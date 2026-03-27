@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation";
 import { 
   LiveKitRoom, 
   VideoConference, 
-  ControlBar, 
-  useTokenCustomizer 
+  ControlBar 
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { 
