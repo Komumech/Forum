@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Komumech Forum | High-Performance Video Meetings",
-  description: "Engineering the next generation of the web. Secure, high-performance video communication for everyone.",
+  title: "Forum | High-Performance Video Meetings",
+  description: "Secure, high-performance video communication for everyone. Connect, collaborate, and celebrate from anywhere.",
 };
 
 export default function RootLayout({
