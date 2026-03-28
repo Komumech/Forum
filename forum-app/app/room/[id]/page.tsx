@@ -83,7 +83,7 @@ export default function MeetingPage() {
     if (!name) return;
     try {
       const metadata = JSON.stringify({ 
-        pending: true, 
+        pending: false, 
         avatar: user?.photoURL || "" 
       });
 
@@ -91,7 +91,10 @@ export default function MeetingPage() {
       streamRef.current?.getTracks().forEach(track => track.stop());
       streamRef.current = null;
 
-      const resp = await fetch(`/api/get-participant-token?room=${room}&username=${encodeURIComponent(name)}&metadata=${encodeURIComponent(metadata)}`);
+      // Use a unique identity (Name + Random ID) to prevent users with the same name from 
+      // kicking each other out of the room.
+      const uniqueIdentity = `${name}#${Math.floor(1000 + Math.random() * 9000)}`;
+      const resp = await fetch(`/api/get-participant-token?room=${room}&username=${encodeURIComponent(uniqueIdentity)}&metadata=${encodeURIComponent(metadata)}`);
       const data = await resp.json();
       setToken(data.token);
       setIsReady(true);
@@ -132,7 +135,7 @@ export default function MeetingPage() {
             <div className="space-y-5">
               <input 
                 type="text" 
-                placeholder="Enter your name" 
+                placeholder="Your name" 
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full px-5 py-4 bg-[#f1f3f4] border-none rounded-lg focus:ring-2 focus:ring-[#1a73e8] outline-none text-[16px] transition-all text-[#3c4043]"
@@ -142,7 +145,7 @@ export default function MeetingPage() {
                 disabled={!name}
                 className="w-full py-4 bg-[#1a73e8] text-white rounded-full font-medium text-[15px] hover:bg-[#185abc] active:scale-[0.98] transition-all disabled:bg-[#e8eaed] disabled:text-[#9aa0a6]"
               >
-                Ask to join
+                Join meeting
               </button>
             </div>
           </div>
@@ -164,8 +167,8 @@ export default function MeetingPage() {
   return (
     <main className="h-screen bg-[#202124] overflow-hidden relative font-sans">
       <LiveKitRoom
-        video={true}
-        audio={true}
+        video={false} // Disable auto-publish to prevent timeout errors
+        audio={false}
         token={token}
         serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
         connect={true}
@@ -195,7 +198,6 @@ function MeetingRoomContent({ room }: { room: string }) {
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | null>(null);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [chatInput, setChatInput] = useState("");
-  const [isAdmitted, setIsAdmitted] = useState(false);
   const [copied, setCopied] = useState(false);
   const [meetingUrl, setMeetingUrl] = useState("");
 
@@ -218,36 +220,29 @@ function MeetingRoomContent({ room }: { room: string }) {
     ? (isScreenSharing || hasPins ? 'sidebar' : 'tiled') 
     : layoutMode;
 
-  // Stabilize participant lists by only re-calculating when identities or metadata change.
-  // remoteParticipants array reference changes frequently (on every audio level/speaking update).
-  const pendingParticipants = useMemo(() => 
-    remoteParticipants.filter(p => {
-      try { return p.metadata && JSON.parse(p.metadata).pending; } catch { return false; }
-    }), 
-    [remoteParticipants.map(p => p.identity + p.metadata).join(',')]
-  );
-
-  const activeParticipants = useMemo(() => 
-    remoteParticipants.filter(p => {
-      try { return !getMetadata(p).pending; } catch { return true; }
-    }), 
-    [remoteParticipants.map(p => p.identity + p.metadata).join(',')]
-  );
+  // Fix: Manually enable tracks ONLY after the user is admitted.
+  // This prevents the "engine not connected within timeout" error.
+  useEffect(() => {
+    if (localParticipant) {
+      localParticipant.setCameraEnabled(true);
+      localParticipant.setMicrophoneEnabled(true);
+    }
+  }, [localParticipant]);
 
   // Stabilize the host logic: The person who joined first is the host.
   const isHost = useMemo(() => {
     if (remoteParticipants.length === 0) return true;
     
-    // The host is the one who joined first among active (admitted) participants
-    const activeOnes = [localParticipant, ...activeParticipants];
-    const sorted = [...activeOnes].sort((a, b) => {
-      const tA = a.joinedAt?.getTime() || Date.now();
-      const tB = b.joinedAt?.getTime() || Date.now();
+    // Determine host by sorting all participants by join time + identity tie-breaker
+    const all = [localParticipant, ...remoteParticipants];
+    const sorted = [...all].sort((a, b) => {
+      const tA = a.joinedAt?.getTime() || Number.MAX_SAFE_INTEGER;
+      const tB = b.joinedAt?.getTime() || Number.MAX_SAFE_INTEGER;
       return tA - tB;
     });
     
     return sorted[0]?.identity === localParticipant.identity;
-  }, [localParticipant.identity, localParticipant.joinedAt, activeParticipants, remoteParticipants.length]);
+  }, [localParticipant, remoteParticipants]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(meetingUrl);
@@ -268,57 +263,16 @@ function MeetingRoomContent({ room }: { room: string }) {
     setMeetingUrl(window.location.href);
   }, []);
 
-  // Permission Logic
-  useDataChannel((msg) => {
-    const decoder = new TextDecoder();
-    const payload = decoder.decode(msg.payload);
-    if (payload === 'JOIN_APPROVED') setIsAdmitted(true);
-  });
-
-  useEffect(() => {
-    if (isHost) {
-      setIsAdmitted(true);
-    } else {
-      const meta = getMetadata(localParticipant);
-      if (meta.pending === false) setIsAdmitted(true);
-    }
-
-    // Once admitted, non-hosts update their metadata so everyone sees them as active
-    if (isAdmitted && !isHost) {
-      const meta = getMetadata(localParticipant);
-      if (meta.pending !== false) {
-        localParticipant.setMetadata(JSON.stringify({ ...meta, pending: false })).catch(err => {
-          console.error("Failed to update admitted metadata", err);
-        });
-      }
-    }
-  }, [isHost, localParticipant.metadata]);
-
-  const admitParticipant = (identity: string) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode('JOIN_APPROVED');
-    localParticipant.publishData(data, {
-      reliable: true,
-      destinationIdentities: [identity],
-    });
-  };
-
   // Filter and Sort Tracks based on Google rules
   const processedTracks = useMemo(() => {
     // If no tracks yet, return empty
     if (!tracks || tracks.length === 0) return [];
 
     const filtered = tracks.filter(t => {
-      // Ensure we always have a reference to the participant
-      const isLocal = t.participant?.isLocal || (t.participant?.identity === localParticipant.identity && localParticipant.identity !== "");
-      // 1. Admit Filter
-      const p = activeParticipants.find(ap => ap.identity === t.participant?.identity);
-      const isAdmittedOrLocal = !!p || isLocal;
-      
       // 2. Hide Non-Video Filter
-      if (hideNonVideo && !t.participant?.isCameraEnabled && !isLocal) return false;
+      if (hideNonVideo && !t.participant?.isCameraEnabled && !t.participant?.isLocal) return false;
       
-      return isAdmittedOrLocal;
+      return true;
     });
 
     return filtered.sort((a, b) => {
@@ -332,10 +286,10 @@ function MeetingRoomContent({ room }: { room: string }) {
 
       return aId.localeCompare(bId);
     }).slice(0, maxParticipants);
-  }, [tracks, activeParticipants, pinnedIdentities, hideNonVideo, maxParticipants]);
+  }, [tracks, pinnedIdentities, hideNonVideo, maxParticipants]);
 
   // Stacking Rule: 1:1 Floating Self-View
-  const totalPeople = activeParticipants.length + 1;
+  const totalPeople = remoteParticipants.length + 1;
   const isOneOnOne = totalPeople === 2;
   const mainGridTracks = useMemo(() => 
     isOneOnOne 
@@ -422,26 +376,7 @@ function MeetingRoomContent({ room }: { room: string }) {
 
       <div className="flex flex-1 overflow-hidden relative bg-[#202124] pb-12 transition-all duration-[800ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"> 
         <div className={`flex-1 relative flex flex-col transition-all duration-[800ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] ${activeTab ? 'mr-2' : ''}`}>
-          {!isAdmitted ? (
-            <div className="flex-1 flex flex-col items-center justify-center bg-[#202124] p-6 relative">
-              <div className="w-full max-w-2xl aspect-video bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative mb-8">
-                {tracks.find(t => t.participant?.isLocal && t.source === Track.Source.Camera) ? (
-                  <CustomParticipantTile 
-                    trackRef={tracks.find(t => t.participant?.isLocal && t.source === Track.Source.Camera)} 
-                    className="w-full h-full"
-                  />
-                ) : <div className="w-full h-full bg-black animate-pulse flex items-center justify-center text-slate-500">Starting camera...</div>}
-                <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
-                  <div className="w-12 h-12 border-4 border-[#8ab4f8] border-t-transparent rounded-full animate-spin mb-4" />
-                  <h2 className="text-[24px] font-medium text-white">Asking to join...</h2>
-                  <p className="text-[#9aa0a6] mt-2">Someone in the meeting will let you in soon.</p>
-                </div>
-              </div>
-              <div className="absolute bottom-10 flex gap-4">
-                <AudioLevelIndicator />
-              </div>
-            </div>
-          ) : (
+          {
             <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden">
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
@@ -488,7 +423,7 @@ function MeetingRoomContent({ room }: { room: string }) {
                 </div>
               )}
             </div>
-          )}
+          }
         </div>
 
         {/* RIGHT SIDEBAR PANEL */}
@@ -524,19 +459,6 @@ function MeetingRoomContent({ room }: { room: string }) {
               )}
               {activeTab === 'users' && (
                 <div className="space-y-6">
-                  {isHost && pendingParticipants.length > 0 && (
-                    <div className="space-y-3">
-                      <p className="text-[12px] font-bold text-[#1a73e8] uppercase tracking-wider">Waiting to join ({pendingParticipants.length})</p>
-                      {pendingParticipants.map(p => (
-                        <div key={p.identity} className="flex items-center justify-between bg-blue-50/50 p-3 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-2">
-                          <span className="text-[14px] font-medium text-[#202124]">{p.identity}</span>
-                          <div className="flex gap-2">
-                            <button onClick={() => admitParticipant(p.identity)} className="px-3 py-1.5 bg-[#1a73e8] text-white text-xs font-medium rounded-full hover:bg-[#185abc] transition-colors">Admit</button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                   <div className="space-y-4">
                     <p className="text-[12px] font-bold text-[#5f6368] uppercase tracking-wider">In call</p>
                     <div className="space-y-2">
@@ -551,7 +473,7 @@ function MeetingRoomContent({ room }: { room: string }) {
                         </div>
                         {isHost && <div className="flex items-center gap-1.5 bg-blue-50 px-2 py-0.5 rounded text-[10px] font-bold text-blue-600 uppercase tracking-tight"><ShieldCheck size={12} /> Host</div>}
                       </div>
-                      {activeParticipants.map(p => {
+                      {remoteParticipants.map(p => {
                         const meta = getMetadata(p);
                         return (
                           <div key={p.identity} className="flex items-center justify-between group py-1">
@@ -720,9 +642,9 @@ function MeetingRoomContent({ room }: { room: string }) {
             className={`relative flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${activeTab === 'users' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
           >
             <div className="flex -space-x-2 mr-1">
-              {[localParticipant, ...activeParticipants].slice(0, 3).map((p, i) => (
+              {[localParticipant, ...remoteParticipants].slice(0, 3).map((p, i) => (
                 <div 
-                  key={p.identity} 
+                  key={p.sid || p.identity} 
                   style={{ zIndex: 3 - i }}
                   className="w-6 h-6 rounded-full border-2 border-[#202124] bg-indigo-500 text-[10px] flex items-center justify-center font-bold"
                 >
@@ -731,11 +653,8 @@ function MeetingRoomContent({ room }: { room: string }) {
               ))}
             </div>
             <span className="text-sm font-medium">
-              {[localParticipant, ...activeParticipants].length}
+              {[localParticipant, ...remoteParticipants].length}
             </span>
-            {pendingParticipants.length > 0 && (
-               <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-[#fbbc04] rounded-full border-2 border-[#202124]"></span>
-            )}
           </button>
 
           <button 
