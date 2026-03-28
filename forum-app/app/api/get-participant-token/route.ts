@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function GET(req: NextRequest) {
   const room = req.nextUrl.searchParams.get('room');
   const username = req.nextUrl.searchParams.get('username');
+  const metadata = req.nextUrl.searchParams.get('metadata');
 
   if (!room || !username) {
     return NextResponse.json({ error: 'Missing room or username' }, { status: 400 });
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
 
   const at = new AccessToken(apiKey, apiSecret, {
     identity: username,
+    metadata: metadata || undefined,
   });
 
   at.addGrant({ roomJoin: true, room: room });

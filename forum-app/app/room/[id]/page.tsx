@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { 
   LiveKitRoom, 
@@ -9,14 +9,15 @@ import {
   useLocalParticipant,
   GridLayout,
   ParticipantTile,
-  FocusLayout,
-  CarouselLayout,
   useChat,
   useRemoteParticipants,
   useDataChannel,
+  TrackReference,
+  useParticipantInfo,
+  useMaybeTrackRefContext,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, DataPacket_Kind } from 'livekit-client';
+import { Track, DataPacket_Kind, Participant, RemoteParticipant } from 'livekit-client';
 import { useParams, useRouter } from 'next/navigation';
 import { 
   Mic, 
@@ -38,7 +39,10 @@ import {
   Pin,
   PinOff,
   Layout as LayoutIcon,
-  Maximize
+  Maximize,
+  ShieldCheck,
+  UserX,
+  VolumeX
 } from 'lucide-react';
 
 export default function MeetingPage() {
@@ -51,6 +55,7 @@ export default function MeetingPage() {
   const [name, setName] = useState(user?.displayName || "");
   const [isReady, setIsReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (user?.displayName && !name) setName(user.displayName);
@@ -62,19 +67,31 @@ export default function MeetingPage() {
       if (!navigator.mediaDevices) return;
       navigator.mediaDevices.getUserMedia({ video: true, audio: true })
         .then(stream => {
+          streamRef.current = stream;
           if (videoRef.current) videoRef.current.srcObject = stream;
         }).catch(err => {
           console.error("Camera access denied", err);
         });
     }
+    return () => {
+      streamRef.current?.getTracks().forEach(track => track.stop());
+    };
   }, [isReady]);
 
   // 2. Fetch Token once user clicks "Join"
   const handleJoin = async () => {
     if (!name) return;
     try {
-      const metadata = JSON.stringify({ pending: true });
-      const resp = await fetch(`/api/get-participant-token?room=${room}&username=${name}&metadata=${metadata}`);
+      const metadata = JSON.stringify({ 
+        pending: true, 
+        avatar: user?.photoURL || "" 
+      });
+
+      // Stop preview stream before joining LiveKit to release camera lock
+      streamRef.current?.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+
+      const resp = await fetch(`/api/get-participant-token?room=${room}&username=${encodeURIComponent(name)}&metadata=${encodeURIComponent(metadata)}`);
       const data = await resp.json();
       setToken(data.token);
       setIsReady(true);
@@ -141,6 +158,7 @@ export default function MeetingPage() {
         audio={true}
         token={token}
         serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
+        connect={true}
         data-lk-theme="default"
         style={{ height: '100dvh' }}
         onDisconnected={() => router.push('/')}
@@ -153,6 +171,7 @@ export default function MeetingPage() {
 
 function MeetingRoomContent({ room }: { room: string }) {
   const router = useRouter();
+  const { user } = useAuth();
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send: sendChat } = useChat();
@@ -176,8 +195,16 @@ function MeetingRoomContent({ room }: { room: string }) {
   const [hideNonVideo, setHideNonVideo] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState(16);
 
+  // Host Logic: First person or specific identity pattern
+  const isHost = localParticipant.identity === room || remoteParticipants.length === 0;
+
+  const getMetadata = (p: Participant) => {
+    try { return p.metadata ? JSON.parse(p.metadata) : {}; }
+    catch { return {}; }
+  };
+
   // Determine effective layout based on Auto logic
-  const isScreenSharing = tracks.some(t => t.source === Track.Source.ScreenShare);
+  const isScreenSharing = tracks.some(t => t.source === Track.Source.ScreenShare && t.participant.identity !== localParticipant.identity);
   const hasPins = pinnedIdentities.size > 0;
   
   const effectiveLayout = layoutMode === 'auto' 
@@ -211,8 +238,16 @@ function MeetingRoomContent({ room }: { room: string }) {
   });
 
   useEffect(() => {
-    const metadata = localParticipant.metadata ? JSON.parse(localParticipant.metadata) : {};
-    if (!metadata.pending || remoteParticipants.length === 0) setIsAdmitted(true);
+    if (remoteParticipants.length === 0) {
+      setIsAdmitted(true);
+      return;
+    }
+    if (localParticipant.metadata) {
+      try {
+        const metadata = JSON.parse(localParticipant.metadata);
+        if (!metadata.pending) setIsAdmitted(true);
+      } catch (e) {}
+    }
   }, [localParticipant.metadata, remoteParticipants.length]);
 
   const admitParticipant = (identity: string) => {
@@ -224,47 +259,61 @@ function MeetingRoomContent({ room }: { room: string }) {
     );
   };
 
-  const pendingParticipants = remoteParticipants.filter(p => {
-    try { return p.metadata && JSON.parse(p.metadata).pending; } catch { return false; }
-  });
+  // Stabilize participant lists by only re-calculating when identities or metadata change.
+  // remoteParticipants array reference changes frequently (on every audio level/speaking update).
+  const pendingParticipants = useMemo(() => 
+    remoteParticipants.filter(p => {
+      try { return p.metadata && JSON.parse(p.metadata).pending; } catch { return false; }
+    }), 
+    [remoteParticipants.map(p => p.identity + p.metadata).join(',')]
+  );
 
-  const activeParticipants = remoteParticipants.filter(p => {
-    try { return !p.metadata || !JSON.parse(p.metadata).pending; } catch { return true; }
-  });
+  const activeParticipants = useMemo(() => 
+    remoteParticipants.filter(p => {
+      try { return !getMetadata(p).pending; } catch { return true; }
+    }), 
+    [remoteParticipants.map(p => p.identity + p.metadata).join(',')]
+  );
 
   // Filter and Sort Tracks based on Google rules
-  const processedTracks = tracks.filter(t => {
-    // 1. Admit Filter
-    const p = activeParticipants.find(ap => ap.identity === t.participant.identity);
-    const isAdmittedOrLocal = !!p || t.participant.identity === localParticipant.identity;
-    
-    // 2. Hide Non-Video Filter
-    if (hideNonVideo && !t.participant.isCameraEnabled) return false;
-    
-    return isAdmittedOrLocal;
-  }).sort((a, b) => {
-    // 3. Priority: Pinned > Speaking > Rest
-    const aPinned = pinnedIdentities.has(a.participant.identity) ? 1 : 0;
-    const bPinned = pinnedIdentities.has(b.participant.identity) ? 1 : 0;
-    if (aPinned !== bPinned) return bPinned - aPinned;
+  const processedTracks = useMemo(() => {
+    return tracks.filter(t => {
+      const isLocal = t.participant?.isLocal;
+      // 1. Admit Filter
+      const p = activeParticipants.find(ap => ap.identity === t.participant.identity);
+      const isAdmittedOrLocal = !!p || isLocal;
+      
+      // 2. Hide Non-Video Filter
+      if (hideNonVideo && !t.participant?.isCameraEnabled && !isLocal) return false;
+      
+      return isAdmittedOrLocal;
+    }).sort((a, b) => {
+      // 3. Priority: Pinned > Identity (Alphabetical for stability)
+      // We remove isSpeaking from the sort to prevent "Element not part of the array" errors
+      const aPinned = pinnedIdentities.has(a.participant.identity) ? 1 : 0;
+      const bPinned = pinnedIdentities.has(b.participant.identity) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
 
-    const aSpeaking = a.participant.isSpeaking ? 1 : 0;
-    const bSpeaking = b.participant.isSpeaking ? 1 : 0;
-    return bSpeaking - aSpeaking;
-  }).slice(0, maxParticipants);
+      return a.participant.identity.localeCompare(b.participant.identity);
+    }).slice(0, maxParticipants);
+  }, [tracks, activeParticipants, pinnedIdentities, hideNonVideo, maxParticipants]);
 
   // Stacking Rule: 1:1 Floating Self-View
   const totalPeople = activeParticipants.length + 1;
   const isOneOnOne = totalPeople === 2;
-  const mainGridTracks = isOneOnOne 
-    ? processedTracks.filter(t => t.participant.identity !== localParticipant.identity)
-    : processedTracks;
+  const mainGridTracks = useMemo(() => 
+    isOneOnOne 
+      ? processedTracks.filter(t => !t.participant.isLocal)
+      : processedTracks,
+  [isOneOnOne, processedTracks]);
 
   // Priority Focus logic: Screenshare > Pinned > Active Speaker
-  const focusTrack = tracks.find(t => t.source === Track.Source.ScreenShare) || 
-                     processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || 
-                     processedTracks.find(t => t.participant.isSpeaking) || 
-                     processedTracks[0];
+  const focusTrack = useMemo(() => 
+    tracks.find(t => t.source === Track.Source.ScreenShare && t.participant.identity !== localParticipant.identity) || 
+    processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || 
+    processedTracks.find(t => t.participant.isSpeaking) || 
+    processedTracks[0],
+  [tracks, processedTracks, pinnedIdentities]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#202124] flex-col relative">
@@ -312,9 +361,13 @@ function MeetingRoomContent({ room }: { room: string }) {
 
         
         /* Standard Grid: Contain to prevent stretching and resolution distortion */
-        .lk-grid-layout .lk-participant-tile video {
+        .lk-participant-tile video {
           object-fit: contain !important;
           background-color: #000 !important;
+        }
+
+        .lk-participant-tile {
+          position: relative;
         }
 
         /* Focus/Spotlight: Contain (Full) to ensure presentation/face isn't cut */
@@ -340,27 +393,40 @@ function MeetingRoomContent({ room }: { room: string }) {
       <div className="flex flex-1 overflow-hidden relative bg-[#202124] pb-12 transition-all duration-[800ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"> 
         <div className={`flex-1 relative flex flex-col transition-all duration-[800ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] ${activeTab ? 'mr-2' : ''}`}>
           {!isAdmitted ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-white space-y-4">
-              <div className="w-12 h-12 border-4 border-[#8ab4f8] border-t-transparent rounded-full animate-spin mb-2" />
-              <h2 className="text-[24px] font-normal">Asking to join...</h2>
-              <p className="text-[#9aa0a6]">Someone in the meeting will let you in soon.</p>
+            <div className="flex-1 flex flex-col items-center justify-center bg-[#202124] p-6 relative">
+              <div className="w-full max-w-2xl aspect-video bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative mb-8">
+                {processedTracks.find(t => t.participant.isLocal && t.source === Track.Source.Camera) && (
+                  <CustomParticipantTile 
+                    trackRef={processedTracks.find(t => t.participant.isLocal && t.source === Track.Source.Camera)} 
+                    className="w-full h-full"
+                  />
+                )}
+                <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
+                  <div className="w-12 h-12 border-4 border-[#8ab4f8] border-t-transparent rounded-full animate-spin mb-4" />
+                  <h2 className="text-[24px] font-medium text-white">Asking to join...</h2>
+                  <p className="text-[#9aa0a6] mt-2">Someone in the meeting will let you in soon.</p>
+                </div>
+              </div>
+              <div className="absolute bottom-10 flex gap-4">
+                <AudioLevelIndicator />
+              </div>
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden">
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
                   <div className="w-full h-full p-4 animate-in fade-in zoom-in-95 duration-700 spotlight-view">
-                    <ParticipantTile trackRef={focusTrack} className="w-full h-full" />
+                    <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" />
                   </div>
                 ) : effectiveLayout === 'sidebar' && focusTrack ? (
                   <div className="flex w-full h-full gap-4 animate-in fade-in duration-700">
-                    <div className="flex-[3] h-full">
-                      <ParticipantTile trackRef={focusTrack} className="w-full h-full" />
+                    <div className="flex-[3] h-full relative">
+                      <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" />
                     </div>
                     <div className="w-[240px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 hidden md:block">
                       {processedTracks.filter(t => t !== focusTrack).map(t => (
                         <div key={t.participant.identity} className="aspect-video w-full relative group">
-                           <ParticipantTile trackRef={t} />
+                           <CustomParticipantTile trackRef={t} />
                            <button 
                             onClick={() => togglePin(t.participant.identity)}
                             className="absolute top-2 right-2 p-1.5 bg-black/40 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
@@ -377,8 +443,8 @@ function MeetingRoomContent({ room }: { room: string }) {
                     </div>
                   </div>
                 ) : (
-                  <GridLayout tracks={mainGridTracks}>
-                    <ParticipantTile />
+                  <GridLayout tracks={mainGridTracks} className="w-full h-full">
+                    <CustomParticipantTile />
                   </GridLayout>
                 )}
               </div>
@@ -386,7 +452,7 @@ function MeetingRoomContent({ room }: { room: string }) {
               {/* FLOATING SELF-VIEW (PIPPED) */}
               {isOneOnOne && (
                 <div className="absolute bottom-24 right-8 w-64 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-white/10 z-[80] animate-in slide-in-from-bottom-4 duration-700">
-                  <ParticipantTile 
+                  <CustomParticipantTile 
                     trackRef={processedTracks.find(t => t.participant.identity === localParticipant.identity)} 
                   />
                 </div>
@@ -443,16 +509,40 @@ function MeetingRoomContent({ room }: { room: string }) {
                   )}
                   <div className="space-y-4">
                     <p className="text-[12px] font-bold text-[#5f6368] uppercase tracking-wider">In call</p>
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-[13px] font-bold">You</div>
-                      <span className="text-[14px] text-[#202124] font-medium">{localParticipant.identity}</span>
-                    </div>
-                    {activeParticipants.map(p => (
-                      <div key={p.identity} className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-blue-100 text-[#1a73e8] rounded-full flex items-center justify-center text-[13px] font-bold">{p.identity.charAt(0).toUpperCase()}</div>
-                        <span className="text-[14px] text-[#202124] font-medium">{p.identity}</span>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between group">
+                        <div className="flex items-center gap-3">
+                          {user?.photoURL ? (
+                            <img src={user.photoURL} className="w-9 h-9 rounded-full object-cover" />
+                          ) : (
+                            <div className="w-9 h-9 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-[13px] font-bold">You</div>
+                          )}
+                          <span className="text-[14px] text-[#202124] font-medium">{localParticipant.identity} (You)</span>
+                        </div>
+                        {isHost && <ShieldCheck size={16} className="text-blue-600" />}
                       </div>
-                    ))}
+                      {activeParticipants.map(p => {
+                        const meta = getMetadata(p);
+                        return (
+                          <div key={p.identity} className="flex items-center justify-between group py-1">
+                            <div className="flex items-center gap-3">
+                              {meta.avatar ? (
+                                <img src={meta.avatar} className="w-9 h-9 rounded-full object-cover" />
+                              ) : (
+                                <div className="w-9 h-9 bg-blue-100 text-[#1a73e8] rounded-full flex items-center justify-center text-[13px] font-bold">{p.identity.charAt(0).toUpperCase()}</div>
+                              )}
+                              <span className="text-[14px] text-[#202124] font-medium">{p.identity}</span>
+                            </div>
+                            {isHost && (
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500"><VolumeX size={16} /></button>
+                                <button className="p-1.5 hover:bg-red-50 rounded-full text-red-500"><UserX size={16} /></button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}
@@ -633,37 +723,47 @@ function MeetingRoomContent({ room }: { room: string }) {
 }
 
 /**
- * --- CustomParticipantTile ---
- * Wraps the standard tile to show the profile image when the camera is off.
+ * --- CustomParticipantTile Component ---
+ * A wrapper around ParticipantTile to allow for custom styling and behavior.
  */
-function CustomParticipantTile({ trackRef, className }: { trackRef?: TrackReference, className?: string }) {
-  const { participant } = useParticipantInfo({ participant: trackRef?.participant });
-  
-  const getAvatar = () => {
-    try {
-      const meta = participant?.metadata ? JSON.parse(participant.metadata) : {};
-      return meta.avatar;
-    } catch { return null; }
-  };
+function CustomParticipantTile({ trackRef, className, ...props }: any) {
+  // Consume trackRef from context if not provided as a prop (essential for GridLayout)
+  const trackRefFromContext = useMaybeTrackRefContext();
+  const ref = trackRef || trackRefFromContext;
 
-  const avatar = getAvatar();
-  const isCameraOff = participant && !participant.isCameraEnabled;
+  // Guard: If no track reference exists yet, return an empty container to prevent crashes
+  if (!ref) return <div className={`lk-participant-tile ${className}`} {...props} />;
+
+  const participant = ref.participant;
+  const isCamera = ref.source === Track.Source.Camera;
+  const isVideoOff = participant && !participant.isCameraEnabled;
+  
+  let avatarUrl = "";
+  if (participant?.metadata) {
+    try {
+      const meta = JSON.parse(participant.metadata);
+      avatarUrl = meta.avatar;
+    } catch (e) {}
+  }
 
   return (
-    <div className={`relative w-full h-full ${className}`}>
-      <ParticipantTile trackRef={trackRef} />
-      {isCameraOff && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#202124]">
-          {avatar ? (
-            <img src={avatar} alt="" className="w-24 h-24 rounded-full object-cover border-4 border-[#3c4043] shadow-2xl" />
+    <ParticipantTile trackRef={ref} className={className} {...props}>
+      {isCamera && isVideoOff && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#202124] z-[5]">
+          {avatarUrl ? (
+            <img 
+              src={avatarUrl} 
+              alt={participant?.identity} 
+              className="w-20 h-20 md:w-32 md:h-32 rounded-full object-cover border-4 border-white/5 shadow-2xl animate-in fade-in zoom-in duration-500" 
+            />
           ) : (
-            <div className="w-24 h-24 rounded-full bg-indigo-600 flex items-center justify-center text-3xl font-bold text-white shadow-2xl">
-              {participant?.identity?.charAt(0).toUpperCase()}
+            <div className="w-20 h-20 md:w-32 md:h-32 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-3xl md:text-5xl font-bold text-white shadow-2xl animate-in fade-in zoom-in duration-500">
+              {participant?.identity?.charAt(0).toUpperCase() || 'U'}
             </div>
           )}
         </div>
       )}
-    </div>
+    </ParticipantTile>
   );
 }
 
