@@ -13,11 +13,21 @@ export default function PreJoinScreen({ onJoin }: { onJoin: (name: string) => vo
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 font-sans">
+      <style jsx>{`
+        /* Ensure the video in this screen specifically doesn't stretch */
+        video {
+          object-fit: contain !important;
+          background-color: #000 !important;
+          width: 100% !important;
+          height: 100% !important;
+          border-radius: 16px !important;
+        }
+      `}</style>
       <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center gap-12">
         
         {/* Left: Video Preview Card */}
-        <div className="flex-1 w-full relative aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border-4 border-slate-50">
-          <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-contain bg-black scale-x-[-1]" />
+        <div className="flex-1 w-full relative aspect-video bg-[#202124] rounded-2xl overflow-hidden shadow-2xl border-4 border-slate-50">
+          <video ref={videoRef} autoPlay muted playsInline className="scale-x-[-1]" />
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
              <button className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white hover:bg-white/40 transition-all">🎤</button>
              <button className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white hover:bg-white/40 transition-all">📷</button>

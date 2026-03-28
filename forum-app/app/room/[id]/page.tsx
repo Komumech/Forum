@@ -104,10 +104,20 @@ export default function MeetingPage() {
   if (!isReady) {
     return (
       <div className="min-h-screen bg-[#f8f9fa] flex flex-col items-center justify-center p-6 font-sans">
+        <style jsx global>{`
+          /* Force all video feeds to maintain aspect ratio and letterbox (Google Meet style) */
+          video {
+            object-fit: contain !important;
+            background-color: #000 !important;
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 16px !important;
+          }
+        `}</style>
         <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center gap-12 bg-white p-8 md:p-12 rounded-[24px] shadow-sm border border-slate-100">
           
           <div className="flex-1 w-full relative aspect-video bg-[#202124] rounded-2xl overflow-hidden shadow-inner">
-            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-contain bg-black scale-x-[-1]" />
+            <video ref={videoRef} autoPlay muted playsInline className="scale-x-[-1]" />
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
                <div className="p-4 rounded-full bg-black/40 backdrop-blur-md text-white border border-white/10"><Mic size={24} /></div>
                <div className="p-4 rounded-full bg-black/40 backdrop-blur-md text-white border border-white/10"><VideoIcon size={24} /></div>
@@ -195,9 +205,6 @@ function MeetingRoomContent({ room }: { room: string }) {
   const [hideNonVideo, setHideNonVideo] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState(16);
 
-  // Host Logic: First person or specific identity pattern
-  const isHost = localParticipant.identity === room || remoteParticipants.length === 0;
-
   const getMetadata = (p: Participant) => {
     try { return p.metadata ? JSON.parse(p.metadata) : {}; }
     catch { return {}; }
@@ -210,54 +217,6 @@ function MeetingRoomContent({ room }: { room: string }) {
   const effectiveLayout = layoutMode === 'auto' 
     ? (isScreenSharing || hasPins ? 'sidebar' : 'tiled') 
     : layoutMode;
-
-  useEffect(() => {
-    setMeetingUrl(window.location.href);
-  }, []);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(meetingUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const togglePin = (identity: string) => {
-    setPinnedIdentities((prev) => {
-      const next = new Set(prev);
-      if (next.has(identity)) next.delete(identity);
-      else if (next.size < 6) next.add(identity); // Limit to 6 pins
-      return next;
-    });
-  };
-
-  // Permission Logic
-  useDataChannel((msg) => {
-    const decoder = new TextDecoder();
-    const payload = decoder.decode(msg.payload);
-    if (payload === 'JOIN_APPROVED') setIsAdmitted(true);
-  });
-
-  useEffect(() => {
-    if (remoteParticipants.length === 0) {
-      setIsAdmitted(true);
-      return;
-    }
-    if (localParticipant.metadata) {
-      try {
-        const metadata = JSON.parse(localParticipant.metadata);
-        if (!metadata.pending) setIsAdmitted(true);
-      } catch (e) {}
-    }
-  }, [localParticipant.metadata, remoteParticipants.length]);
-
-  const admitParticipant = (identity: string) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode('JOIN_APPROVED');
-    localParticipant.publishData(data, {
-      reliable: true,
-      destinationIdentities: [identity],
-    });
-  };
 
   // Stabilize participant lists by only re-calculating when identities or metadata change.
   // remoteParticipants array reference changes frequently (on every audio level/speaking update).
@@ -275,26 +234,103 @@ function MeetingRoomContent({ room }: { room: string }) {
     [remoteParticipants.map(p => p.identity + p.metadata).join(',')]
   );
 
+  // Stabilize the host logic: The person who joined first is the host.
+  const isHost = useMemo(() => {
+    if (remoteParticipants.length === 0) return true;
+    
+    // The host is the one who joined first among active (admitted) participants
+    const activeOnes = [localParticipant, ...activeParticipants];
+    const sorted = [...activeOnes].sort((a, b) => {
+      const tA = a.joinedAt?.getTime() || Date.now();
+      const tB = b.joinedAt?.getTime() || Date.now();
+      return tA - tB;
+    });
+    
+    return sorted[0]?.identity === localParticipant.identity;
+  }, [localParticipant.identity, localParticipant.joinedAt, activeParticipants, remoteParticipants.length]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(meetingUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const togglePin = (identity: string) => {
+    setPinnedIdentities((prev) => {
+      const next = new Set(prev);
+      if (next.has(identity)) next.delete(identity);
+      else if (next.size < 6) next.add(identity); // Limit to 6 pins
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setMeetingUrl(window.location.href);
+  }, []);
+
+  // Permission Logic
+  useDataChannel((msg) => {
+    const decoder = new TextDecoder();
+    const payload = decoder.decode(msg.payload);
+    if (payload === 'JOIN_APPROVED') setIsAdmitted(true);
+  });
+
+  useEffect(() => {
+    if (isHost) {
+      setIsAdmitted(true);
+    } else {
+      const meta = getMetadata(localParticipant);
+      if (meta.pending === false) setIsAdmitted(true);
+    }
+
+    // Once admitted, non-hosts update their metadata so everyone sees them as active
+    if (isAdmitted && !isHost) {
+      const meta = getMetadata(localParticipant);
+      if (meta.pending !== false) {
+        localParticipant.setMetadata(JSON.stringify({ ...meta, pending: false })).catch(err => {
+          console.error("Failed to update admitted metadata", err);
+        });
+      }
+    }
+  }, [isHost, localParticipant.metadata]);
+
+  const admitParticipant = (identity: string) => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode('JOIN_APPROVED');
+    localParticipant.publishData(data, {
+      reliable: true,
+      destinationIdentities: [identity],
+    });
+  };
+
   // Filter and Sort Tracks based on Google rules
   const processedTracks = useMemo(() => {
-    return tracks.filter(t => {
-      const isLocal = t.participant?.isLocal;
+    // If no tracks yet, return empty
+    if (!tracks || tracks.length === 0) return [];
+
+    const filtered = tracks.filter(t => {
+      // Ensure we always have a reference to the participant
+      const isLocal = t.participant?.isLocal || (t.participant?.identity === localParticipant.identity && localParticipant.identity !== "");
       // 1. Admit Filter
-      const p = activeParticipants.find(ap => ap.identity === t.participant.identity);
+      const p = activeParticipants.find(ap => ap.identity === t.participant?.identity);
       const isAdmittedOrLocal = !!p || isLocal;
       
       // 2. Hide Non-Video Filter
       if (hideNonVideo && !t.participant?.isCameraEnabled && !isLocal) return false;
       
       return isAdmittedOrLocal;
-    }).sort((a, b) => {
+    });
+
+    return filtered.sort((a, b) => {
       // 3. Priority: Pinned > Identity (Alphabetical for stability)
-      // We remove isSpeaking from the sort to prevent "Element not part of the array" errors
-      const aPinned = pinnedIdentities.has(a.participant.identity) ? 1 : 0;
-      const bPinned = pinnedIdentities.has(b.participant.identity) ? 1 : 0;
+      const aId = a.participant?.identity || "";
+      const bId = b.participant?.identity || "";
+      
+      const aPinned = pinnedIdentities.has(aId) ? 1 : 0;
+      const bPinned = pinnedIdentities.has(bId) ? 1 : 0;
       if (aPinned !== bPinned) return bPinned - aPinned;
 
-      return a.participant.identity.localeCompare(b.participant.identity);
+      return aId.localeCompare(bId);
     }).slice(0, maxParticipants);
   }, [tracks, activeParticipants, pinnedIdentities, hideNonVideo, maxParticipants]);
 
@@ -309,7 +345,7 @@ function MeetingRoomContent({ room }: { room: string }) {
 
   // Priority Focus logic: Screenshare > Pinned > Active Speaker
   const focusTrack = useMemo(() => 
-    tracks.find(t => t.source === Track.Source.ScreenShare && t.participant.identity !== localParticipant.identity) || 
+    tracks.find(t => t.source === Track.Source.ScreenShare && !t.participant.isLocal) || 
     processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || 
     processedTracks.find(t => t.participant.isSpeaking) || 
     processedTracks[0],
@@ -342,14 +378,15 @@ function MeetingRoomContent({ room }: { room: string }) {
           box-shadow: none !important;
           outline: none !important;
           background-color: #3c4043 !important;
-          border-radius: 12px;
+          border-radius: 16px !important;
           overflow: hidden;
+          position: relative;
+          z-index: 1;
         }
 
         .lk-participant-tile[data-lk-speaking="true"] {
           border-color: #8ab4f8 !important;
         }
-
 
         /* Target the internal elements that might carry default styling */
         .lk-participant-tile::after,
@@ -362,18 +399,11 @@ function MeetingRoomContent({ room }: { room: string }) {
         
         /* Standard Grid: Contain to prevent stretching and resolution distortion */
         .lk-participant-tile video {
-          object-fit: contain !important;
+          object-fit: cover !important;
+          width: 100% !important;
+          height: 100% !important;
           background-color: #000 !important;
-        }
-
-        .lk-participant-tile {
-          position: relative;
-        }
-
-        /* Focus/Spotlight: Contain (Full) to ensure presentation/face isn't cut */
-        .lk-focus-layout video,
-        .spotlight-view video {
-          object-fit: contain !important;
+          border-radius: 16px !important;
         }
         
         /* Custom Scrollbar for Chat */
@@ -395,12 +425,12 @@ function MeetingRoomContent({ room }: { room: string }) {
           {!isAdmitted ? (
             <div className="flex-1 flex flex-col items-center justify-center bg-[#202124] p-6 relative">
               <div className="w-full max-w-2xl aspect-video bg-black rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative mb-8">
-                {processedTracks.find(t => t.participant.isLocal && t.source === Track.Source.Camera) && (
+                {tracks.find(t => t.participant?.isLocal && t.source === Track.Source.Camera) ? (
                   <CustomParticipantTile 
-                    trackRef={processedTracks.find(t => t.participant.isLocal && t.source === Track.Source.Camera)} 
+                    trackRef={tracks.find(t => t.participant?.isLocal && t.source === Track.Source.Camera)} 
                     className="w-full h-full"
                   />
-                )}
+                ) : <div className="w-full h-full bg-black animate-pulse flex items-center justify-center text-slate-500">Starting camera...</div>}
                 <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
                   <div className="w-12 h-12 border-4 border-[#8ab4f8] border-t-transparent rounded-full animate-spin mb-4" />
                   <h2 className="text-[24px] font-medium text-white">Asking to join...</h2>
@@ -453,7 +483,7 @@ function MeetingRoomContent({ room }: { room: string }) {
               {isOneOnOne && (
                 <div className="absolute bottom-24 right-8 w-64 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-white/10 z-[80] animate-in slide-in-from-bottom-4 duration-700">
                   <CustomParticipantTile 
-                    trackRef={processedTracks.find(t => t.participant.identity === localParticipant.identity)} 
+                    trackRef={processedTracks.find(t => t.participant.isLocal)} 
                   />
                 </div>
               )}
@@ -494,7 +524,7 @@ function MeetingRoomContent({ room }: { room: string }) {
               )}
               {activeTab === 'users' && (
                 <div className="space-y-6">
-                  {pendingParticipants.length > 0 && (
+                  {isHost && pendingParticipants.length > 0 && (
                     <div className="space-y-3">
                       <p className="text-[12px] font-bold text-[#1a73e8] uppercase tracking-wider">Waiting to join ({pendingParticipants.length})</p>
                       {pendingParticipants.map(p => (
@@ -519,7 +549,7 @@ function MeetingRoomContent({ room }: { room: string }) {
                           )}
                           <span className="text-[14px] text-[#202124] font-medium">{localParticipant.identity} (You)</span>
                         </div>
-                        {isHost && <ShieldCheck size={16} className="text-blue-600" />}
+                        {isHost && <div className="flex items-center gap-1.5 bg-blue-50 px-2 py-0.5 rounded text-[10px] font-bold text-blue-600 uppercase tracking-tight"><ShieldCheck size={12} /> Host</div>}
                       </div>
                       {activeParticipants.map(p => {
                         const meta = getMetadata(p);
@@ -735,8 +765,13 @@ function CustomParticipantTile({ trackRef, className, ...props }: any) {
   if (!ref) return <div className={`lk-participant-tile ${className}`} {...props} />;
 
   const participant = ref.participant;
-  const isCamera = ref.source === Track.Source.Camera;
-  const isVideoOff = participant && !participant.isCameraEnabled;
+  
+  // Show avatar if:
+  // 1. Participant has explicitly turned their camera off
+  // 2. Or the track is currently muted
+  // Note: We don't check for !ref.publication here because it can be null for a split second 
+  // while joining, which causes the "black flash".
+  const isVideoOff = !participant.isCameraEnabled || ref.publication?.isMuted;
   
   let avatarUrl = "";
   if (participant?.metadata) {
@@ -747,9 +782,11 @@ function CustomParticipantTile({ trackRef, className, ...props }: any) {
   }
 
   return (
-    <ParticipantTile trackRef={ref} className={className} {...props}>
-      {isCamera && isVideoOff && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#202124] z-[5]">
+    <div className={`relative w-full h-full overflow-hidden rounded-2xl ${className}`}>
+      <ParticipantTile trackRef={ref} {...props} />
+      
+      {isVideoOff && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#3c4043] z-[10]">
           {avatarUrl ? (
             <img 
               src={avatarUrl} 
@@ -763,7 +800,7 @@ function CustomParticipantTile({ trackRef, className, ...props }: any) {
           )}
         </div>
       )}
-    </ParticipantTile>
+    </div>
   );
 }
 
