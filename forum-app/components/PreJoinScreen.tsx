@@ -17,7 +17,7 @@ export default function PreJoinScreen({ onJoin }: { onJoin: (name: string) => vo
         
         {/* Left: Video Preview Card */}
         <div className="flex-1 w-full relative aspect-video bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border-4 border-slate-50">
-          <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
+          <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-contain bg-black scale-x-[-1]" />
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
              <button className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white hover:bg-white/40 transition-all">🎤</button>
              <button className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-white hover:bg-white/40 transition-all">📷</button>

@@ -2,10 +2,12 @@
 
 import { Video, Keyboard, Settings, HelpCircle, MessageSquare, Grid, Menu, Calendar, Phone, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '@/context/AuthContext';
 
 export default function LandingPage() {
   const router = useRouter();
+  const { user, logOut } = useAuth();
   const [roomCode, setRoomCode] = useState('');
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
 
@@ -23,52 +25,57 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col text-[#3c4043] font-sans selection:bg-blue-100">
+    <div className="h-screen bg-white flex flex-col text-[#3c4043] font-sans selection:bg-blue-100 overflow-hidden">
       
-      {/* --- REFINED HEADER --- */}
-      <header className="h-[64px] flex items-center justify-between px-4 bg-white shrink-0">
+      {/* --- TOP HEADER --- */}
+      <header className="h-16 flex items-center justify-between px-4 bg-white border-b border-transparent shrink-0">
         <div className="flex items-center gap-2">
-          <button className="p-2.5 hover:bg-slate-100 rounded-full transition-colors text-[#5f6368]">
+          <button className="p-2.5 hover:bg-gray-100 rounded-full transition-colors text-[#5f6368]">
             <Menu size={22} />
           </button>
-          <div className="flex items-center gap-2 ml-1 select-none cursor-pointer">
-            {/* Replace with your actual Logo SVG or Image */}
+          <div className="flex items-center gap-2 ml-1 select-none cursor-pointer" onClick={() => router.push('/')}>
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">F</div>
             <span className="text-[22px] font-normal text-[#5f6368] tracking-tight">Forum</span>
           </div>
         </div>
         
-        <div className="flex items-center gap-1">
-          <div className="hidden md:flex items-center text-[#5f6368] text-[14px] mr-4 font-normal tracking-tight">
+        <div className="flex items-center gap-0.5">
+          <div className="hidden md:flex items-center text-[#5f6368] text-[15px] mr-4 font-normal">
             {currentTime ? (
-              `${currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} • ${currentTime.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`
+              `${currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} • ${currentTime.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}`
             ) : (
               '--:--'
             )}
           </div>
-          <div className="flex items-center gap-0.5">
-            <button className="p-2 hover:bg-slate-100 rounded-full text-[#5f6368]"><HelpCircle size={22} /></button>
-            <button className="p-2 hover:bg-slate-100 rounded-full text-[#5f6368]"><MessageSquare size={22} /></button>
-            <button className="p-2 hover:bg-slate-100 rounded-full text-[#5f6368]"><Settings size={22} /></button>
-            <button className="p-2 hover:bg-slate-100 rounded-full text-[#5f6368] mr-1"><Grid size={22} /></button>
-          </div>
-          <div className="w-8 h-8 bg-[#673ab7] rounded-full flex items-center justify-center text-white text-xs font-medium cursor-pointer ml-2">
-            M
-          </div>
+          <button className="p-2 hover:bg-gray-100 rounded-full text-[#5f6368]"><HelpCircle size={22} /></button>
+          <button className="p-2 hover:bg-gray-100 rounded-full text-[#5f6368]"><MessageSquare size={22} /></button>
+          <button className="p-2 hover:bg-gray-100 rounded-full text-[#5f6368]"><Settings size={22} /></button>
+          <button className="p-2 hover:bg-gray-100 rounded-full text-[#5f6368] mr-1"><Grid size={22} /></button>
+          {user?.photoURL ? (
+            <img 
+              src={user.photoURL} 
+              onClick={logOut}
+              className="w-8 h-8 rounded-full cursor-pointer ml-3 border border-black/5 shadow-sm" 
+            />
+          ) : (
+            <div className="w-8 h-8 bg-[#673ab7] rounded-full flex items-center justify-center text-white text-xs font-medium cursor-pointer ml-3 shadow-sm">
+              {user?.displayName?.charAt(0) || 'U'}
+            </div>
+          )}
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1">
         
-        {/* --- SIDEBAR (Fixed Width) --- */}
-        <aside className="w-[256px] hidden lg:flex flex-col pt-2 px-3 gap-1">
+        {/* --- LEFT SIDEBAR --- */}
+        <aside className="w-72 hidden lg:flex flex-col pt-2 px-3 gap-1 shrink-0">
           <div className="bg-[#e8f0fe] text-[#1967d2] flex items-center gap-5 px-6 py-3 rounded-full font-medium transition-all cursor-pointer">
             <Calendar size={18} strokeWidth={2.5} />
-            <span className="text-[14px]">Meetings</span>
+            <span className="text-sm font-medium">Meetings</span>
           </div>
-          <div className="text-[#5f6368] hover:bg-slate-100 flex items-center gap-5 px-6 py-3 rounded-full font-medium transition-all cursor-pointer">
+          <div className="text-[#5f6368] hover:bg-gray-100 flex items-center gap-5 px-6 py-3 rounded-full font-medium transition-all cursor-pointer">
             <Phone size={18} />
-            <span className="text-[14px]">Calls</span>
+            <span className="text-sm font-medium">Calls</span>
           </div>
           
           <div className="mt-auto mb-6 mx-2 p-5 bg-slate-50/50 rounded-[28px] border border-slate-100/50">
@@ -80,69 +87,59 @@ export default function LandingPage() {
           </div>
         </aside>
 
-        {/* --- MAIN CONTENT AREA --- */}
-        <main className="flex-1 flex flex-col items-center justify-center px-8 relative bg-white">
-          <div className="max-w-[840px] w-full flex flex-col items-center">
-            
-            <div className="text-center space-y-6 mb-10">
-              <h1 className="text-[44px] md:text-[52px] leading-[1.15] font-normal text-[#1f1f1f] tracking-tight">
-                Video calls and meetings <br /> for everyone
+        {/* --- MAIN CENTER CONTENT --- */}
+        <main className="flex-1 flex items-center justify-center p-8 bg-white overflow-hidden">
+          <div className="max-w-[1024px] w-full flex flex-col lg:flex-row items-center justify-between gap-12 lg:gap-24">
+            <div className="flex-1 text-center lg:text-left space-y-7">
+              <h1 className="text-4xl md:text-[44px] leading-[1.2] font-normal text-[#1f1f1f] tracking-tight">
+                Video calls and meetings for everyone
               </h1>
-              <p className="text-[18px] md:text-[21px] font-light text-[#5f6368] max-w-[600px] mx-auto leading-relaxed">
+              <p className="text-lg md:text-[21px] font-light text-[#5f6368] leading-normal max-w-xl">
                 Connect, collaborate, and celebrate from anywhere with Forum.
               </p>
-            </div>
 
-            {/* ACTION ROW */}
-            <div className="flex flex-col md:flex-row items-center justify-center gap-4 w-full">
-              <button 
-                onClick={createMeeting}
-                className="bg-[#1a73e8] hover:bg-[#185abc] text-white px-6 py-3 rounded-[4px] font-medium shadow-sm flex items-center gap-2.5 transition-all active:scale-[0.98] shrink-0"
-              >
-                <Video size={20} />
-                <span className="text-[14px]">New meeting</span>
-              </button>
-
-              <div className="flex items-center gap-3">
-                <div className="flex items-center bg-white border border-[#dadce0] rounded-[4px] focus-within:border-[#1a73e8] focus-within:ring-[1px] focus-within:ring-[#1a73e8] transition-all overflow-hidden h-[48px]">
-                  <div className="pl-4 text-[#5f6368]">
-                    <Keyboard size={20} strokeWidth={1.5} />
-                  </div>
-                  <input 
-                    type="text" 
-                    placeholder="Enter a code or link"
-                    value={roomCode}
-                    onChange={(e) => setRoomCode(e.target.value)}
-                    className="pl-3 pr-4 py-2 outline-none w-full md:w-[240px] text-[16px] text-[#3c4043] placeholder:text-[#5f6368] placeholder:font-light"
-                  />
-                </div>
+              <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
                 <button 
-                  onClick={() => roomCode.trim() && router.push(`/room/${roomCode.trim()}`)}
-                  className={`font-semibold text-[15px] px-3 py-2 transition-colors ${roomCode.trim() ? 'text-[#1a73e8] hover:bg-blue-50 rounded-md' : 'text-[#3c4043] opacity-30 cursor-not-allowed'}`}
-                  disabled={!roomCode.trim()}
+                  onClick={createMeeting}
+                  className="bg-[#1a73e8] hover:bg-[#185abc] text-white px-6 h-[48px] rounded-[4px] font-medium shadow-sm flex items-center gap-2.5 transition-all shrink-0"
                 >
-                  Join
+                  <Video size={20} />
+                  <span className="text-[14px]">New meeting</span>
                 </button>
-              </div>
-            </div>
 
-            {/* SEPARATOR */}
-            <div className="w-full h-[1px] bg-[#dadce0] mt-12 mb-8 max-w-[760px]" />
-
-            {/* BOTTOM DECORATION */}
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-[120px] h-[120px] rounded-full bg-slate-50 flex items-center justify-center border border-slate-100 relative shadow-inner">
-                <div className="w-14 h-14 bg-white rounded-2xl shadow-md flex items-center justify-center border border-slate-50">
-                  <Video size={28} className="text-blue-600" />
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center border border-[#dadce0] rounded-[4px] h-[48px] px-4 focus-within:border-[#1a73e8] focus-within:ring-[1px] focus-within:ring-[#1a73e8] transition-all">
+                    <Keyboard size={20} className="text-[#5f6368] mr-3" />
+                    <input 
+                      type="text" 
+                      placeholder="Enter a code or link" 
+                      value={roomCode}
+                      onChange={(e) => setRoomCode(e.target.value)}
+                      className="bg-transparent outline-none text-[#3c4043] w-48 placeholder:font-light"
+                    />
+                  </div>
+                  <button 
+                    disabled={!roomCode.trim()}
+                    onClick={() => router.push(`/room/${roomCode.trim()}`)}
+                    className={`font-semibold text-[15px] px-4 py-2 transition-colors ${roomCode.trim() ? 'text-[#1a73e8] hover:bg-blue-50' : 'text-gray-400 cursor-not-allowed'} rounded-md`}
+                  >Join</button>
                 </div>
-                {/* Visual Glassmorphism accent */}
-                <div className="absolute -top-2 -right-2 w-8 h-8 bg-blue-100/50 rounded-full blur-xl" />
               </div>
-              <p className="text-[14px] text-[#5f6368] font-normal">
-                <span className="text-[#1a73e8] cursor-pointer hover:underline">Learn more</span> about Forum’s secure infrastructure.
+
+              <div className="h-[1px] bg-[#dadce0] w-full mt-10" />
+              <p className="text-[14px] text-[#5f6368]">
+                <span className="text-[#1a73e8] cursor-pointer hover:underline">Learn more</span> about Forum.
               </p>
             </div>
 
+            <div className="hidden lg:flex flex-col items-center">
+               <div className="w-[320px] h-[320px] md:w-[400px] md:h-[400px] rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center shadow-inner relative">
+                  <div className="w-16 h-16 bg-white rounded-2xl shadow-lg border border-slate-50 flex items-center justify-center">
+                     <Video size={36} className="text-blue-600" />
+                  </div>
+                  <div className="absolute -top-4 -right-4 w-12 h-12 bg-blue-100/50 rounded-full blur-2xl" />
+               </div>
+            </div>
           </div>
         </main>
 

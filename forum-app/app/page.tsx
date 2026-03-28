@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 import { 
   LiveKitRoom, 
   VideoConference, 
@@ -23,13 +24,10 @@ import {
 
 export default function Home() {
   const router = useRouter();
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { user, signInWithGoogle, loading } = useAuth();
   const [roomCode, setRoomCode] = useState("");
   const [barHeights, setBarHeights] = useState<number[]>([30, 35, 25, 40, 30]);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
-
-  // Mock login for demo purposes
-  const handleLogin = () => setIsLoggedIn(true);
 
   useEffect(() => {
     setBarHeights(Array.from({ length: 5 }, () => 20 + Math.random() * 40));
@@ -50,8 +48,10 @@ export default function Home() {
     router.push(`/room/${roomCode}`);
   };
 
+  if (loading) return null;
+
   // DASHBOARD VIEW (Matching image.png)
-  if (isLoggedIn) {
+  if (user) {
     return (
       <div className="min-h-screen bg-white flex flex-col font-sans">
         {/* Top Header */}
@@ -80,7 +80,7 @@ export default function Home() {
             <button className="p-2 hover:bg-slate-100 rounded-full"><MessageSquare className="w-5 h-5" /></button>
             <button className="p-2 hover:bg-slate-100 rounded-full"><Settings className="w-5 h-5" /></button>
             <button className="p-2 hover:bg-slate-100 rounded-full ml-2"><Grid className="w-5 h-5" /></button>
-            <img src="/favicon.ico" alt="User Profile" className="w-8 h-8 rounded-full border border-slate-200 ml-2" />
+            <img src={user.photoURL || "/favicon.ico"} alt="User Profile" className="w-8 h-8 rounded-full border border-slate-200 ml-2" />
           </div>
         </header>
 
@@ -179,7 +179,7 @@ export default function Home() {
 
         <div className="flex items-center gap-4">
           <span 
-            onClick={handleLogin}
+            onClick={signInWithGoogle}
             className="text-sm font-medium text-slate-600 hidden sm:block cursor-pointer hover:text-slate-900"
           >Sign in</span>
           <button className="hidden sm:block border border-slate-300 text-blue-600 px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-50 transition-colors">
