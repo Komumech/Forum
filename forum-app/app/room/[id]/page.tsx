@@ -252,11 +252,11 @@ function MeetingRoomContent({ room }: { room: string }) {
 
   const admitParticipant = (identity: string) => {
     const encoder = new TextEncoder();
-    localParticipant.publishData(
-      encoder.encode('JOIN_APPROVED'),
-      DataPacket_Kind.RELIABLE,
-      { destinationIdentities: [identity] }
-    );
+    const data = encoder.encode('JOIN_APPROVED');
+    localParticipant.publishData(data, {
+      reliable: true,
+      destinationIdentities: [identity],
+    });
   };
 
   // Stabilize participant lists by only re-calculating when identities or metadata change.
