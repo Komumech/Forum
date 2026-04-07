@@ -352,11 +352,27 @@ function MeetingRoomContent({ room }: { room: string }) {
   // Stacking Rule: 1:1 Floating Self-View
   const totalPeople = remoteParticipants.length + 1;
   const isOneOnOne = totalPeople === 2;
+  
+  // Helper to calculate Grid Dimensions for Google Meet style
+  const getGridDimensions = (count: number) => {
+    if (count <= 1) return { cols: 1, rows: 1 };
+    if (count === 2) return { cols: 2, rows: 1 };
+    if (count <= 4) return { cols: 2, rows: 2 };
+    if (count <= 6) return { cols: 3, rows: 2 };
+    if (count <= 9) return { cols: 3, rows: 3 };
+    if (count <= 12) return { cols: 4, rows: 3 };
+    if (count <= 16) return { cols: 4, rows: 4 };
+    return { cols: 5, rows: Math.ceil(count / 5) };
+  };
+
   const mainGridTracks = useMemo(() => 
-    isOneOnOne 
-      ? processedTracks.filter(t => !t.participant.isLocal)
-      : processedTracks,
+    (isOneOnOne 
+      ? processedTracks.filter(t => !t.participant.isLocal) 
+      : processedTracks
+    ).filter((t, i, self) => self.findIndex(prev => prev.participant.sid === t.participant.sid) === i),
   [isOneOnOne, processedTracks]);
+
+  const { cols, rows } = getGridDimensions(mainGridTracks.length);
 
   // Priority Focus logic: Screenshare > Pinned > Active Speaker
   const focusTrack = useMemo(() => 
@@ -401,26 +417,37 @@ function MeetingRoomContent({ room }: { room: string }) {
           position: relative !important;
           z-index: 5 !important;
         }
-        
+
+        /* Voice Bar Animations */
+        @keyframes voice-bar {
+          0%, 100% { height: 3px; }
+          50% { height: 12px; }
+        }
+        .animate-voice-bar-1 { animation: voice-bar 0.6s infinite ease-in-out; }
+        .animate-voice-bar-2 { animation: voice-bar 0.6s infinite ease-in-out 0.2s; }
+        .animate-voice-bar-3 { animation: voice-bar 0.6s infinite ease-in-out 0.4s; }
+
         @media (max-width: 768px) {
-          
           .lk-participant-tile video {
             width: 100% !important;
             height: 100% !important;
           }
         }
 
-        /* Hide default bottom labels to prevent blocking */
-        .lk-participant-name, .lk-focus-toggle-button {
+        /* Hide default LiveKit labels */
+        .lk-participant-name, .lk-focus-toggle-button, .lk-audio-visualizer {
           display: none !important;
         }
 
-        /* Speaking Indicator Border */
+        /* Google Meet Style Spotlight/Speaking Border */
         .lk-participant-tile[data-lk-speaking="true"] {
-           outline: 3px solid #8ab4f8 !important;
-           outline-offset: -3px;
+           box-shadow: inset 0 0 0 3px #8ab4f8 !important;
+           border-radius: 16px !important;
         }
-
+        
+        .lk-participant-tile {
+          transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
 
         /* Glassmorphism Classes */
         .glass-panel {
@@ -465,9 +492,21 @@ function MeetingRoomContent({ room }: { room: string }) {
                   </div>
                 ) : (
                   <div className="flex-1 w-full h-full min-h-[400px]"> 
-                    <GridLayout tracks={mainGridTracks} className="w-full h-full">
-                      <CustomParticipantTile raisedHands={raisedHands} />
-                    </GridLayout>
+                    <div 
+                      className="grid gap-3 w-full h-full transition-all duration-500"
+                      style={{ 
+                        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` 
+                      }}
+                    >
+                      {mainGridTracks.map((t) => (
+                        <CustomParticipantTile 
+                          key={`${t.participant.sid}-${t.source}`} 
+                          trackRef={t} 
+                          raisedHands={raisedHands} 
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -818,18 +857,18 @@ function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: a
       */}
       <ParticipantTile trackRef={ref} {...props} />
 
-      {/* PAIR: Name and Volume Indicator (Top Right) */}
-      <div className="absolute top-3 right-3 z-30 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 max-w-[80%]">
+      {/* PAIR: Name and Volume Indicator (Top Right) - Google Style */}
+      <div className="absolute top-3 right-3 z-30 flex items-center gap-2 bg-[#202124]/60 backdrop-blur-xl px-2.5 py-1 rounded-xl border border-white/5 shadow-lg group-hover:bg-[#202124]/80 transition-all">
         <span className="text-white text-[12px] font-medium truncate">
           {ref.participant.identity === 'local' ? 'You' : ref.participant.identity.split('#')[0]}
         </span>
         
         {isSpeaking && (
-           <div className="flex gap-0.5 items-end h-3 w-3">
-             <div className="w-[2px] bg-blue-400 rounded-full animate-voice-bar-1"></div>
-             <div className="w-[2px] bg-blue-400 rounded-full animate-voice-bar-2"></div>
-             <div className="w-[2px] bg-blue-400 rounded-full animate-voice-bar-3"></div>
-           </div>
+          <div className="flex gap-[2px] items-center h-3 w-3">
+            <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-1"></div>
+            <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-2"></div>
+            <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-3"></div>
+          </div>
         )}
         {!ref.participant.isMicrophoneEnabled && (
           <MicOff size={12} className="text-red-400" />
