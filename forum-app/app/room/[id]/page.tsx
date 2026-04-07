@@ -35,6 +35,7 @@ import {
   MessageSquare,
   X,
   Send,
+  Settings,
   Copy,
   Check,
   Pin,
@@ -130,6 +131,19 @@ export default function MeetingPage() {
             border-radius: 16px !important;
             padding: 0 !important;
           }
+
+          /* Global Sleek Scrollbars */
+          * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+          }
+          *::-webkit-scrollbar { width: 6px; height: 6px; }
+          *::-webkit-scrollbar-track { background: transparent; }
+          *::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            backdrop-filter: blur(4px);
+          }
         `}</style>
         <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center gap-12 bg-white p-8 md:p-12 rounded-[24px] shadow-sm border border-slate-100">
           
@@ -189,15 +203,13 @@ export default function MeetingPage() {
       <LiveKitRoom
         video={{
           captureDefaults: {
-            resolution: VideoPresets.h720.resolution,
+            resolution: VideoPresets.h1080.resolution,
+            frameRate: 30,
           },
+          simulcast: true,
+          adaptiveStream: true,
         }}
         audio={false}
-        screenShare={{
-          captureDefaults: {
-            resolution: ScreenSharePresets.h1080p25.resolution,
-          },
-        }}
         token={token}
         serverUrl={serverUrl}
         connect={true}
@@ -218,8 +230,8 @@ function MeetingRoomContent({ room }: { room: string }) {
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send: sendChat } = useChat();
   
-  // Setup Data Channel for Hand Raise synchronization
-  const { publish: publishData } = useDataChannel("hand-raise");
+  // Fix: useDataChannel returns 'send', not 'publish'
+  const { send: sendData } = useDataChannel("hand-raise");
 
   const tracks = useTracks(
     [
@@ -230,6 +242,7 @@ function MeetingRoomContent({ room }: { room: string }) {
   );
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | null>(null);
   const [isHandRaised, setIsHandRaised] = useState(false);
+  const [raisedHands, setRaisedHands] = useState<Record<string, boolean>>({});
   const [chatInput, setChatInput] = useState("");
   const [copied, setCopied] = useState(false);
   const [meetingUrl, setMeetingUrl] = useState("");
@@ -240,6 +253,7 @@ function MeetingRoomContent({ room }: { room: string }) {
   const [pinnedIdentities, setPinnedIdentities] = useState<Set<string>>(new Set());
   const [hideNonVideo, setHideNonVideo] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState(16);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   const getMetadata = (p: Participant) => {
     try { return p.metadata ? JSON.parse(p.metadata) : {}; }
@@ -263,7 +277,8 @@ function MeetingRoomContent({ room }: { room: string }) {
     const newState = !isHandRaised;
     setIsHandRaised(newState);
     const encoder = new TextEncoder();
-    publishData(encoder.encode(JSON.stringify({ type: 'hand-raise', raised: newState })), { reliable: true });
+    sendData(encoder.encode(JSON.stringify({ type: 'hand-raise', raised: newState })), { reliable: true });
+    setRaisedHands(prev => ({ ...prev, [localParticipant.identity]: newState }));
   };
 
   // Fix: Manually enable tracks ONLY after the user is admitted.
@@ -380,51 +395,59 @@ function MeetingRoomContent({ room }: { room: string }) {
         .lk-participant-tile video {
           display: block !important;
           object-fit: cover !important; /* Changed to cover for a more modern immersive feel */
-          width: 100% !important;
-          height: 100% !important;
+          width: 70% !important;
+          height: 74% !important;
           background-color: #000 !important;
           position: relative !important;
           z-index: 5 !important;
         }
         
+        @media (max-width: 768px) {
+          
+          .lk-participant-tile video {
+            width: 100% !important;
+            height: 100% !important;
+          }
+        }
+
+        /* Hide default bottom labels to prevent blocking */
+        .lk-participant-name, .lk-focus-toggle-button {
+          display: none !important;
+        }
+
         /* Speaking Indicator Border */
         .lk-participant-tile[data-lk-speaking="true"] {
            outline: 3px solid #8ab4f8 !important;
            outline-offset: -3px;
         }
 
-        /* Custom Scrollbar for Chat */
-        .custom-scroll::-webkit-scrollbar { width: 6px; }
-        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 10px; }
-      `}</style>
 
-      {/* TOP BRANDING BAR */}
-      <div className="absolute top-4 left-4 z-50 pointer-events-none">
-        <div className="flex items-center gap-2 bg-[#202124]/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/5">
-          <div className="w-5 h-5 bg-indigo-500 rounded flex items-center justify-center text-[10px] font-bold text-white">F</div>
-          <span className="text-white text-[13px] font-medium tracking-wide">Forum | {room}</span>
-        </div>
-      </div>
+        /* Glassmorphism Classes */
+        .glass-panel {
+          background: rgba(32, 33, 36, 0.4) !important;
+          backdrop-filter: blur(24px) saturate(180%) !important;
+          border: 1px solid rgba(255, 255, 255, 0.1) !important;
+          box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+      `}</style>
 
       <div className="flex flex-1 overflow-hidden relative bg-[#202124] transition-all duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"> 
         <div className={`flex-1 relative flex flex-col transition-all duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] ${activeTab ? 'mr-2' : ''}`}>
-          {
             <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden">
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
                   <div className="w-full h-full p-4 animate-in fade-in zoom-in-95 duration-1000 spotlight-view">
-                    <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" />
+                    <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} />
                   </div>
                 ) : effectiveLayout === 'sidebar' && focusTrack ? (
                   <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000">
                     <div className="flex-[3] h-full relative">
-                      <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" />
+                      <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} />
                     </div>
                     <div className="w-[240px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 hidden md:block">
                       {processedTracks.filter(t => t !== focusTrack).map(t => (
                         <div key={t.participant.identity} className="aspect-video w-full relative group">
-                           <CustomParticipantTile trackRef={t} />
+                           <CustomParticipantTile trackRef={t} raisedHands={raisedHands} />
                            <button 
                             onClick={() => togglePin(t.participant.identity)}
                             className="absolute top-2 right-2 p-1.5 bg-black/40 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
@@ -443,29 +466,35 @@ function MeetingRoomContent({ room }: { room: string }) {
                 ) : (
                   <div className="flex-1 w-full h-full min-h-[400px]"> 
                     <GridLayout tracks={mainGridTracks} className="w-full h-full">
-                      <CustomParticipantTile />
+                      <CustomParticipantTile raisedHands={raisedHands} />
                     </GridLayout>
                   </div>
                 )}
               </div>
-
-              {/* FLOATING SELF-VIEW (PIPPED) */}
-              {isOneOnOne && (
-                <div className="absolute bottom-8 right-8 w-40 sm:w-64 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-white/10 z-[80] animate-in slide-in-from-bottom-4 duration-1000">
-                  <CustomParticipantTile 
-                    trackRef={processedTracks.find(t => t.participant.isLocal)} 
-                  />
-                </div>
-              )}
-            </div>
-          }
+        
+        {/* TOP BRANDING BAR (Floating) */}
+        <div className="absolute top-6 left-6 z-50 pointer-events-none">
+          <div className="flex items-center gap-2 glass-panel px-4 py-2 rounded-2xl">
+            <div className="w-6 h-6 bg-indigo-500 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shadow-lg">F</div>
+            <span className="text-white/90 text-sm font-semibold tracking-tight">Forum <span className="text-white/40 mx-1">|</span> {room}</span>
+          </div>
         </div>
 
-        {/* RIGHT SIDEBAR PANEL */}
+        {/* FLOATING SELF-VIEW (PIPPED) */}
+        {isOneOnOne && (
+          <div className="absolute bottom-24 sm:bottom-8 right-8 w-40 sm:w-64 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-white/10 z-[80] animate-in slide-in-from-bottom-4 duration-1000">
+            <CustomParticipantTile 
+              trackRef={processedTracks.find(t => t.participant.isLocal)} raisedHands={raisedHands}
+            />
+          </div>
+        )}
+      </div>
+
+        {/* RIGHT SIDEBAR PANEL (Overlay Style) */}
         {activeTab && (
           <aside 
             key={activeTab} 
-            className="fixed inset-y-0 right-0 w-full sm:w-[360px] sm:relative bg-white sm:m-4 sm:ml-0 sm:rounded-2xl flex flex-col shadow-2xl z-[100] overflow-hidden animate-in fade-in slide-in-from-right-full duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"
+            className="fixed inset-y-4 right-4 w-[calc(100%-32px)] sm:w-[380px] bg-white rounded-[28px] flex flex-col shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-right-8 duration-[800ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"
           >
             <div className="flex items-center justify-between p-5 shrink-0 border-b border-slate-100">
               <h2 className="text-[18px] font-medium text-[#202124] capitalize">
@@ -608,63 +637,111 @@ function MeetingRoomContent({ room }: { room: string }) {
             </div>
           </aside>
         )}
-      </div>
 
-      {/* STABLE CONTROL BAR (NON-FLOATING) */}
-      <div className="h-20 bg-[#202124] flex items-center justify-between px-4 sm:px-8 z-[70] border-t border-white/5">
+      {/* FLOATING TASKBAR UI */}
+      <div className="absolute bottom-8 left-0 right-0 flex items-center justify-center px-6 z-[120] pointer-events-none">
+        
+        {/* MOBILE MORE MENU */}
+        {isMoreMenuOpen && (
+          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-[280px] glass-panel rounded-3xl p-2 flex flex-col gap-1 pointer-events-auto sm:hidden animate-in slide-in-from-bottom-4 duration-300">
+            <button 
+              onClick={() => { setActiveTab('info'); setIsMoreMenuOpen(false); }}
+              className="flex items-center gap-3 w-full p-4 rounded-2xl text-white hover:bg-white/10 transition-colors"
+            >
+              <Info size={20} /> <span className="text-sm font-medium">Meeting info</span>
+            </button>
+            <button 
+              onClick={() => { setActiveTab('users'); setIsMoreMenuOpen(false); }}
+              className="flex items-center gap-3 w-full p-4 rounded-2xl text-white hover:bg-white/10 transition-colors"
+            >
+              <Users size={20} /> <span className="text-sm font-medium">Participants</span>
+            </button>
+            <button 
+              onClick={() => { setActiveTab('chat'); setIsMoreMenuOpen(false); }}
+              className="flex items-center gap-3 w-full p-4 rounded-2xl text-white hover:bg-white/10 transition-colors"
+            >
+              <MessageSquare size={20} /> <span className="text-sm font-medium">In-call messages</span>
+            </button>
+            <button 
+              onClick={() => { 
+                localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled, {
+                  resolution: ScreenSharePresets.h1080fps30.resolution,
+                });
+                setIsMoreMenuOpen(false);
+              }}
+              className={`flex items-center gap-3 w-full p-4 rounded-2xl transition-colors ${localParticipant.isScreenShareEnabled ? 'text-blue-400' : 'text-white'}`}
+            >
+              {localParticipant.isScreenShareEnabled ? <MonitorOff size={20} /> : <MonitorUp size={20} />}
+              <span className="text-sm font-medium">{localParticipant.isScreenShareEnabled ? 'Stop sharing' : 'Share screen'}</span>
+            </button>
+            <div className="h-[1px] bg-white/10 my-1" />
+            <button 
+              onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); }}
+              className="flex items-center gap-3 w-full p-4 rounded-2xl text-white hover:bg-white/10 transition-colors"
+            >
+              <Settings size={20} /> <span className="text-sm font-medium">Settings</span>
+            </button>
+          </div>
+        )}
 
-        {/* Left: Time (Hidden on small screens) */}
-        <div className="hidden lg:flex items-center text-white/90 text-[14px] font-medium">
-          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase()} | {room}
+
+        {/* Left: Time (Glass) */}
+        <div className="absolute left-8 hidden xl:flex items-center glass-panel px-5 py-3 rounded-2xl text-white/80 text-sm font-medium pointer-events-auto">
+          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
 
-        {/* Center: Controls */}
-        <div className="flex items-center gap-2 sm:gap-4 mx-auto lg:mx-0">
+        {/* Center: Main Taskbar */}
+        <div className="flex items-center gap-3 glass-panel p-2 rounded-[24px] pointer-events-auto">
             <button 
-              onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
-              className={`p-2.5 sm:p-3 rounded-full transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335]' : 'bg-[#3c4043] hover:bg-[#4a4e51]'} text-white`}
+              onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled, {
+                resolution: ScreenSharePresets.h1080fps30.resolution,
+              })}
+              className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
             >
               {localParticipant.isMicrophoneEnabled ? <Mic size={20} /> : <MicOff size={20} />}
             </button>
             
             <button 
               onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
-              className={`p-2.5 sm:p-3 rounded-full transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335]' : 'bg-[#3c4043] hover:bg-[#4a4e51]'} text-white`}
+              className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
             >
               {localParticipant.isCameraEnabled ? <VideoIcon size={20} /> : <VideoOff size={20} />}
             </button>
 
             <button 
               onClick={toggleHandRaise}
-              className={`p-2.5 sm:p-3 rounded-full transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124]' : 'bg-[#3c4043] hover:bg-[#4a4e51] text-white'}`}
+              className={`p-3.5 rounded-2xl transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124] shadow-lg shadow-yellow-500/20' : 'text-white hover:bg-white/10'}`}
             >
               <Hand size={20} />
             </button>
 
             <button 
-              onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
-              className={`p-2.5 sm:p-3 rounded-full transition-all hidden sm:flex ${localParticipant.isScreenShareEnabled ? 'bg-[#8ab4f8] text-[#202124]' : 'bg-[#3c4043] hover:bg-[#4a4e51] text-white'}`}
+              onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled, {
+                resolution: ScreenSharePresets.h1080fps30.resolution,
+              })}
+              className={`p-3.5 rounded-2xl transition-all hidden sm:flex ${localParticipant.isScreenShareEnabled ? 'bg-[#8ab4f8] text-[#202124] shadow-lg' : 'text-white hover:bg-white/10'}`}
             >
               {localParticipant.isScreenShareEnabled ? <MonitorOff size={20} /> : <MonitorUp size={20} />}
             </button>
 
             <button 
-              onClick={() => setActiveTab(activeTab === 'settings' ? null : 'settings')}
-              className={`p-3 rounded-full transition-all hidden sm:block ${activeTab === 'settings' ? 'bg-[#8ab4f8] text-[#202124]' : 'bg-[#3c4043] hover:bg-[#4a4e51] text-white'}`}
+              onClick={() => { if(window.innerWidth < 640) setIsMoreMenuOpen(!isMoreMenuOpen); else setActiveTab(activeTab === 'settings' ? null : 'settings'); }}
+              className={`p-3.5 rounded-2xl transition-all ${(activeTab === 'settings' || isMoreMenuOpen) ? 'bg-[#8ab4f8] text-[#202124]' : 'text-white hover:bg-white/10'}`}
             >
               <MoreVertical size={22} /></button>
             
             {/* End Call Pill */}
+            <div className="w-[1px] h-8 bg-white/10 mx-1" />
             <button 
               onClick={() => router.push('/')}
-              className="px-5 py-3 rounded-full bg-[#ea4335] hover:bg-[#d93025] text-white transition-all shadow-md ml-2 flex items-center gap-2"
+              className="p-3.5 rounded-2xl bg-[#ea4335] hover:bg-[#d93025] text-white transition-all shadow-lg shadow-red-500/20 flex items-center justify-center"
             >
               <PhoneOff size={22} />
             </button>
         </div>
 
-        {/* Right: Tab Controls */}
-        <div className="flex items-center gap-1 pointer-events-auto">
+        {/* Right: Side Taskbar (Tabs) */}
+        <div className="absolute right-8 hidden sm:flex items-center gap-2 glass-panel p-2 rounded-[24px] pointer-events-auto">
           <button 
             onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')}
             className={`p-2.5 rounded-full transition-all ${activeTab === 'info' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
@@ -707,6 +784,8 @@ function MeetingRoomContent({ room }: { room: string }) {
         <RoomAudioRenderer />
       </div>
     </div>
+    </div>
+    </div>
   );
 }
 
@@ -714,14 +793,17 @@ function MeetingRoomContent({ room }: { room: string }) {
  * --- CustomParticipantTile Component ---
  * A wrapper around ParticipantTile to allow for custom styling and behavior.
  */
-function CustomParticipantTile({ trackRef, className, ...props }: any) {
+function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: any) {
   const trackRefFromContext = useMaybeTrackRefContext();
   const ref = trackRef || trackRefFromContext;
 
+  const isSpeaking = useIsSpeaking(ref?.participant);
   if (!ref) return null;
 
   // Check if the specific track being rendered is actually enabled/subscribed
   const isVideoOff = !ref.publication || ref.publication.isMuted || !ref.publication.isEnabled;
+
+  const isHandRaised = raisedHands?.[ref.participant.identity];
   
   let avatarUrl = "";
   try {
@@ -735,6 +817,31 @@ function CustomParticipantTile({ trackRef, className, ...props }: any) {
          The CSS above handles making it 'contain' and 'big'.
       */}
       <ParticipantTile trackRef={ref} {...props} />
+
+      {/* PAIR: Name and Volume Indicator (Top Right) */}
+      <div className="absolute top-3 right-3 z-30 flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 max-w-[80%]">
+        <span className="text-white text-[12px] font-medium truncate">
+          {ref.participant.identity === 'local' ? 'You' : ref.participant.identity.split('#')[0]}
+        </span>
+        
+        {isSpeaking && (
+           <div className="flex gap-0.5 items-end h-3 w-3">
+             <div className="w-[2px] bg-blue-400 rounded-full animate-voice-bar-1"></div>
+             <div className="w-[2px] bg-blue-400 rounded-full animate-voice-bar-2"></div>
+             <div className="w-[2px] bg-blue-400 rounded-full animate-voice-bar-3"></div>
+           </div>
+        )}
+        {!ref.participant.isMicrophoneEnabled && (
+          <MicOff size={12} className="text-red-400" />
+        )}
+      </div>
+
+      {/* Hand Raised Indicator */}
+      {isHandRaised && (
+        <div className="absolute top-4 left-4 z-[20] bg-[#fbbc04] p-1.5 rounded-full shadow-lg animate-in zoom-in duration-300">
+          <Hand size={18} className="text-[#202124]" />
+        </div>
+      )}
       
       {/* Overlay for when camera is off */}
       {isVideoOff && (
