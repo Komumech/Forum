@@ -15,9 +15,10 @@ import {
   TrackReference,
   useParticipantInfo,
   useMaybeTrackRefContext,
+  useIsSpeaking,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, DataPacket_Kind, Participant, RemoteParticipant } from 'livekit-client';
+import { Track, DataPacket_Kind, Participant, RemoteParticipant, VideoPresets, ScreenSharePresets } from 'livekit-client';
 import { useParams, useRouter } from 'next/navigation';
 import { 
   Mic, 
@@ -91,15 +92,27 @@ export default function MeetingPage() {
       streamRef.current?.getTracks().forEach(track => track.stop());
       streamRef.current = null;
 
-      // Use a unique identity (Name + Random ID) to prevent users with the same name from 
-      // kicking each other out of the room.
       const uniqueIdentity = `${name}#${Math.floor(1000 + Math.random() * 9000)}`;
-      const resp = await fetch(`/api/get-participant-token?room=${room}&username=${encodeURIComponent(uniqueIdentity)}&metadata=${encodeURIComponent(metadata)}`);
+      const url = `/api/get-participant-token?room=${room}&username=${encodeURIComponent(uniqueIdentity)}&metadata=${encodeURIComponent(metadata)}`;
+      
+      const resp = await fetch(url);
+      
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => "Unknown error");
+        throw new Error(`Token API failed (${resp.status}): ${errorText}`);
+      }
+
       const data = await resp.json();
+      if (!data.token) {
+        throw new Error("No token returned from server");
+      }
+
       setToken(data.token);
       setIsReady(true);
     } catch (e) {
-      console.error("Failed to get token", e);
+      // Use e.message to avoid the "{}" serialization issue in logs
+      console.error("Join Error:", e instanceof Error ? e.message : String(e));
+      alert("Could not join the meeting. Please check your connection or room code.");
     }
   };
 
@@ -115,6 +128,7 @@ export default function MeetingPage() {
             width: 100% !important;
             height: 100% !important;
             border-radius: 16px !important;
+            padding: 0 !important;
           }
         `}</style>
         <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center gap-12 bg-white p-8 md:p-12 rounded-[24px] shadow-sm border border-slate-100">
@@ -164,16 +178,31 @@ export default function MeetingPage() {
   }
 
   // --- VIEW 3: ACTUAL MEETING ROOM ---
+  const serverUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+  
+  if (!serverUrl) {
+    console.error("CRITICAL: NEXT_PUBLIC_LIVEKIT_URL is not defined in environment variables.");
+  }
+
   return (
-    <main className="h-screen bg-[#202124] overflow-hidden relative font-sans">
+    <main className="h-[100dvh] bg-[#202124] overflow-hidden flex flex-col font-sans">
       <LiveKitRoom
-        video={false} // Disable auto-publish to prevent timeout errors
+        video={{
+          captureDefaults: {
+            resolution: VideoPresets.h720.resolution,
+          },
+        }}
         audio={false}
+        screenShare={{
+          captureDefaults: {
+            resolution: ScreenSharePresets.h1080p25.resolution,
+          },
+        }}
         token={token}
-        serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
+        serverUrl={serverUrl}
         connect={true}
         data-lk-theme="default"
-        style={{ height: '100dvh' }}
+        style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
         onDisconnected={() => router.push('/')}
       >
         <MeetingRoomContent room={room} />
@@ -188,18 +217,23 @@ function MeetingRoomContent({ room }: { room: string }) {
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send: sendChat } = useChat();
+  
+  // Setup Data Channel for Hand Raise synchronization
+  const { publish: publishData } = useDataChannel("hand-raise");
+
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
     ],
-    { onlySubscribed: false },
+    { onlySubscribed: true },
   );
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | null>(null);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [copied, setCopied] = useState(false);
   const [meetingUrl, setMeetingUrl] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Layout & Stacking States
   const [layoutMode, setLayoutMode] = useState<'auto' | 'tiled' | 'sidebar' | 'spotlight'>('auto');
@@ -219,6 +253,18 @@ function MeetingRoomContent({ room }: { room: string }) {
   const effectiveLayout = layoutMode === 'auto' 
     ? (isScreenSharing || hasPins ? 'sidebar' : 'tiled') 
     : layoutMode;
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
+  const toggleHandRaise = () => {
+    const newState = !isHandRaised;
+    setIsHandRaised(newState);
+    const encoder = new TextEncoder();
+    publishData(encoder.encode(JSON.stringify({ type: 'hand-raise', raised: newState })), { reliable: true });
+  };
 
   // Fix: Manually enable tracks ONLY after the user is admitted.
   // This prevents the "engine not connected within timeout" error.
@@ -306,60 +352,47 @@ function MeetingRoomContent({ room }: { room: string }) {
   [tracks, processedTracks, pinnedIdentities]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#202124] flex-col relative">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[#202124] relative">
       
-      {/* AGGRESSIVE CSS OVERRIDES: Obliterates Glows, Outlines, and Borders */}
       <style jsx global>{`
+        /* 1. Make the Grid fill the screen */
         .lk-video-conference, 
-        .lk-grid-layout,
-        .lk-focus-layout {
-          transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) !important;
-          padding: 1rem !important;
-          gap: 12px !important;
+        .lk-grid-layout {
+          height: 100% !important;
+          width: 100% !important;
+          padding: 8px !important;
+          gap: 8px !important;
           background: transparent !important;
         }
 
+        /* 2. Force the Tile to be a container that doesn't shrink */
         .lk-participant-tile {
-          transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) !important;
-        }
-
-        /* Remove ALL tracking/glowing shadows and outlines injected by LiveKit */
-        .lk-participant-tile,
-        .lk-participant-tile[data-lk-speaking="true"],
-        .lk-participant-tile:focus,
-        .lk-participant-tile:focus-within {
-          border: 2px solid transparent !important;
-          box-shadow: none !important;
-          outline: none !important;
           background-color: #3c4043 !important;
           border-radius: 16px !important;
-          overflow: hidden;
-          position: relative;
-          z-index: 1;
-        }
-
-        .lk-participant-tile[data-lk-speaking="true"] {
-          border-color: #8ab4f8 !important;
-        }
-
-        /* Target the internal elements that might carry default styling */
-        .lk-participant-tile::after,
-        .lk-participant-tile::before {
-          box-shadow: none !important;
+          overflow: hidden !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
           border: none !important;
-          outline: none !important;
         }
 
-        
-        /* Standard Grid: Contain to prevent stretching and resolution distortion */
+        /* 3. The "No-Stretch, No-Crop, Big-Video" Rule */
         .lk-participant-tile video {
-          object-fit: cover !important;
+          display: block !important;
+          object-fit: cover !important; /* Changed to cover for a more modern immersive feel */
           width: 100% !important;
           height: 100% !important;
           background-color: #000 !important;
-          border-radius: 16px !important;
+          position: relative !important;
+          z-index: 5 !important;
         }
         
+        /* Speaking Indicator Border */
+        .lk-participant-tile[data-lk-speaking="true"] {
+           outline: 3px solid #8ab4f8 !important;
+           outline-offset: -3px;
+        }
+
         /* Custom Scrollbar for Chat */
         .custom-scroll::-webkit-scrollbar { width: 6px; }
         .custom-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -374,17 +407,17 @@ function MeetingRoomContent({ room }: { room: string }) {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden relative bg-[#202124] pb-12 transition-all duration-[800ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"> 
-        <div className={`flex-1 relative flex flex-col transition-all duration-[800ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] ${activeTab ? 'mr-2' : ''}`}>
+      <div className="flex flex-1 overflow-hidden relative bg-[#202124] transition-all duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"> 
+        <div className={`flex-1 relative flex flex-col transition-all duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] ${activeTab ? 'mr-2' : ''}`}>
           {
             <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden">
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
-                  <div className="w-full h-full p-4 animate-in fade-in zoom-in-95 duration-700 spotlight-view">
+                  <div className="w-full h-full p-4 animate-in fade-in zoom-in-95 duration-1000 spotlight-view">
                     <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" />
                   </div>
                 ) : effectiveLayout === 'sidebar' && focusTrack ? (
-                  <div className="flex w-full h-full gap-4 animate-in fade-in duration-700">
+                  <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000">
                     <div className="flex-[3] h-full relative">
                       <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" />
                     </div>
@@ -408,15 +441,17 @@ function MeetingRoomContent({ room }: { room: string }) {
                     </div>
                   </div>
                 ) : (
-                  <GridLayout tracks={mainGridTracks} className="w-full h-full">
-                    <CustomParticipantTile />
-                  </GridLayout>
+                  <div className="flex-1 w-full h-full min-h-[400px]"> 
+                    <GridLayout tracks={mainGridTracks} className="w-full h-full">
+                      <CustomParticipantTile />
+                    </GridLayout>
+                  </div>
                 )}
               </div>
 
               {/* FLOATING SELF-VIEW (PIPPED) */}
               {isOneOnOne && (
-                <div className="absolute bottom-24 right-8 w-64 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-white/10 z-[80] animate-in slide-in-from-bottom-4 duration-700">
+                <div className="absolute bottom-8 right-8 w-40 sm:w-64 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-white/10 z-[80] animate-in slide-in-from-bottom-4 duration-1000">
                   <CustomParticipantTile 
                     trackRef={processedTracks.find(t => t.participant.isLocal)} 
                   />
@@ -430,7 +465,7 @@ function MeetingRoomContent({ room }: { room: string }) {
         {activeTab && (
           <aside 
             key={activeTab} 
-            className="w-[360px] bg-white m-4 ml-0 rounded-2xl flex flex-col shadow-2xl z-[60] overflow-hidden animate-in fade-in slide-in-from-right-full duration-[800ms] [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"
+            className="fixed inset-y-0 right-0 w-full sm:w-[360px] sm:relative bg-white sm:m-4 sm:ml-0 sm:rounded-2xl flex flex-col shadow-2xl z-[100] overflow-hidden animate-in fade-in slide-in-from-right-full duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"
           >
             <div className="flex items-center justify-between p-5 shrink-0 border-b border-slate-100">
               <h2 className="text-[18px] font-medium text-[#202124] capitalize">
@@ -465,7 +500,7 @@ function MeetingRoomContent({ room }: { room: string }) {
                       <div className="flex items-center justify-between group">
                         <div className="flex items-center gap-3">
                           {user?.photoURL ? (
-                            <img src={user.photoURL} className="w-9 h-9 rounded-full object-cover" />
+                            <img src={user.photoURL} className="w-9 h-9 rounded-full object-cover bg-slate-100" />
                           ) : (
                             <div className="w-9 h-9 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-[13px] font-bold">You</div>
                           )}
@@ -479,7 +514,7 @@ function MeetingRoomContent({ room }: { room: string }) {
                           <div key={p.identity} className="flex items-center justify-between group py-1">
                             <div className="flex items-center gap-3">
                               {meta.avatar ? (
-                                <img src={meta.avatar} className="w-9 h-9 rounded-full object-cover" />
+                                <img src={meta.avatar} className="w-9 h-9 rounded-full object-cover bg-slate-100" />
                               ) : (
                                 <div className="w-9 h-9 bg-blue-100 text-[#1a73e8] rounded-full flex items-center justify-center text-[13px] font-bold">{p.identity.charAt(0).toUpperCase()}</div>
                               )}
@@ -513,6 +548,7 @@ function MeetingRoomContent({ room }: { room: string }) {
                         </div>
                       ))
                     )}
+                    <div ref={chatEndRef} />
                   </div>
                   <form 
                     onSubmit={(e) => { e.preventDefault(); if(chatInput.trim()){ sendChat(chatInput); setChatInput(""); }}}
@@ -574,42 +610,42 @@ function MeetingRoomContent({ room }: { room: string }) {
         )}
       </div>
 
-      {/* GOOGLE-STYLE FLOATING CONTROL DOCK */}
-      <div className="absolute bottom-5 left-0 right-0 flex items-center justify-between px-6 z-[70] pointer-events-none">
-        
+      {/* STABLE CONTROL BAR (NON-FLOATING) */}
+      <div className="h-20 bg-[#202124] flex items-center justify-between px-4 sm:px-8 z-[70] border-t border-white/5">
+
         {/* Left: Time (Hidden on small screens) */}
-        <div className="hidden xl:flex items-center text-white/90 text-[15px] font-medium pointer-events-auto">
+        <div className="hidden lg:flex items-center text-white/90 text-[14px] font-medium">
           {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase()} | {room}
         </div>
 
-        {/* Center: Main Controls */}
-        <div className="flex items-center gap-3 pointer-events-auto mx-auto">
+        {/* Center: Controls */}
+        <div className="flex items-center gap-2 sm:gap-4 mx-auto lg:mx-0">
             <button 
               onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
-              className={`p-3 rounded-full transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] hover:bg-[#d93025]' : 'bg-[#3c4043] hover:bg-[#4a4e51]'} text-white`}
+              className={`p-2.5 sm:p-3 rounded-full transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335]' : 'bg-[#3c4043] hover:bg-[#4a4e51]'} text-white`}
             >
-              {localParticipant.isMicrophoneEnabled ? <Mic size={22} /> : <MicOff size={22} />}
+              {localParticipant.isMicrophoneEnabled ? <Mic size={20} /> : <MicOff size={20} />}
             </button>
             
             <button 
               onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
-              className={`p-3 rounded-full transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] hover:bg-[#d93025]' : 'bg-[#3c4043] hover:bg-[#4a4e51]'} text-white`}
+              className={`p-2.5 sm:p-3 rounded-full transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335]' : 'bg-[#3c4043] hover:bg-[#4a4e51]'} text-white`}
             >
-              {localParticipant.isCameraEnabled ? <VideoIcon size={22} /> : <VideoOff size={22} />}
+              {localParticipant.isCameraEnabled ? <VideoIcon size={20} /> : <VideoOff size={20} />}
             </button>
 
             <button 
-              onClick={() => setIsHandRaised(!isHandRaised)}
-              className={`p-3 rounded-full transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124] hover:bg-[#f2a900]' : 'bg-[#3c4043] hover:bg-[#4a4e51] text-white'}`}
+              onClick={toggleHandRaise}
+              className={`p-2.5 sm:p-3 rounded-full transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124]' : 'bg-[#3c4043] hover:bg-[#4a4e51] text-white'}`}
             >
-              <Hand size={22} />
+              <Hand size={20} />
             </button>
 
             <button 
               onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
-              className={`p-3 rounded-full transition-all ${localParticipant.isScreenShareEnabled ? 'bg-[#8ab4f8] text-[#202124]' : 'bg-[#3c4043] hover:bg-[#4a4e51] text-white'}`}
+              className={`p-2.5 sm:p-3 rounded-full transition-all hidden sm:flex ${localParticipant.isScreenShareEnabled ? 'bg-[#8ab4f8] text-[#202124]' : 'bg-[#3c4043] hover:bg-[#4a4e51] text-white'}`}
             >
-              {localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
+              {localParticipant.isScreenShareEnabled ? <MonitorOff size={20} /> : <MonitorUp size={20} />}
             </button>
 
             <button 
@@ -639,20 +675,23 @@ function MeetingRoomContent({ room }: { room: string }) {
           {/* Stacked Avatars and Count */}
           <button 
             onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')}
-            className={`relative flex items-center gap-2 px-3 py-1.5 rounded-full transition-all ${activeTab === 'users' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
+            className={`relative flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-full transition-all ${activeTab === 'users' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
           >
             <div className="flex -space-x-2 mr-1">
-              {[localParticipant, ...remoteParticipants].slice(0, 3).map((p, i) => (
-                <div 
-                  key={p.sid || p.identity} 
-                  style={{ zIndex: 3 - i }}
-                  className="w-6 h-6 rounded-full border-2 border-[#202124] bg-indigo-500 text-[10px] flex items-center justify-center font-bold"
-                >
-                  {p.identity.charAt(0).toUpperCase()}
-                </div>
-              ))}
+              {[localParticipant, ...remoteParticipants].slice(0, 3).map((p, i) => {
+                const meta = getMetadata(p);
+                return (
+                  <div 
+                    key={p.sid || p.identity} 
+                    style={{ zIndex: 3 - i }}
+                    className="w-6 h-6 rounded-full border-2 border-[#202124] bg-indigo-500 overflow-hidden text-[10px] flex items-center justify-center font-bold"
+                  >
+                    {meta.avatar ? <img src={meta.avatar} className="w-full h-full object-cover" /> : p.identity.charAt(0).toUpperCase()}
+                  </div>
+                );
+              })}
             </div>
-            <span className="text-sm font-medium">
+            <span className="text-xs sm:text-sm font-medium">
               {[localParticipant, ...remoteParticipants].length}
             </span>
           </button>
@@ -676,47 +715,33 @@ function MeetingRoomContent({ room }: { room: string }) {
  * A wrapper around ParticipantTile to allow for custom styling and behavior.
  */
 function CustomParticipantTile({ trackRef, className, ...props }: any) {
-  // Consume trackRef from context if not provided as a prop (essential for GridLayout)
   const trackRefFromContext = useMaybeTrackRefContext();
   const ref = trackRef || trackRefFromContext;
 
-  // Guard: If no track reference exists yet, return an empty container to prevent crashes
-  if (!ref) return <div className={`lk-participant-tile ${className}`} {...props} />;
+  if (!ref) return null;
 
-  const participant = ref.participant;
-  
-  // Show avatar if:
-  // 1. Participant has explicitly turned their camera off
-  // 2. Or the track is currently muted
-  // Note: We don't check for !ref.publication here because it can be null for a split second 
-  // while joining, which causes the "black flash".
-  const isVideoOff = !participant.isCameraEnabled || ref.publication?.isMuted;
+  // Check if the specific track being rendered is actually enabled/subscribed
+  const isVideoOff = !ref.publication || ref.publication.isMuted || !ref.publication.isEnabled;
   
   let avatarUrl = "";
-  if (participant?.metadata) {
-    try {
-      const meta = JSON.parse(participant.metadata);
-      avatarUrl = meta.avatar;
-    } catch (e) {}
-  }
+  try {
+    const meta = JSON.parse(ref.participant.metadata || "{}");
+    avatarUrl = meta.avatar;
+  } catch (e) {}
 
   return (
-    <div className={`relative w-full h-full overflow-hidden rounded-2xl ${className}`}>
+    <div className={`relative w-full h-full ${className}`}>
+      {/* IMPORTANT: We put the ParticipantTile directly here. 
+         The CSS above handles making it 'contain' and 'big'.
+      */}
       <ParticipantTile trackRef={ref} {...props} />
       
+      {/* Overlay for when camera is off */}
       {isVideoOff && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#3c4043] z-[10]">
-          {avatarUrl ? (
-            <img 
-              src={avatarUrl} 
-              alt={participant?.identity} 
-              className="w-20 h-20 md:w-32 md:h-32 rounded-full object-cover border-4 border-white/5 shadow-2xl animate-in fade-in zoom-in duration-500" 
-            />
-          ) : (
-            <div className="w-20 h-20 md:w-32 md:h-32 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-3xl md:text-5xl font-bold text-white shadow-2xl animate-in fade-in zoom-in duration-500">
-              {participant?.identity?.charAt(0).toUpperCase() || 'U'}
-            </div>
-          )}
+        <div className="absolute inset-0 flex items-center justify-center bg-[#3c4043] z-[10] rounded-2xl">
+          <div className="w-20 h-20 md:w-32 md:h-32 rounded-full bg-indigo-600 flex items-center justify-center text-3xl font-bold text-white">
+            {avatarUrl ? <img src={avatarUrl} className="rounded-full w-full h-full object-cover" /> : ref.participant.identity.charAt(0)}
+          </div>
         </div>
       )}
     </div>
