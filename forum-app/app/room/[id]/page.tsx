@@ -200,25 +200,23 @@ export default function MeetingPage() {
 
   return (
     <main className="h-[100dvh] bg-[#202124] overflow-hidden flex flex-col font-sans">
-      <LiveKitRoom
-        video={{
-          captureDefaults: {
-            resolution: VideoPresets.h1080.resolution,
-            frameRate: 30,
-          },
-          simulcast: true,
-          adaptiveStream: true,
-        }}
-        audio={false}
-        token={token}
-        serverUrl={serverUrl}
-        connect={true}
-        data-lk-theme="default"
-        style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-        onDisconnected={() => router.push('/')}
-      >
-        <MeetingRoomContent room={room} />
-      </LiveKitRoom>
+<LiveKitRoom
+  // Video Capture settings (Camera)
+  video={{
+    resolution: VideoPresets.h1080.resolution,
+    frameRate: 30,
+  }}
+  // Optimization settings
+  audio={false}
+  token={token}
+  serverUrl={serverUrl}
+  connect={true}
+  data-lk-theme="default"
+  style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+  onDisconnected={() => router.push('/')}
+>
+  <MeetingRoomContent room={room} />
+</LiveKitRoom>
     </main>
   );
 }
@@ -732,9 +730,7 @@ function MeetingRoomContent({ room }: { room: string }) {
         {/* Center: Main Taskbar */}
         <div className="flex items-center gap-3 glass-panel p-2 rounded-[24px] pointer-events-auto">
             <button 
-              onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled, {
-                resolution: ScreenSharePresets.h1080fps30.resolution,
-              })}
+              onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
               className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
             >
               {localParticipant.isMicrophoneEnabled ? <Mic size={20} /> : <MicOff size={20} />}
