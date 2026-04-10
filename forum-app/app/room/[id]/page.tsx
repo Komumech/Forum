@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { 
   LiveKitRoom, 
+  useConnectionState,
   RoomAudioRenderer,
   useTracks,
   useLocalParticipant,
@@ -13,12 +14,14 @@ import {
   useRemoteParticipants,
   useDataChannel,
   TrackReference,
+  MediaDeviceMenu,
   useParticipantInfo,
   useMaybeTrackRefContext,
   useIsSpeaking,
+  ConnectionQualityIndicator,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, DataPacket_Kind, Participant, RemoteParticipant, VideoPresets, ScreenSharePresets } from 'livekit-client';
+import { Track, ConnectionState, DataPacket_Kind, Participant, RemoteParticipant, VideoPresets, ScreenSharePresets } from 'livekit-client';
 import { useParams, useRouter } from 'next/navigation';
 import { 
   Mic, 
@@ -35,6 +38,7 @@ import {
   MessageSquare,
   X,
   Send,
+  ChevronDown,
   Settings,
   Copy,
   Check,
@@ -227,6 +231,7 @@ function MeetingRoomContent({ room }: { room: string }) {
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send: sendChat } = useChat();
+  const connectionState = useConnectionState();
   
   // Fix: useDataChannel returns 'send', not 'publish'
   const { send: sendData } = useDataChannel("hand-raise");
@@ -272,11 +277,21 @@ function MeetingRoomContent({ room }: { room: string }) {
   }, [chatMessages]);
 
   const toggleHandRaise = () => {
+    // Gracefully handle connection state to prevent "PC manager is closed"
+    if (connectionState !== ConnectionState.Connected) {
+      console.warn("Cannot raise hand: Not connected to room");
+      return;
+    }
+
     const newState = !isHandRaised;
     setIsHandRaised(newState);
     const encoder = new TextEncoder();
-    sendData(encoder.encode(JSON.stringify({ type: 'hand-raise', raised: newState })), { reliable: true });
-    setRaisedHands(prev => ({ ...prev, [localParticipant.identity]: newState }));
+    try {
+      sendData(encoder.encode(JSON.stringify({ type: 'hand-raise', raised: newState })), { reliable: true });
+      setRaisedHands(prev => ({ ...prev, [localParticipant.identity]: newState }));
+    } catch (err) {
+      console.error("Failed to send hand-raise data", err);
+    }
   };
 
   // Fix: Manually enable tracks ONLY after the user is admitted.
@@ -433,7 +448,7 @@ function MeetingRoomContent({ room }: { room: string }) {
         }
 
         /* Hide default LiveKit labels */
-        .lk-participant-name, .lk-focus-toggle-button, .lk-audio-visualizer {
+        .lk-participant-name, .lk-focus-toggle-button, .lk-audio-visualizer, .lk-track-muted-indicator {
           display: none !important;
         }
 
@@ -454,10 +469,45 @@ function MeetingRoomContent({ room }: { room: string }) {
           border: 1px solid rgba(255, 255, 255, 0.1) !important;
           box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
+
+        /* Device Menu Styling */
+        .lk-device-menu {
+          background: rgba(32, 33, 36, 0.9) !important;
+          backdrop-filter: blur(24px) !important;
+          border: 1px solid rgba(255, 255, 255, 0.15) !important;
+          border-radius: 16px !important;
+          padding: 8px !important;
+          color: white !important;
+          box-shadow: 0 20px 50px rgba(0,0,0,0.6) !important;
+          z-index: 200 !important;
+          width: 280px !important; /* Fixed width to prevent "too wide" menus */
+          max-height: 400px !important;
+          overflow-y: auto !important;
+        }
+        .lk-device-menu-item {
+          padding: 10px 14px !important;
+          border-radius: 8px !important;
+          font-size: 13px !important;
+          cursor: pointer !important;
+          transition: background 0.2s !important;
+        }
+        .lk-device-menu-item:hover {
+          background: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        /* Device Menu Labels */
+        .lk-device-menu h6 {
+          color: rgba(255, 255, 255, 0.4) !important;
+          font-size: 11px !important;
+          text-transform: uppercase !important;
+          padding: 8px 14px !important;
+          margin: 0 !important;
+          letter-spacing: 0.05em !important;
+        }
       `}</style>
 
-      <div className="flex flex-1 overflow-hidden relative bg-[#202124] transition-all duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"> 
-        <div className={`flex-1 relative flex flex-col transition-all duration-[1000ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] ${activeTab ? 'mr-2' : ''}`}>
+      <div className="flex flex-1 overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex-row flex-nowrap"> 
+        <div className="flex-1 relative flex flex-col overflow-hidden min-w-0">
             <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden">
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
@@ -510,12 +560,29 @@ function MeetingRoomContent({ room }: { room: string }) {
               </div>
         
         {/* TOP BRANDING BAR (Floating) */}
-        <div className="absolute top-6 left-6 z-50 pointer-events-none">
-          <div className="flex items-center gap-2 glass-panel px-4 py-2 rounded-2xl">
+        <div className="absolute top-6 left-6 z-50 pointer-events-auto flex items-center gap-3">
+          <div className="flex items-center gap-2 glass-panel px-4 py-2.5 rounded-2xl">
             <div className="w-6 h-6 bg-indigo-500 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shadow-lg">F</div>
             <span className="text-white/90 text-sm font-semibold tracking-tight">Forum <span className="text-white/40 mx-1">|</span> {room}</span>
           </div>
+          
+          {/* Clock & Connection Quality moved here to clear the bottom-left */}
+          <div className="hidden md:flex items-center gap-3 glass-panel px-4 py-2.5 rounded-2xl text-white/80 text-sm font-medium">
+            <span className="opacity-60">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <div className="w-[1px] h-3 bg-white/10" />
+            <ConnectionQualityIndicator participant={localParticipant} />
+          </div>
         </div>
+
+        {/* Connection State Overlay */}
+        {(connectionState === ConnectionState.Reconnecting || connectionState === ConnectionState.Connecting) && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center animate-in fade-in duration-300">
+            <div className="glass-panel p-8 rounded-3xl flex flex-col items-center gap-4 text-white">
+              <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm font-medium tracking-wide">Connection unstable. Reconnecting...</p>
+            </div>
+          </div>
+        )}
 
         {/* FLOATING SELF-VIEW (PIPPED) */}
         {isOneOnOne && (
@@ -529,9 +596,10 @@ function MeetingRoomContent({ room }: { room: string }) {
 
         {/* RIGHT SIDEBAR PANEL (Overlay Style) */}
         {activeTab && (
-          <aside 
+          <aside
             key={activeTab} 
-            className="fixed inset-y-4 right-4 w-[calc(100%-32px)] sm:w-[380px] bg-white rounded-[28px] flex flex-col shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-right-8 duration-[800ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"
+            /* Fixed on mobile, pushed content (squeeze) on laptop/lg */
+            className="fixed inset-y-4 right-4 lg:relative lg:inset-auto lg:h-[calc(100%-32px)] lg:my-4 lg:mr-4 w-[calc(100%-32px)] sm:w-[380px] bg-white rounded-[28px] flex flex-col shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-right-8 duration-[800ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"
           >
             <div className="flex items-center justify-between p-5 shrink-0 border-b border-slate-100">
               <h2 className="text-[18px] font-medium text-[#202124] capitalize">
@@ -722,26 +790,41 @@ function MeetingRoomContent({ room }: { room: string }) {
         )}
 
 
-        {/* Left: Time (Glass) */}
-        <div className="absolute left-8 hidden xl:flex items-center glass-panel px-5 py-3 rounded-2xl text-white/80 text-sm font-medium pointer-events-auto">
-          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </div>
-
         {/* Center: Main Taskbar */}
         <div className="flex items-center gap-3 glass-panel p-2 rounded-[24px] pointer-events-auto">
-            <button 
-              onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
-              className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
-            >
-              {localParticipant.isMicrophoneEnabled ? <Mic size={20} /> : <MicOff size={20} />}
-            </button>
+            <div className="flex items-center">
+              <button 
+                onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
+                className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
+              >
+                {localParticipant.isMicrophoneEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+              </button>
+              <MediaDeviceMenu 
+                kind="audioinput" 
+                className="p-1 text-white/40 hover:text-white transition-colors"
+              >
+                <ChevronDown size={14} />
+              </MediaDeviceMenu>
+            </div>
             
-            <button 
-              onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
-              className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
-            >
-              {localParticipant.isCameraEnabled ? <VideoIcon size={20} /> : <VideoOff size={20} />}
-            </button>
+            <div className="w-[1px] h-6 bg-white/10 mx-1" />
+
+            <div className="flex items-center">
+              <button 
+                onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
+                className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
+              >
+                {localParticipant.isCameraEnabled ? <VideoIcon size={20} /> : <VideoOff size={20} />}
+              </button>
+              <MediaDeviceMenu 
+                kind="videoinput" 
+                className="p-1 text-white/40 hover:text-white transition-colors"
+              >
+                <ChevronDown size={14} />
+              </MediaDeviceMenu>
+            </div>
+
+            <div className="w-[1px] h-6 bg-white/10 mx-1" />
 
             <button 
               onClick={toggleHandRaise}
@@ -866,15 +949,12 @@ function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: a
             <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-3"></div>
           </div>
         )}
-        {!ref.participant.isMicrophoneEnabled && (
-          <MicOff size={12} className="text-red-400" />
-        )}
       </div>
 
       {/* Hand Raised Indicator */}
       {isHandRaised && (
-        <div className="absolute top-4 left-4 z-[20] bg-[#fbbc04] p-1.5 rounded-full shadow-lg animate-in zoom-in duration-300">
-          <Hand size={18} className="text-[#202124]" />
+        <div className="absolute bottom-3 left-3 z-[40] bg-[#fbbc04] p-1.5 rounded-full shadow-xl animate-in zoom-in duration-300">
+          <Hand size={16} className="text-[#202124]" />
         </div>
       )}
       
