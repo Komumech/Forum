@@ -210,8 +210,7 @@ export default function MeetingPage() {
     resolution: VideoPresets.h1080.resolution,
     frameRate: 30,
   }}
-  // Optimization settings
-  audio={false}
+  audio={true}
   token={token}
   serverUrl={serverUrl}
   connect={true}
@@ -267,8 +266,9 @@ function MeetingRoomContent({ room }: { room: string }) {
   const isScreenSharing = tracks.some(t => t.source === Track.Source.ScreenShare && t.participant.identity !== localParticipant.identity);
   const hasPins = pinnedIdentities.size > 0;
   
+  // Google Meet logic: If someone joins, shift to Sidebar (Spotlight + vertical list)
   const effectiveLayout = layoutMode === 'auto' 
-    ? (isScreenSharing || hasPins ? 'sidebar' : 'tiled') 
+    ? (isScreenSharing || hasPins || remoteParticipants.length > 0 ? 'sidebar' : 'tiled') 
     : layoutMode;
 
   // Auto-scroll chat
@@ -418,17 +418,19 @@ function MeetingRoomContent({ room }: { room: string }) {
           align-items: center !important;
           justify-content: center !important;
           border: none !important;
+          min-width: 0 !important; /* Prevents tile from being pushed by video aspect ratio */
+          min-height: 0 !important;
         }
 
         /* 3. The "No-Stretch, No-Crop, Big-Video" Rule */
         .lk-participant-tile video {
           display: block !important;
           object-fit: cover !important; /* Changed to cover for a more modern immersive feel */
-          width: 70% !important;
-          height: 74% !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-width: 100% !important;
+          max-height: 100% !important;
           background-color: #000 !important;
-          position: relative !important;
-          z-index: 5 !important;
         }
 
         /* Voice Bar Animations */
@@ -506,40 +508,68 @@ function MeetingRoomContent({ room }: { room: string }) {
         }
       `}</style>
 
-      <div className="flex flex-1 overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex-row flex-nowrap"> 
-        <div className="flex-1 relative flex flex-col overflow-hidden min-w-0">
-            <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden">
-              <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center">
+      <div className="flex flex-1 h-full overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex-col"> 
+        <div className="flex-1 h-full relative flex flex-col overflow-hidden min-h-0">
+            <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden min-h-0">
+              <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center max-h-full overflow-hidden">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
                   <div className="w-full h-full p-4 animate-in fade-in zoom-in-95 duration-1000 spotlight-view">
                     <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} />
                   </div>
                 ) : effectiveLayout === 'sidebar' && focusTrack ? (
-                  <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000">
+                  <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000 p-2">
+                    {/* Main Spotlight Section */}
                     <div className="flex-[3] h-full relative">
                       <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} />
                     </div>
-                    <div className="w-[240px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 hidden md:block">
-                      {processedTracks.filter(t => t !== focusTrack).map(t => (
-                        <div key={t.participant.identity} className="aspect-video w-full relative group">
-                           <CustomParticipantTile trackRef={t} raisedHands={raisedHands} />
-                           <button 
-                            onClick={() => togglePin(t.participant.identity)}
-                            className="absolute top-2 right-2 p-1.5 bg-black/40 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                           >
-                             {pinnedIdentities.has(t.participant.identity) ? <PinOff size={14} /> : <Pin size={14} />}
-                           </button>
-                        </div>
-                      ))}
+
+                    {/* Vertical Sidebar Section */}
+                    <div className="w-[200px] lg:w-[280px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 hidden md:flex flex-col">
+                      {processedTracks
+                        .filter(t => t.participant.identity !== focusTrack.participant.identity)
+                        .slice(0, 5) // Show up to 5 individual tiles
+                        .map(t => (
+                          <div key={t.participant.identity} className="aspect-video w-full relative group shrink-0">
+                            <CustomParticipantTile trackRef={t} raisedHands={raisedHands} />
+                            <button 
+                              onClick={() => togglePin(t.participant.identity)}
+                              className="absolute top-2 right-2 p-1.5 bg-black/40 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              {pinnedIdentities.has(t.participant.identity) ? <PinOff size={14} /> : <Pin size={14} />}
+                            </button>
+                          </div>
+                        ))}
+
+                      {/* THE OTHERS STACK */}
                       {processedTracks.length > 6 && (
-                        <div className="bg-[#3c4043] aspect-video rounded-xl flex items-center justify-center text-white text-xs font-medium">
-                          +{processedTracks.length - 6} more
+                        <div className="bg-[#3c4043] aspect-video rounded-2xl flex flex-col items-center justify-center p-4 gap-3 border border-white/5 shrink-0 shadow-lg">
+                          <div className="flex -space-x-3">
+                            {processedTracks.slice(6, 9).map((t, idx) => {
+                              const meta = getMetadata(t.participant);
+                              return (
+                                <div 
+                                  key={t.participant.identity} 
+                                  className="w-10 h-10 rounded-full border-2 border-[#3c4043] bg-indigo-600 flex items-center justify-center text-[12px] font-bold text-white overflow-hidden shadow-md"
+                                  style={{ zIndex: 3 - idx }}
+                                >
+                                  {meta.avatar ? (
+                                    <img src={meta.avatar} className="w-full h-full object-cover" />
+                                  ) : (
+                                    t.participant.identity.charAt(0).toUpperCase()
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <span className="text-white/70 text-[13px] font-medium tracking-wide">
+                            +{processedTracks.length - 6} others
+                          </span>
                         </div>
                       )}
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 w-full h-full min-h-[400px]"> 
+                  <div className="flex-1 w-full h-full min-h-0"> 
                     <div 
                       className="grid gap-3 w-full h-full transition-all duration-500"
                       style={{ 
@@ -584,22 +614,14 @@ function MeetingRoomContent({ room }: { room: string }) {
           </div>
         )}
 
-        {/* FLOATING SELF-VIEW (PIPPED) */}
-        {isOneOnOne && (
-          <div className="absolute bottom-24 sm:bottom-8 right-8 w-40 sm:w-64 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-white/10 z-[80] animate-in slide-in-from-bottom-4 duration-1000">
-            <CustomParticipantTile 
-              trackRef={processedTracks.find(t => t.participant.isLocal)} raisedHands={raisedHands}
-            />
-          </div>
-        )}
       </div>
 
         {/* RIGHT SIDEBAR PANEL (Overlay Style) */}
         {activeTab && (
           <aside
             key={activeTab} 
-            /* Fixed on mobile, pushed content (squeeze) on laptop/lg */
-            className="fixed inset-y-4 right-4 lg:relative lg:inset-auto lg:h-[calc(100%-32px)] lg:my-4 lg:mr-4 w-[calc(100%-32px)] sm:w-[380px] bg-white rounded-[28px] flex flex-col shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-right-8 duration-[800ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"
+            /* Back to fixed overlay for all screens to prevent grid shifting */
+            className="fixed inset-y-4 right-4 w-[calc(100%-32px)] sm:w-[380px] bg-white rounded-[28px] flex flex-col shadow-2xl z-[150] overflow-hidden animate-in fade-in slide-in-from-right-8 duration-[800ms] ease-[cubic-bezier(0.2,0.8,0.2,1)]"
           >
             <div className="flex items-center justify-between p-5 shrink-0 border-b border-slate-100">
               <h2 className="text-[18px] font-medium text-[#202124] capitalize">
@@ -914,6 +936,7 @@ function MeetingRoomContent({ room }: { room: string }) {
 function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: any) {
   const trackRefFromContext = useMaybeTrackRefContext();
   const ref = trackRef || trackRefFromContext;
+  const { localParticipant } = useLocalParticipant();
 
   const isSpeaking = useIsSpeaking(ref?.participant);
   if (!ref) return null;
@@ -938,8 +961,12 @@ function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: a
 
       {/* PAIR: Name and Volume Indicator (Top Right) - Google Style */}
       <div className="absolute top-3 right-3 z-30 flex items-center gap-2 bg-[#202124]/60 backdrop-blur-xl px-2.5 py-1 rounded-xl border border-white/5 shadow-lg group-hover:bg-[#202124]/80 transition-all">
+        {!ref.participant.isMicrophoneEnabled && (
+          <MicOff size={14} className="text-red-500 shrink-0" />
+        )}
+        
         <span className="text-white text-[12px] font-medium truncate">
-          {ref.participant.identity === 'local' ? 'You' : ref.participant.identity.split('#')[0]}
+          {ref.participant.identity === localParticipant.identity ? 'You' : ref.participant.identity.split('#')[0]}
         </span>
         
         {isSpeaking && (
