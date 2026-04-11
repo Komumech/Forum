@@ -19,15 +19,18 @@ import {
   Video, 
   Keyboard, 
   Calendar, 
-  Phone 
+  Phone,
+  LogOut,
+  User as UserIcon
 } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
-  const { user, signInWithGoogle, loading } = useAuth();
+  const { user, signInWithGoogle, signOut, loading } = useAuth();
   const [roomCode, setRoomCode] = useState("");
   const [barHeights, setBarHeights] = useState<number[]>([30, 35, 25, 40, 30]);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   useEffect(() => {
     setBarHeights(Array.from({ length: 5 }, () => 20 + Math.random() * 40));
@@ -80,7 +83,47 @@ export default function Home() {
             <button className="p-2 hover:bg-slate-100 rounded-full"><MessageSquare className="w-5 h-5" /></button>
             <button className="p-2 hover:bg-slate-100 rounded-full"><Settings className="w-5 h-5" /></button>
             <button className="p-2 hover:bg-slate-100 rounded-full ml-2"><Grid className="w-5 h-5" /></button>
-            <img src={user.photoURL || "/favicon.ico"} alt="User Profile" className="w-8 h-8 rounded-full border border-slate-200 ml-2" />
+            
+            {/* Profile Section with Dropdown */}
+            <div className="relative ml-2">
+              {user ? (
+                <button 
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                  className="flex items-center justify-center w-9 h-9 rounded-full hover:ring-4 hover:ring-slate-100 transition-all overflow-hidden border border-slate-200"
+                >
+                  <img src={user.photoURL || "/favicon.ico"} alt="User Profile" className="w-full h-full object-cover" />
+                </button>
+              ) : (
+                <button 
+                  onClick={signInWithGoogle}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+                >
+                  Sign in
+                </button>
+              )}
+
+              {isProfileOpen && user && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsProfileOpen(false)} />
+                  <div className="absolute right-0 mt-3 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 py-4 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="px-6 pb-4 border-b border-slate-50 flex flex-col items-center text-center">
+                      <img src={user.photoURL || "/favicon.ico"} className="w-16 h-16 rounded-full border border-slate-100 mb-3" />
+                      <p className="text-sm font-bold text-slate-800">{user.displayName}</p>
+                      <p className="text-xs text-slate-500">{user.email}</p>
+                    </div>
+                    <div className="pt-2 px-2">
+                      <button 
+                        onClick={() => { signOut(); setIsProfileOpen(false); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors font-medium"
+                      >
+                        <LogOut className="w-4 h-4 text-slate-500" />
+                        Sign out
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 

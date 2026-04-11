@@ -21,6 +21,7 @@ import {
   useIsSpeaking,
   ConnectionQualityIndicator,
 } from '@livekit/components-react';
+import { isMobileBrowser } from '@livekit/components-core';
 import '@livekit/components-styles';
 import { Track, ConnectionState, DataPacket_Kind, Participant, RemoteParticipant, VideoPresets, ScreenSharePresets } from 'livekit-client';
 import { useParams, useRouter } from 'next/navigation';
@@ -247,11 +248,8 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send: sendChat } = useChat();
   const connectionState = useConnectionState();
-  
   const processorRef = useRef<any>(null);
-  // Fix: useDataChannel returns 'send', not 'publish'
   const { send: sendData } = useDataChannel("hand-raise");
-
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -267,6 +265,23 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const [copied, setCopied] = useState(false);
   const [meetingUrl, setMeetingUrl] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // --- SPATIAL ENGINE STATES ---
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
+  const [lastSpokenMap, setLastSpokenMap] = useState<Map<string, number>>(new Map());
+  
+  const isMobile = useMemo(() => typeof window !== 'undefined' && isMobileBrowser(), []);
+
+  // Observe container size for Dynamic Grid Math
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      setContainerDimensions({ width: entries[0].contentRect.width, height: entries[0].contentRect.height });
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // Layout & Stacking States
   const [layoutMode, setLayoutMode] = useState<'auto' | 'tiled' | 'sidebar' | 'spotlight'>('auto');
@@ -376,15 +391,6 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
     };
   }, [activeTab, localParticipant, selectedMic, selectedSpeaker, selectedCam]);
 
-  // Determine effective layout based on Auto logic
-  const isScreenSharing = tracks.some(t => t.source === Track.Source.ScreenShare && t.participant.identity !== localParticipant.identity);
-  const hasPins = pinnedIdentities.size > 0;
-  
-  // AI Auto-Pin: Automatically shift to Sidebar view if guests are present, someone is pinned, or sharing screen
-  const effectiveLayout = layoutMode === 'auto' 
-    ? (isScreenSharing || hasPins || remoteParticipants.length > 0 ? 'sidebar' : 'tiled') 
-    : layoutMode;
-
   // Auto-scroll chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -472,48 +478,56 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
   // Video Effects Logic (Background Blur & Virtual BGs)
   useEffect(() => {
+    let isCurrent = true;
+
     const applyVideoProcessor = async () => {
       try {
-        if (!localParticipant || !localParticipant.isCameraEnabled) return;
         const track = localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
-        if (!track) return;
 
-        // Clean up previous processor if it exists
+        // Safeguard 1: Ensure track exists and is enabled
+        if (!track || !localParticipant.isCameraEnabled || !isCurrent) return;
+
+        // Safeguard 2: Wait for dimensions to avoid "could not determine track dimensions"
+        if (!track.dimensions || track.dimensions.width === 0) {
+          // Retry in 200ms if dimensions aren't ready yet
+          setTimeout(() => { if (isCurrent) applyVideoProcessor(); }, 200);
+          return;
+        }
+
+        // Cleanup previous processor to prevent "Abort handler" conflicts
         if (processorRef.current) {
           await track.stopProcessor();
           processorRef.current = null;
         }
 
-        if (selectedBg === 'none') {
-          return;
-        } else if (selectedBg === 'blur') {
-          // Dynamically import to keep bundle small
+        if (selectedBg === 'none' || !isCurrent) return;
+
+        if (selectedBg === 'blur') {
           const { BackgroundBlur } = await import('@livekit/track-processors');
-          processorRef.current = BackgroundBlur(10); // 10 is the blur radius
+          processorRef.current = BackgroundBlur(10);
           await track.setProcessor(processorRef.current);
-          console.log("Blur applied");
         } else {
           const allBgs = [...VIRTUAL_BGS, ...customBgs];
           const bg = allBgs.find(b => b.id === selectedBg);
           if (bg?.url) {
             const { VirtualBackground } = await import('@livekit/track-processors');
-            // AI Optimization: Background removal works best with a high-quality image
             processorRef.current = VirtualBackground(bg.url);
             await track.setProcessor(processorRef.current);
-            console.log(`Virtual BG applied: ${bg.label}`);
           }
         }
       } catch (error) {
-        console.error("Failed to apply video processor:", error);
-        setSelectedBg('none');
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        // Ignore Abort errors as they are expected during rapid switching
+        if (!errorMessage.includes("Abort")) {
+          console.error("Failed to apply video processor:", error);
+          setSelectedBg('none');
+        }
       }
     };
+
     applyVideoProcessor();
-    
-    return () => {
-      // Optional: Cleanup if component unmounts
-    };
-  }, [selectedBg, localParticipant]);
+    return () => { isCurrent = false; };
+  }, [selectedBg, localParticipant.isCameraEnabled, customBgs]);
 
   // Stabilize the host logic: The person who joined first is the host.
   const isHost = useMemo(() => {
@@ -581,38 +595,47 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
       return aId.localeCompare(bId);
     }).slice(0, maxParticipants);
   }, [tracks, pinnedIdentities, hideNonVideo, maxParticipants, localParticipant.identity, remoteParticipants]);
-
-  // Stacking Rule: 1:1 Floating Self-View
-  const totalPeople = remoteParticipants.length + 1;
-  const isOneOnOne = totalPeople === 2;
   
-  // Helper to calculate Grid Dimensions for Google Meet style
-  const getGridDimensions = (count: number) => {
+  // --- 3. DYNAMIC GRID MATHEMATICS ---
+  const gridConfig = useMemo(() => {
+    const count = processedTracks.length;
     if (count <= 1) return { cols: 1, rows: 1 };
+    
+    // Rule 4: The "Portrait Tile" Shift (Stack vertically for 2 people on mobile)
+    if (isMobile && count === 2) return { cols: 1, rows: 2 };
+
     if (count === 2) return { cols: 2, rows: 1 };
-    if (count <= 4) return { cols: 2, rows: 2 };
-    if (count <= 6) return { cols: 3, rows: 2 };
-    if (count <= 9) return { cols: 3, rows: 3 };
-    if (count <= 12) return { cols: 4, rows: 3 };
-    if (count <= 16) return { cols: 4, rows: 4 };
-    return { cols: 5, rows: Math.ceil(count / 5) };
-  };
-
-  // Show all tracks in the grid, including local, so you can pin yourself
-  const mainGridTracks = processedTracks;
-  const { cols, rows } = getGridDimensions(mainGridTracks.length);
-
-  // Priority Focus logic: Screenshare > Pinned > Active Speaker
-  const focusTrack = useMemo(() => 
-    tracks.find(t => t.source === Track.Source.ScreenShare && !t.participant.isLocal) || 
-    processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || 
-    // AI Auto-Focus: The sorting logic in processedTracks already promotes speakers to index 0
-    processedTracks[0],
-  [tracks, processedTracks, pinnedIdentities]);
+    const cols = Math.ceil(Math.sqrt(count * (16/9)));
+    const rows = Math.ceil(count / cols);
+    return { cols, rows };
+  }, [processedTracks, isMobile]);
 
   // Helper to determine if a track has active video
   const isVideoActive = (track?: TrackReferenceOrPlaceholder) => 
     track?.publication?.isEnabled && !track?.publication?.isMuted;
+
+  // Compute layout based on layoutMode and participant state
+  const computedLayout = useMemo(() => {
+    if (layoutMode === 'auto') {
+      // Auto mode: use spotlight if there are pinned participants, otherwise tiled
+      return pinnedIdentities.size > 0 ? 'spotlight' : 'tiled';
+    }
+    return layoutMode;
+  }, [layoutMode, pinnedIdentities]);
+
+  // Derive focusTrack from pinned identities (first pinned participant's track)
+  const focusTrack = useMemo(() => {
+    if (pinnedIdentities.size === 0) return null;
+    return processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || null;
+  }, [processedTracks, pinnedIdentities]);
+
+  // Calculate hidden count for mobile
+  const hiddenCount = useMemo(() => {
+    const visibleCount = computedLayout === 'sidebar' || computedLayout === 'spotlight' 
+      ? (focusTrack ? 1 : 0) + (computedLayout === 'sidebar' ? processedTracks.filter(t => t.participant.sid !== focusTrack?.participant.sid).length : 0)
+      : processedTracks.length;
+    return Math.max(0, processedTracks.length - visibleCount);
+  }, [computedLayout, focusTrack, processedTracks]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-[#202124] relative">
@@ -628,28 +651,50 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
           background: transparent !important;
         }
 
-        /* 2. Force the Tile to be a container that doesn't shrink */
+        /* 1. Force the Tile Container to be the boundary */
         .lk-participant-tile {
-          background-color: #3c404300 !important;
+          background-color: transparent !important;
           border-radius: 16px !important;
           overflow: hidden !important;
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
-          border: none !important;
-          min-width: 0 !important; /* Prevents tile from being pushed by video aspect ratio */
-          min-height: 0 !important;
-        }
-
-        /* 3. The "No-Stretch, No-Crop, Big-Video" Rule */
-        .lk-participant-tile video {
-          display: block !important;
-          object-fit: contain !important; /* Changed to contain to preserve rectangular aspect ratio without cropping */
+          border: none !important; /* Remove default border */
           width: 100% !important;
           height: 100% !important;
-          max-width: 100% !important;
-          max-height: 100% !important;
+        }
+
+        /* 2. The Video Aspect Ratio Rule */
+        .lk-participant-tile video {
+          display: block !important;
+          object-fit: contain !important;
+          width: 100% !important;
+          height: 100% !important;
           background-color: #000 !important;
+        }
+
+        /* 3. Grid Item Sizing */
+        .grid > div {
+          width: 100%;
+          height: 100%;
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        /* Sidebar Layout Specifics */
+        .sidebar-container {
+          display: flex;
+          flex-direction: row;
+          width: 100%;
+          height: 100%;
+        }
+        @media (max-width: 768px) {
+          .sidebar-container {
+            flex-direction: column;
+          }
         }
 
         /* Voice Bar Animations */
@@ -682,14 +727,6 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
         
         .lk-participant-tile {
           transition: all 1s cubic-bezier(0.2, 0.8, 0.2, 1);
-        }
-
-        /* Glassmorphism Classes */
-        .glass-panel {
-          background: rgba(30, 31, 35, 0.7) !important;
-          backdrop-filter: blur(24px) saturate(180%) !important;
-          border: 1px solid rgba(255, 255, 255, 0.1) !important;
-          box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
 
         /* Device Menu Styling */
@@ -727,6 +764,14 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
           margin: 0 !important;
           letter-spacing: 0.05em !important;
         }
+
+        .glass-panel {
+          background: rgba(32, 33, 36, 0.86) !important;
+          backdrop-filter: blur(24px) saturate(180%) !important;
+          -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+          border: 1px solid rgba(255, 255, 255, 0.1) !important;
+          box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4) !important;
+        }
       `}</style>
 
       <style jsx global>{`
@@ -734,56 +779,68 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
         .custom-scroll::-webkit-scrollbar-track { background: transparent !important; }
       `}</style>
 
-      <div className="flex flex-1 h-full overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex-col"> 
-        <div className="flex-1 h-full relative flex flex-col overflow-hidden min-h-0">
-            <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-2 pb-24 overflow-hidden min-h-0">
-              <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center max-h-full overflow-hidden">
-                {(effectiveLayout === 'sidebar' || effectiveLayout === 'spotlight') && focusTrack ? (
-                  <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000 p-4">
+      <div className="flex-1 overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex flex-col"> 
+        <div className="flex-1 relative flex flex-col overflow-hidden min-h-0">
+            <div ref={containerRef} className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 pb-24 overflow-hidden min-h-0">
+              <div className="w-full max-w-[1600px] mx-auto h-full flex items-center justify-center overflow-hidden">
+                {(computedLayout === 'sidebar' || computedLayout === 'spotlight') && focusTrack ? (
+                  <div className="sidebar-container gap-4 animate-in fade-in duration-1000 p-4">
                     {/* Main Spotlight Section */}
-                    <div className="flex-1 h-full relative p-2 lg:p-4 flex items-center justify-center min-w-0">
-                      <div className={`w-full ${isVideoActive(focusTrack) ? 'max-w-[720px]' : 'max-w-[900px]'} aspect-video h-auto shadow-2xl transition-all duration-500 rounded-2xl overflow-hidden`}>
+                    <div className="flex-1 flex items-center justify-center relative min-w-0 h-full">
+                      <div className="w-full h-full max-w-full max-h-full aspect-video shadow-2xl rounded-2xl overflow-hidden bg-black flex items-center justify-center">
                         <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} onTogglePin={() => togglePin(focusTrack.participant.identity)} isPinned={pinnedIdentities.has(focusTrack.participant.identity)} />
                       </div>
                     </div>
 
-                    {/* Vertical Sidebar Section */}
-                    <div className="w-[160px] sm:w-[220px] lg:w-[260px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 flex flex-col shrink-0">
-                      {processedTracks
+                    {/* Vertical Sidebar (Only if NOT in Spotlight) */}
+                    {computedLayout === 'sidebar' && (
+                      <div className="w-[180px] sm:w-[220px] lg:w-[280px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 flex flex-col shrink-0">
+                        {processedTracks
                         .filter(t => t.participant.sid !== focusTrack.participant.sid)
                         .map(t => (
-                          <div key={t.participant.identity} className="aspect-video w-full shrink-0">
+                          <div key={t.participant.identity} className="aspect-video w-full shrink-0 flex items-center justify-center">
                             <CustomParticipantTile 
                               trackRef={t} 
                               raisedHands={raisedHands} 
                               isPinned={pinnedIdentities.has(t.participant.identity)}
                               onTogglePin={() => togglePin(t.participant.identity)}
+                              className="w-full h-full"
                             />
                           </div>
                         ))}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <div className="flex-1 w-full h-full min-h-0 flex items-center justify-center"> 
+                  <div className="w-full h-full flex items-center justify-center overflow-hidden"> 
                     <div 
-                      className={`grid gap-3 transition-all duration-500 ${mainGridTracks.length === 1 ? (isVideoActive(mainGridTracks[0]) ? 'max-w-[720px]' : 'max-w-[900px]') + ' w-full aspect-video h-auto self-center shadow-2xl' : 'w-full h-full'}`}
+                      className="grid gap-3 transition-all duration-500 w-full h-full max-w-full max-h-full"
                       style={{ 
-                        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` 
+                        gridTemplateColumns: `repeat(${gridConfig.cols}, minmax(0, 1fr))`,
+                        gridTemplateRows: `repeat(${gridConfig.rows}, minmax(0, 1fr))`,
+                        placeContent: 'center'
                       }}
                     >
-                      {mainGridTracks.map((t) => (
-                        <CustomParticipantTile 
-                          key={`${t.participant.sid}-${t.source}`} 
-                          trackRef={t}
-                          raisedHands={raisedHands}
-                          isPinned={pinnedIdentities.has(t.participant.identity)}
-                          mirror={t.participant.isLocal && videoMirroring}
-                          showName={showParticipantNames}
-                          onTogglePin={() => togglePin(t.participant.identity)}
-                        />
+                      {processedTracks.map((t) => (
+                        <div key={`${t.participant.sid}-${t.source}`} className="w-full h-full flex items-center justify-center overflow-hidden">
+                          <CustomParticipantTile 
+                            trackRef={t}
+                            raisedHands={raisedHands}
+                            isPinned={pinnedIdentities.has(t.participant.identity)}
+                            mirror={t.participant.isLocal && videoMirroring}
+                            showName={showParticipantNames}
+                            onTogglePin={() => togglePin(t.participant.identity)}
+                          />
+                        </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Rule 6: Hidden Count Indicator (Mobile Collapse) */}
+                {isMobile && hiddenCount > 0 && (
+                  <div className="absolute bottom-24 left-1/2 -translate-x-1/2 glass-panel px-4 py-1.5 rounded-full text-white/70 text-[10px] font-bold uppercase tracking-widest animate-in fade-in slide-in-from-bottom-2">
+                    + {hiddenCount} other participants
                   </div>
                 )}
               </div>
@@ -1393,11 +1450,8 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
   } catch (e) {}
 
   return (
-    <div className={`relative w-full h-full group ${className}`}>
-      {/* IMPORTANT: We put the ParticipantTile directly here. 
-         The CSS above handles making it 'contain' and 'big'.
-      */}
-      <div className={mirror ? 'scale-x-[-1]' : ''}>
+    <div className={`relative aspect-video bg-black rounded-2xl overflow-hidden group shadow-lg flex items-center justify-center ${className}`} style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}>
+      <div className={`w-full h-full ${mirror ? 'scale-x-[-1]' : ''}`}>
         <ParticipantTile trackRef={ref} {...props} />
       </div>
 
