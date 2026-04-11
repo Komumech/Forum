@@ -246,6 +246,7 @@ function MeetingRoomContent({ room }: { room: string }) {
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [raisedHands, setRaisedHands] = useState<Record<string, boolean>>({});
   const [chatInput, setChatInput] = useState("");
+  const [chatRecipient, setChatRecipient] = useState<string>("everyone");
   const [copied, setCopied] = useState(false);
   const [meetingUrl, setMeetingUrl] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -378,12 +379,10 @@ function MeetingRoomContent({ room }: { room: string }) {
     return { cols: 5, rows: Math.ceil(count / 5) };
   };
 
-  const mainGridTracks = useMemo(() => 
-    (isOneOnOne 
-      ? processedTracks.filter(t => !t.participant.isLocal) 
-      : processedTracks
-    ).filter((t, i, self) => self.findIndex(prev => prev.participant.sid === t.participant.sid) === i),
-  [isOneOnOne, processedTracks]);
+  // Show all tracks in the grid, including local, so you can pin yourself
+  const mainGridTracks = useMemo(() => {
+    return processedTracks.filter((t, i, self) => self.findIndex(prev => prev.participant.sid === t.participant.sid) === i);
+  }, [processedTracks]);
 
   const { cols, rows } = getGridDimensions(mainGridTracks.length);
 
@@ -411,7 +410,7 @@ function MeetingRoomContent({ room }: { room: string }) {
 
         /* 2. Force the Tile to be a container that doesn't shrink */
         .lk-participant-tile {
-          background-color: #3c4043 !important;
+          background-color: #3c404300 !important;
           border-radius: 16px !important;
           overflow: hidden !important;
           display: flex !important;
@@ -456,17 +455,16 @@ function MeetingRoomContent({ room }: { room: string }) {
 
         /* Google Meet Style Spotlight/Speaking Border */
         .lk-participant-tile[data-lk-speaking="true"] {
-           box-shadow: inset 0 0 0 3px #8ab4f8 !important;
-           border-radius: 16px !important;
+           box-shadow: none !important;
         }
         
         .lk-participant-tile {
-          transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+          transition: all 1s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
         /* Glassmorphism Classes */
         .glass-panel {
-          background: rgba(32, 33, 36, 0.4) !important;
+          background: rgba(103, 113, 142, 0.4) !important;
           backdrop-filter: blur(24px) saturate(180%) !important;
           border: 1px solid rgba(255, 255, 255, 0.1) !important;
           box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
@@ -514,7 +512,13 @@ function MeetingRoomContent({ room }: { room: string }) {
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center max-h-full overflow-hidden">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
                   <div className="w-full h-full p-4 animate-in fade-in zoom-in-95 duration-1000 spotlight-view">
-                    <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} />
+                    <CustomParticipantTile 
+                      trackRef={focusTrack} 
+                      className="w-full h-full" 
+                      raisedHands={raisedHands}
+                      isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
+                      onTogglePin={() => togglePin(focusTrack.participant.identity)}
+                    />
                   </div>
                 ) : effectiveLayout === 'sidebar' && focusTrack ? (
                   <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000 p-2">
@@ -529,14 +533,13 @@ function MeetingRoomContent({ room }: { room: string }) {
                         .filter(t => t.participant.identity !== focusTrack.participant.identity)
                         .slice(0, 5) // Show up to 5 individual tiles
                         .map(t => (
-                          <div key={t.participant.identity} className="aspect-video w-full relative group shrink-0">
-                            <CustomParticipantTile trackRef={t} raisedHands={raisedHands} />
-                            <button 
-                              onClick={() => togglePin(t.participant.identity)}
-                              className="absolute top-2 right-2 p-1.5 bg-black/40 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              {pinnedIdentities.has(t.participant.identity) ? <PinOff size={14} /> : <Pin size={14} />}
-                            </button>
+                          <div key={t.participant.identity} className="aspect-video w-full shrink-0">
+                            <CustomParticipantTile 
+                              trackRef={t} 
+                              raisedHands={raisedHands} 
+                              isPinned={pinnedIdentities.has(t.participant.identity)}
+                              onTogglePin={() => togglePin(t.participant.identity)}
+                            />
                           </div>
                         ))}
 
@@ -580,8 +583,10 @@ function MeetingRoomContent({ room }: { room: string }) {
                       {mainGridTracks.map((t) => (
                         <CustomParticipantTile 
                           key={`${t.participant.sid}-${t.source}`} 
-                          trackRef={t} 
-                          raisedHands={raisedHands} 
+                          trackRef={t}
+                          raisedHands={raisedHands}
+                          isPinned={pinnedIdentities.has(t.participant.identity)}
+                          onTogglePin={() => togglePin(t.participant.identity)}
                         />
                       ))}
                     </div>
@@ -605,11 +610,20 @@ function MeetingRoomContent({ room }: { room: string }) {
         </div>
 
         {/* Connection State Overlay */}
-        {(connectionState === ConnectionState.Reconnecting || connectionState === ConnectionState.Connecting) && (
+        {connectionState === ConnectionState.Connecting && (
+          <div className="absolute inset-0 bg-[#202124] z-[200] flex items-center justify-center animate-in fade-in duration-300">
+            <div className="flex flex-col items-center gap-4 text-white">
+              <div className="w-10 h-10 border-[3px] border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm font-medium tracking-wide">Connecting to meeting...</p>
+            </div>
+          </div>
+        )}
+
+        {connectionState === ConnectionState.Reconnecting && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center animate-in fade-in duration-300">
             <div className="glass-panel p-8 rounded-3xl flex flex-col items-center gap-4 text-white">
               <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-medium tracking-wide">Connection unstable. Reconnecting...</p>
+              <p className="text-sm font-medium tracking-wide text-center">Connection unstable.<br/>Attempting to reconnect...</p>
             </div>
           </div>
         )}
@@ -690,8 +704,8 @@ function MeetingRoomContent({ room }: { room: string }) {
                 </div>
               )}
               {activeTab === 'chat' && (
-                <div className="flex flex-col h-full">
-                  <div className="flex-1 space-y-4 mb-4">
+                <div className="flex flex-col h-full relative">
+                  <div className="flex-1 space-y-4 mb-4 custom-scroll overflow-y-auto pr-2">
                     {chatMessages.length === 0 ? (
                        <p className="text-center text-[#5f6368] text-sm mt-10">Messages can only be seen by people in the call and are deleted when the call ends.</p>
                     ) : (
@@ -706,19 +720,45 @@ function MeetingRoomContent({ room }: { room: string }) {
                     )}
                     <div ref={chatEndRef} />
                   </div>
-                  <form 
-                    onSubmit={(e) => { e.preventDefault(); if(chatInput.trim()){ sendChat(chatInput); setChatInput(""); }}}
-                    className="flex gap-2 items-center bg-[#f1f3f4] rounded-full px-4 py-1.5"
-                  >
-                    <input 
-                      type="text" 
-                      placeholder="Send a message" 
-                      className="bg-transparent outline-none flex-1 text-[14px] text-[#202124] h-10 placeholder:text-[#5f6368]"
-                      value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
-                    />
-                    <button type="submit" disabled={!chatInput.trim()} className="text-[#1a73e8] p-2 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"><Send size={18} /></button>
-                  </form>
+
+                  {/* Chat Controls and Input */}
+                  <div className="mt-auto space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-[#5f6368] uppercase tracking-widest">To:</span>
+                      <select 
+                        value={chatRecipient}
+                        onChange={(e) => setChatRecipient(e.target.value)}
+                        className="text-[12px] bg-slate-100 border-none rounded-lg px-2 py-1 outline-none text-[#1a73e8] font-medium cursor-pointer hover:bg-slate-200 transition-colors"
+                      >
+                        <option value="everyone">Everyone</option>
+                        {remoteParticipants.map(p => (
+                          <option key={p.identity} value={p.identity}>{p.identity.split('#')[0]}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <form 
+                      onSubmit={(e) => { 
+                        e.preventDefault(); 
+                        if(chatInput.trim()){ 
+                          sendChat(chatInput, { 
+                            destinationIdentities: chatRecipient === "everyone" ? undefined : [chatRecipient] 
+                          }); 
+                          setChatInput(""); 
+                        }
+                      }}
+                      className="flex gap-2 items-center bg-[#f1f3f4] rounded-full px-4 py-1.5"
+                    >
+                      <input 
+                        type="text" 
+                        placeholder={chatRecipient === 'everyone' ? "Send a message to everyone" : `Message ${chatRecipient.split('#')[0]}`} 
+                        className="bg-transparent outline-none flex-1 text-[14px] text-[#202124] h-10 placeholder:text-[#5f6368]"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                      />
+                      <button type="submit" disabled={!chatInput.trim()} className="text-[#1a73e8] p-2 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-50"><Send size={18} /></button>
+                    </form>
+                  </div>
                 </div>
               )}
               {activeTab === 'settings' && (
@@ -933,10 +973,17 @@ function MeetingRoomContent({ room }: { room: string }) {
  * --- CustomParticipantTile Component ---
  * A wrapper around ParticipantTile to allow for custom styling and behavior.
  */
-function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: any) {
+function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onTogglePin, ...props }: any) {
   const trackRefFromContext = useMaybeTrackRefContext();
   const ref = trackRef || trackRefFromContext;
   const { localParticipant } = useLocalParticipant();
+  const remoteParticipants = useRemoteParticipants();
+
+  const isHost = useMemo(() => {
+    const all = [localParticipant, ...remoteParticipants];
+    const sorted = [...all].sort((a, b) => (a.joinedAt?.getTime() || 0) - (b.joinedAt?.getTime() || 0));
+    return sorted[0]?.identity === ref?.participant.identity;
+  }, [localParticipant, remoteParticipants, ref]);
 
   const isSpeaking = useIsSpeaking(ref?.participant);
   if (!ref) return null;
@@ -953,7 +1000,7 @@ function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: a
   } catch (e) {}
 
   return (
-    <div className={`relative w-full h-full ${className}`}>
+    <div className={`relative w-full h-full group ${className}`}>
       {/* IMPORTANT: We put the ParticipantTile directly here. 
          The CSS above handles making it 'contain' and 'big'.
       */}
@@ -969,6 +1016,10 @@ function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: a
           {ref.participant.identity === localParticipant.identity ? 'You' : ref.participant.identity.split('#')[0]}
         </span>
         
+        {isHost && (
+          <ShieldCheck size={12} className="text-blue-400" />
+        )}
+        
         {isSpeaking && (
           <div className="flex gap-[2px] items-center h-3 w-3">
             <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-1"></div>
@@ -978,9 +1029,19 @@ function CustomParticipantTile({ trackRef, className, raisedHands, ...props }: a
         )}
       </div>
 
+      {/* Pin/Spotlight Button (Top Left) - Only visible on hover */}
+      {onTogglePin && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
+          className={`absolute top-3 left-3 z-30 p-2 rounded-xl border border-white/10 backdrop-blur-xl transition-all shadow-lg opacity-0 group-hover:opacity-100 ${isPinned ? 'bg-blue-500 text-white opacity-100' : 'bg-[#202124]/60 text-white/70 hover:bg-[#202124]/90 hover:text-white'}`}
+        >
+          {isPinned ? <PinOff size={16} /> : <Pin size={16} />}
+        </button>
+      )}
+
       {/* Hand Raised Indicator */}
       {isHandRaised && (
-        <div className="absolute bottom-3 left-3 z-[40] bg-[#fbbc04] p-1.5 rounded-full shadow-xl animate-in zoom-in duration-300">
+        <div className="absolute bottom-3 right-3 z-[40] bg-[#fbbc04] p-1.5 rounded-full shadow-xl animate-in zoom-in duration-300">
           <Hand size={16} className="text-[#202124]" />
         </div>
       )}
