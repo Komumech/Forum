@@ -14,6 +14,7 @@ import {
   useRemoteParticipants,
   useDataChannel,
   TrackReference,
+  TrackReferenceOrPlaceholder,
   MediaDeviceMenu,
   useParticipantInfo,
   useMaybeTrackRefContext,
@@ -395,7 +396,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   [tracks, processedTracks, pinnedIdentities]);
 
   // Helper to determine if a track has active video
-  const isVideoActive = (track?: TrackReference) => 
+  const isVideoActive = (track?: TrackReferenceOrPlaceholder) => 
     track?.publication?.isEnabled && !track?.publication?.isMuted;
 
   return (
