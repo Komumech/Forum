@@ -218,13 +218,13 @@ export default function MeetingPage() {
   style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
   onDisconnected={() => router.push('/')}
 >
-  <MeetingRoomContent room={room} />
+<MeetingRoomContent room={room} token={token} />
 </LiveKitRoom>
     </main>
   );
 }
 
-function MeetingRoomContent({ room }: { room: string }) {
+function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const router = useRouter();
   const { user } = useAuth();
   const { localParticipant } = useLocalParticipant();
@@ -394,6 +394,10 @@ function MeetingRoomContent({ room }: { room: string }) {
     processedTracks[0],
   [tracks, processedTracks, pinnedIdentities]);
 
+  // Helper to determine if a track has active video
+  const isVideoActive = (track?: TrackReference) => 
+    track?.publication?.isEnabled && !track?.publication?.isMuted;
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-[#202124] relative">
       
@@ -455,7 +459,9 @@ function MeetingRoomContent({ room }: { room: string }) {
 
         /* Google Meet Style Spotlight/Speaking Border */
         .lk-participant-tile[data-lk-speaking="true"] {
-           box-shadow: none !important;
+           box-shadow: none !important; /* Removed blue speaking borders */
+           border: none !important;
+           outline: none !important;
         }
         
         .lk-participant-tile {
@@ -508,23 +514,27 @@ function MeetingRoomContent({ room }: { room: string }) {
 
       <div className="flex flex-1 h-full overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex-col"> 
         <div className="flex-1 h-full relative flex flex-col overflow-hidden min-h-0">
-            <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 overflow-hidden min-h-0">
+            <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-2 pb-20 overflow-hidden min-h-0">
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center max-h-full overflow-hidden">
                 {effectiveLayout === 'spotlight' && focusTrack ? (
-                  <div className="w-full h-full p-4 animate-in fade-in zoom-in-95 duration-1000 spotlight-view">
-                    <CustomParticipantTile 
-                      trackRef={focusTrack} 
-                      className="w-full h-full" 
-                      raisedHands={raisedHands}
-                      isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
-                      onTogglePin={() => togglePin(focusTrack.participant.identity)}
-                    />
+                  <div className="w-full h-full p-8 lg:p-16 animate-in fade-in zoom-in-95 duration-1000 spotlight-view flex items-center justify-center">
+                    <div className={`w-full ${isVideoActive(focusTrack) ? 'max-w-[640px]' : 'max-w-[800px]'} aspect-video shadow-2xl transition-all duration-500 rounded-2xl overflow-hidden`}>
+                      <CustomParticipantTile 
+                        trackRef={focusTrack} 
+                        className="w-full h-full" 
+                        raisedHands={raisedHands}
+                        isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
+                        onTogglePin={() => togglePin(focusTrack.participant.identity)}
+                      />
+                    </div>
                   </div>
                 ) : effectiveLayout === 'sidebar' && focusTrack ? (
-                  <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000 p-2">
+                  <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000 p-4">
                     {/* Main Spotlight Section */}
-                    <div className="flex-[3] h-full relative">
-                      <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} />
+                    <div className="flex-[3] h-full relative p-2 lg:p-4 flex items-center justify-center">
+                      <div className={`w-full ${isVideoActive(focusTrack) ? 'max-w-[640px]' : 'max-w-[800px]'} aspect-video shadow-2xl transition-all duration-500 rounded-2xl overflow-hidden`}>
+                        <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} onTogglePin={() => togglePin(focusTrack.participant.identity)} isPinned={pinnedIdentities.has(focusTrack.participant.identity)} />
+                      </div>
                     </div>
 
                     {/* Vertical Sidebar Section */}
@@ -572,9 +582,9 @@ function MeetingRoomContent({ room }: { room: string }) {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 w-full h-full min-h-0"> 
+                  <div className="flex-1 w-full h-full min-h-0 flex items-center justify-center"> 
                     <div 
-                      className="grid gap-3 w-full h-full transition-all duration-500"
+                      className={`grid gap-3 transition-all duration-500 ${mainGridTracks.length === 1 ? (isVideoActive(mainGridTracks[0]) ? 'max-w-[640px]' : 'max-w-[800px]') + ' w-full aspect-video self-center shadow-2xl' : 'w-full h-full'}`}
                       style={{ 
                         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
                         gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` 
@@ -595,7 +605,7 @@ function MeetingRoomContent({ room }: { room: string }) {
               </div>
         
         {/* TOP BRANDING BAR (Floating) */}
-        <div className="absolute top-6 left-6 z-50 pointer-events-auto flex items-center gap-3">
+        <div className="absolute top-4 left-6 z-50 pointer-events-auto flex items-center gap-3">
           <div className="flex items-center gap-2 glass-panel px-4 py-2.5 rounded-2xl">
             <div className="w-6 h-6 bg-indigo-500 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shadow-lg">F</div>
             <span className="text-white/90 text-sm font-semibold tracking-tight">Forum <span className="text-white/40 mx-1">|</span> {room}</span>
@@ -610,11 +620,11 @@ function MeetingRoomContent({ room }: { room: string }) {
         </div>
 
         {/* Connection State Overlay */}
-        {connectionState === ConnectionState.Connecting && (
+        {connectionState === ConnectionState.Connecting && token !== "" && (
           <div className="absolute inset-0 bg-[#202124] z-[200] flex items-center justify-center animate-in fade-in duration-300">
             <div className="flex flex-col items-center gap-4 text-white">
-              <div className="w-10 h-10 border-[3px] border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-medium tracking-wide">Connecting to meeting...</p>
+              <div className="w-8 h-8 border-[2px] border-white/20 border-t-white rounded-full animate-spin" />
+              <p className="text-xs font-medium tracking-widest uppercase opacity-50">Connecting...</p>
             </div>
           </div>
         )}
@@ -623,7 +633,7 @@ function MeetingRoomContent({ room }: { room: string }) {
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center animate-in fade-in duration-300">
             <div className="glass-panel p-8 rounded-3xl flex flex-col items-center gap-4 text-white">
               <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-medium tracking-wide text-center">Connection unstable.<br/>Attempting to reconnect...</p>
+              <p className="text-sm font-medium tracking-wide text-center">Network issue detected.<br/>Reconnecting...</p>
             </div>
           </div>
         )}
@@ -853,11 +863,11 @@ function MeetingRoomContent({ room }: { room: string }) {
 
 
         {/* Center: Main Taskbar */}
-        <div className="flex items-center gap-3 glass-panel p-2 rounded-[24px] pointer-events-auto">
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 glass-panel p-1.5 rounded-[22px] pointer-events-auto">
             <div className="flex items-center">
               <button 
                 onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
-                className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
+                className={`p-2.5 rounded-xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
               >
                 {localParticipant.isMicrophoneEnabled ? <Mic size={20} /> : <MicOff size={20} />}
               </button>
@@ -874,7 +884,7 @@ function MeetingRoomContent({ room }: { room: string }) {
             <div className="flex items-center">
               <button 
                 onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
-                className={`p-3.5 rounded-2xl transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
+                className={`p-2.5 rounded-xl transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
               >
                 {localParticipant.isCameraEnabled ? <VideoIcon size={20} /> : <VideoOff size={20} />}
               </button>
@@ -890,7 +900,7 @@ function MeetingRoomContent({ room }: { room: string }) {
 
             <button 
               onClick={toggleHandRaise}
-              className={`p-3.5 rounded-2xl transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124] shadow-lg shadow-yellow-500/20' : 'text-white hover:bg-white/10'}`}
+              className={`p-2.5 rounded-xl transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124] shadow-lg shadow-yellow-500/20' : 'text-white hover:bg-white/10'}`}
             >
               <Hand size={20} />
             </button>
@@ -899,68 +909,27 @@ function MeetingRoomContent({ room }: { room: string }) {
               onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled, {
                 resolution: ScreenSharePresets.h1080fps30.resolution,
               })}
-              className={`p-3.5 rounded-2xl transition-all hidden sm:flex ${localParticipant.isScreenShareEnabled ? 'bg-[#8ab4f8] text-[#202124] shadow-lg' : 'text-white hover:bg-white/10'}`}
+              className={`p-2.5 rounded-xl transition-all hidden sm:flex ${localParticipant.isScreenShareEnabled ? 'bg-[#8ab4f8] text-[#202124] shadow-lg' : 'text-white hover:bg-white/10'}`}
             >
               {localParticipant.isScreenShareEnabled ? <MonitorOff size={20} /> : <MonitorUp size={20} />}
             </button>
 
             <button 
               onClick={() => { if(window.innerWidth < 640) setIsMoreMenuOpen(!isMoreMenuOpen); else setActiveTab(activeTab === 'settings' ? null : 'settings'); }}
-              className={`p-3.5 rounded-2xl transition-all ${(activeTab === 'settings' || isMoreMenuOpen) ? 'bg-[#8ab4f8] text-[#202124]' : 'text-white hover:bg-white/10'}`}
+              className={`p-2.5 rounded-xl transition-all ${(activeTab === 'settings' || isMoreMenuOpen) ? 'bg-[#8ab4f8] text-[#202124]' : 'text-white hover:bg-white/10'}`}
             >
-              <MoreVertical size={22} /></button>
+              <MoreVertical size={20} /></button>
             
             {/* End Call Pill */}
             <div className="w-[1px] h-8 bg-white/10 mx-1" />
             <button 
               onClick={() => router.push('/')}
-              className="p-3.5 rounded-2xl bg-[#ea4335] hover:bg-[#d93025] text-white transition-all shadow-lg shadow-red-500/20 flex items-center justify-center"
+              className="p-2.5 rounded-xl bg-[#ea4335] hover:bg-[#d93025] text-white transition-all shadow-lg shadow-red-500/20 flex items-center justify-center"
             >
-              <PhoneOff size={22} />
+              <PhoneOff size={20} />
             </button>
         </div>
 
-        {/* Right: Side Taskbar (Tabs) */}
-        <div className="absolute right-8 hidden sm:flex items-center gap-2 glass-panel p-2 rounded-[24px] pointer-events-auto">
-          <button 
-            onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')}
-            className={`p-2.5 rounded-full transition-all ${activeTab === 'info' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
-          >
-            <Info size={22} />
-          </button>
-
-          {/* Stacked Avatars and Count */}
-          <button 
-            onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')}
-            className={`relative flex items-center gap-2 px-2 sm:px-3 py-1.5 rounded-full transition-all ${activeTab === 'users' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
-          >
-            <div className="flex -space-x-2 mr-1">
-              {[localParticipant, ...remoteParticipants].slice(0, 3).map((p, i) => {
-                const meta = getMetadata(p);
-                return (
-                  <div 
-                    key={p.sid || p.identity} 
-                    style={{ zIndex: 3 - i }}
-                    className="w-6 h-6 rounded-full border-2 border-[#202124] bg-indigo-500 overflow-hidden text-[10px] flex items-center justify-center font-bold"
-                  >
-                    {meta.avatar ? <img src={meta.avatar} className="w-full h-full object-cover" /> : p.identity.charAt(0).toUpperCase()}
-                  </div>
-                );
-              })}
-            </div>
-            <span className="text-xs sm:text-sm font-medium">
-              {[localParticipant, ...remoteParticipants].length}
-            </span>
-          </button>
-
-          <button 
-            onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')}
-            className={`p-2.5 rounded-full transition-all ${activeTab === 'chat' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
-          >
-            <MessageSquare size={22} />
-          </button>
-        </div>
-        
         <RoomAudioRenderer />
       </div>
     </div>
@@ -1049,7 +1018,7 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
       {/* Overlay for when camera is off */}
       {isVideoOff && (
         <div className="absolute inset-0 flex items-center justify-center bg-[#3c4043] z-[10] rounded-2xl">
-          <div className="w-20 h-20 md:w-32 md:h-32 rounded-full bg-indigo-600 flex items-center justify-center text-3xl font-bold text-white">
+          <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl">
             {avatarUrl ? <img src={avatarUrl} className="rounded-full w-full h-full object-cover" /> : ref.participant.identity.charAt(0)}
           </div>
         </div>
