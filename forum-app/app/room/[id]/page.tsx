@@ -270,7 +270,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   
   // Google Meet logic: If someone joins, shift to Sidebar (Spotlight + vertical list)
   const effectiveLayout = layoutMode === 'auto' 
-    ? (isScreenSharing || hasPins || remoteParticipants.length > 0 ? 'sidebar' : 'tiled') 
+    ? (isScreenSharing || hasPins ? 'sidebar' : 'tiled') 
     : layoutMode;
 
   // Auto-scroll chat
@@ -358,11 +358,17 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
       
       const aPinned = pinnedIdentities.has(aId) ? 1 : 0;
       const bPinned = pinnedIdentities.has(bId) ? 1 : 0;
-      if (aPinned !== bPinned) return bPinned - aPinned;
+      if (aPinned !== bPinned) return bPinned - aPinned; // Pinned first
+
+      // "AI" Alignment: Prioritize active speakers in the sorting order
+      if (a.participant.isSpeaking !== b.participant.isSpeaking) return b.participant.isSpeaking ? 1 : -1;
+
+      // Local participant always goes last to prevent "swapping" positions with guests
+      if (a.participant.isLocal !== b.participant.isLocal) return a.participant.isLocal ? 1 : -1;
 
       return aId.localeCompare(bId);
     }).slice(0, maxParticipants);
-  }, [tracks, pinnedIdentities, hideNonVideo, maxParticipants]);
+  }, [tracks, pinnedIdentities, hideNonVideo, maxParticipants, localParticipant.identity, remoteParticipants]);
 
   // Stacking Rule: 1:1 Floating Self-View
   const totalPeople = remoteParticipants.length + 1;
@@ -391,7 +397,6 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const focusTrack = useMemo(() => 
     tracks.find(t => t.source === Track.Source.ScreenShare && !t.participant.isLocal) || 
     processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || 
-    processedTracks.find(t => t.participant.isSpeaking) || 
     processedTracks[0],
   [tracks, processedTracks, pinnedIdentities]);
 
@@ -429,7 +434,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
         /* 3. The "No-Stretch, No-Crop, Big-Video" Rule */
         .lk-participant-tile video {
           display: block !important;
-          object-fit: cover !important; /* Changed to cover for a more modern immersive feel */
+          object-fit: contain !important; /* Changed to contain to preserve rectangular aspect ratio without cropping */
           width: 100% !important;
           height: 100% !important;
           max-width: 100% !important;
@@ -515,25 +520,13 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
       <div className="flex flex-1 h-full overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex-col"> 
         <div className="flex-1 h-full relative flex flex-col overflow-hidden min-h-0">
-            <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-2 pb-20 overflow-hidden min-h-0">
+            <div className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-2 pb-24 overflow-hidden min-h-0">
               <div className="lk-video-conference-inner w-full max-w-[1600px] mx-auto h-full flex items-center justify-center max-h-full overflow-hidden">
-                {effectiveLayout === 'spotlight' && focusTrack ? (
-                  <div className="w-full h-full p-8 lg:p-16 animate-in fade-in zoom-in-95 duration-1000 spotlight-view flex items-center justify-center">
-                    <div className={`w-full ${isVideoActive(focusTrack) ? 'max-w-[640px]' : 'max-w-[800px]'} aspect-video shadow-2xl transition-all duration-500 rounded-2xl overflow-hidden`}>
-                      <CustomParticipantTile 
-                        trackRef={focusTrack} 
-                        className="w-full h-full" 
-                        raisedHands={raisedHands}
-                        isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
-                        onTogglePin={() => togglePin(focusTrack.participant.identity)}
-                      />
-                    </div>
-                  </div>
-                ) : effectiveLayout === 'sidebar' && focusTrack ? (
+                {(effectiveLayout === 'sidebar' || effectiveLayout === 'spotlight') && focusTrack ? (
                   <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000 p-4">
                     {/* Main Spotlight Section */}
                     <div className="flex-[3] h-full relative p-2 lg:p-4 flex items-center justify-center">
-                      <div className={`w-full ${isVideoActive(focusTrack) ? 'max-w-[640px]' : 'max-w-[800px]'} aspect-video shadow-2xl transition-all duration-500 rounded-2xl overflow-hidden`}>
+                      <div className={`w-full ${isVideoActive(focusTrack) ? 'max-w-[720px]' : 'max-w-[900px]'} aspect-video h-auto shadow-2xl transition-all duration-500 rounded-2xl overflow-hidden`}>
                         <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} onTogglePin={() => togglePin(focusTrack.participant.identity)} isPinned={pinnedIdentities.has(focusTrack.participant.identity)} />
                       </div>
                     </div>
@@ -585,7 +578,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
                 ) : (
                   <div className="flex-1 w-full h-full min-h-0 flex items-center justify-center"> 
                     <div 
-                      className={`grid gap-3 transition-all duration-500 ${mainGridTracks.length === 1 ? (isVideoActive(mainGridTracks[0]) ? 'max-w-[640px]' : 'max-w-[800px]') + ' w-full aspect-video self-center shadow-2xl' : 'w-full h-full'}`}
+                      className={`grid gap-3 transition-all duration-500 ${mainGridTracks.length === 1 ? (isVideoActive(mainGridTracks[0]) ? 'max-w-[720px]' : 'max-w-[900px]') + ' w-full aspect-video h-auto self-center shadow-2xl' : 'w-full h-full'}`}
                       style={{ 
                         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
                         gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` 
@@ -914,6 +907,48 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
             >
               {localParticipant.isScreenShareEnabled ? <MonitorOff size={20} /> : <MonitorUp size={20} />}
             </button>
+
+            <div className="w-[1px] h-6 bg-white/10 mx-1 hidden sm:block" />
+
+            {/* Combined Tab Buttons (Info, Users, Chat) */}
+            <div className="hidden sm:flex items-center gap-1">
+              <button 
+                onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')}
+                className={`p-2.5 rounded-xl transition-all ${activeTab === 'info' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
+              >
+                <Info size={20} />
+              </button>
+
+              <button 
+                onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')}
+                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-all ${activeTab === 'users' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
+              >
+                <div className="flex -space-x-2">
+                  {[localParticipant, ...remoteParticipants].slice(0, 3).map((p, i) => {
+                    const meta = getMetadata(p);
+                    return (
+                      <div 
+                        key={p.sid || p.identity} 
+                        className="w-5 h-5 rounded-full border border-[#202124] bg-indigo-500 overflow-hidden text-[8px] flex items-center justify-center font-bold"
+                        style={{ zIndex: 3 - i }}
+                      >
+                        {meta.avatar ? <img src={meta.avatar} className="w-full h-full object-cover" /> : p.identity.charAt(0).toUpperCase()}
+                      </div>
+                    );
+                  })}
+                </div>
+                <span className="text-xs font-medium">{[localParticipant, ...remoteParticipants].length}</span>
+              </button>
+
+              <button 
+                onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')}
+                className={`p-2.5 rounded-xl transition-all ${activeTab === 'chat' ? 'text-[#8ab4f8] bg-[#8ab4f8]/20' : 'text-white hover:bg-white/10'}`}
+              >
+                <MessageSquare size={20} />
+              </button>
+            </div>
+
+            <div className="w-[1px] h-6 bg-white/10 mx-1 hidden sm:block" />
 
             <button 
               onClick={() => { if(window.innerWidth < 640) setIsMoreMenuOpen(!isMoreMenuOpen); else setActiveTab(activeTab === 'settings' ? null : 'settings'); }}
