@@ -49,7 +49,10 @@ import {
   Maximize,
   ShieldCheck,
   UserX,
-  VolumeX
+  VolumeX,
+  Volume2,
+  Bell,
+  Monitor
 } from 'lucide-react';
 
 export default function MeetingPage() {
@@ -137,17 +140,29 @@ export default function MeetingPage() {
             padding: 0 !important;
           }
 
-          /* Global Sleek Scrollbars */
-          * {
+          /* Global BG-less Sleek Scrollbars */
+          html, body, .custom-scroll, * {
             scrollbar-width: thin;
             scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
           }
-          *::-webkit-scrollbar { width: 6px; height: 6px; }
-          *::-webkit-scrollbar-track { background: transparent; }
+          *::-webkit-scrollbar {
+            width: 6px; 
+            height: 6px; 
+          }
+          *::-webkit-scrollbar-track { 
+            background: transparent !important; 
+            box-shadow: none !important;
+            border: none !important;
+          }
           *::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.15);
+            background: #3c4043 !important;
+            border: 1px solid #000;
             border-radius: 20px;
-            backdrop-filter: blur(4px);
+          }
+          
+          /* Ensure settings container specifically has no scrollbar bg */
+          .custom-scroll {
+            background-clip: padding-box;
           }
         `}</style>
         <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center gap-12 bg-white p-8 md:p-12 rounded-[24px] shadow-sm border border-slate-100">
@@ -155,8 +170,8 @@ export default function MeetingPage() {
           <div className="flex-1 w-full relative aspect-video bg-[#202124] rounded-2xl overflow-hidden shadow-inner">
             <video ref={videoRef} autoPlay muted playsInline className="scale-x-[-1]" />
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
-               <div className="p-4 rounded-full bg-black/40 backdrop-blur-md text-white border border-white/10"><Mic size={24} /></div>
-               <div className="p-4 rounded-full bg-black/40 backdrop-blur-md text-white border border-white/10"><VideoIcon size={24} /></div>
+               <div className="p-4 rounded-full bg-black/80 backdrop-blur-md text-white border border-white/10 shadow-xl"><Mic size={24} /></div>
+               <div className="p-4 rounded-full bg-black/80 backdrop-blur-md text-white border border-white/10 shadow-xl"><VideoIcon size={24} /></div>
             </div>
           </div>
 
@@ -233,6 +248,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const { chatMessages, send: sendChat } = useChat();
   const connectionState = useConnectionState();
   
+  const processorRef = useRef<any>(null);
   // Fix: useDataChannel returns 'send', not 'publish'
   const { send: sendData } = useDataChannel("hand-raise");
 
@@ -259,18 +275,114 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const [maxParticipants, setMaxParticipants] = useState(16);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
+  // Advanced Settings States
+  const VIRTUAL_BGS = [
+    { id: 'none', label: 'None', url: '' },
+    { id: 'blur', label: 'Blur', url: '' },
+    { id: 'office', label: 'Office', url: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=800&q=80' },
+    { id: 'nature', label: 'Nature', url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=800&q=80' }
+  ];
+  const [settingsCategory, setSettingsCategory] = useState<'video' | 'audio' | 'general' | 'advanced' | 'effects'>('video');
+  const [videoMirroring, setVideoMirroring] = useState(true);
+  const [noiseCancellation, setNoiseCancellation] = useState(true);
+  const [echoCancellation, setEchoCancellation] = useState(true);
+  const [showParticipantNames, setShowParticipantNames] = useState(true);
+  const [autoGainControl, setAutoGainControl] = useState(true);
+  const [showClock, setShowClock] = useState(true);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMic, setSelectedMic] = useState<string>("");
+  const [selectedSpeaker, setSelectedSpeaker] = useState<string>("");
+  const [selectedCam, setSelectedCam] = useState<string>("");
+
+  const [inputLevel, setInputLevel] = useState(0);
+  const [selectedResolution, setSelectedResolution] = useState<'360p' | '720p'>('720p');
+  const [receiveResolution, setReceiveResolution] = useState<'360p' | '720p'>('720p');
+  const [lowLightCorrection, setLowLightCorrection] = useState(true);
+  const [reactionSounds, setReactionSounds] = useState(true);
+  const [selectedBg, setSelectedBg] = useState('none');
+  const [customBgs, setCustomBgs] = useState<{id: string, label: string, url: string}[]>([]);
+
+  // Persistent Preferences: Load on Mount
+  useEffect(() => {
+    const saved = localStorage.getItem(`meeting_prefs_${user?.uid || 'guest'}`);
+    if (saved) {
+      try {
+        const p = JSON.parse(saved);
+        if (p.layoutMode) setLayoutMode(p.layoutMode);
+        if (p.hideNonVideo !== undefined) setHideNonVideo(p.hideNonVideo);
+        if (p.maxParticipants) setMaxParticipants(p.maxParticipants);
+        if (p.videoMirroring !== undefined) setVideoMirroring(p.videoMirroring);
+        if (p.noiseCancellation !== undefined) setNoiseCancellation(p.noiseCancellation);
+        if (p.echoCancellation !== undefined) setEchoCancellation(p.echoCancellation);
+        if (p.showParticipantNames !== undefined) setShowParticipantNames(p.showParticipantNames);
+        if (p.autoGainControl !== undefined) setAutoGainControl(p.autoGainControl);
+        if (p.showClock !== undefined) setShowClock(p.showClock);
+        if (p.selectedResolution) setSelectedResolution(p.selectedResolution);
+        if (p.lowLightCorrection !== undefined) setLowLightCorrection(p.lowLightCorrection);
+        if (p.reactionSounds !== undefined) setReactionSounds(p.reactionSounds);
+        if (p.selectedBg) setSelectedBg(p.selectedBg);
+        if (p.customBgs) setCustomBgs(p.customBgs);
+      } catch (e) {
+        console.error("Failed to load preferences", e);
+      }
+    }
+  }, [user]);
+
+  // Persistent Preferences: Save on Change
+  useEffect(() => {
+    const prefs = {
+      layoutMode, hideNonVideo, maxParticipants, videoMirroring,
+      noiseCancellation, echoCancellation, showParticipantNames,
+      autoGainControl, showClock, selectedResolution,
+      lowLightCorrection, reactionSounds, selectedBg, customBgs
+    };
+    localStorage.setItem(`meeting_prefs_${user?.uid || 'guest'}`, JSON.stringify(prefs));
+  }, [
+    layoutMode, hideNonVideo, maxParticipants, videoMirroring,
+    noiseCancellation, echoCancellation, showParticipantNames,
+    autoGainControl, showClock, selectedResolution,
+    lowLightCorrection, reactionSounds, selectedBg, customBgs, user
+  ]);
+
   const getMetadata = (p: Participant) => {
     try { return p.metadata ? JSON.parse(p.metadata) : {}; }
     catch { return {}; }
   };
 
+  // Fetch available devices and monitor audio level for settings preview
+  useEffect(() => {
+    const getDevices = async () => {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      setDevices(devs);
+      
+      // Auto-select current devices if not set
+      if (!selectedMic) setSelectedMic(devs.find(d => d.kind === 'audioinput')?.deviceId || "");
+      if (!selectedSpeaker) setSelectedSpeaker(devs.find(d => d.kind === 'audiooutput')?.deviceId || "");
+      if (!selectedCam) setSelectedCam(devs.find(d => d.kind === 'videoinput')?.deviceId || "");
+    };
+    getDevices();
+    navigator.mediaDevices.addEventListener('devicechange', getDevices);
+    
+    let interval: NodeJS.Timeout;
+    if (activeTab === 'settings') {
+      interval = setInterval(() => {
+        setInputLevel(localParticipant.audioLevel || 0);
+      }, 100);
+    }
+
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', getDevices);
+      if (interval) clearInterval(interval);
+    };
+  }, [activeTab, localParticipant, selectedMic, selectedSpeaker, selectedCam]);
+
   // Determine effective layout based on Auto logic
   const isScreenSharing = tracks.some(t => t.source === Track.Source.ScreenShare && t.participant.identity !== localParticipant.identity);
   const hasPins = pinnedIdentities.size > 0;
   
-  // Google Meet logic: If someone joins, shift to Sidebar (Spotlight + vertical list)
+  // AI Auto-Pin: Automatically shift to Sidebar view if guests are present, someone is pinned, or sharing screen
   const effectiveLayout = layoutMode === 'auto' 
-    ? (isScreenSharing || hasPins ? 'sidebar' : 'tiled') 
+    ? (isScreenSharing || hasPins || remoteParticipants.length > 0 ? 'sidebar' : 'tiled') 
     : layoutMode;
 
   // Auto-scroll chat
@@ -291,19 +403,117 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
     try {
       sendData(encoder.encode(JSON.stringify({ type: 'hand-raise', raised: newState })), { reliable: true });
       setRaisedHands(prev => ({ ...prev, [localParticipant.identity]: newState }));
+      
+      // Play local sound for self
+      if (newState && reactionSounds) {
+        playReactionSound();
+      }
     } catch (err) {
       console.error("Failed to send hand-raise data", err);
     }
   };
 
-  // Fix: Manually enable tracks ONLY after the user is admitted.
-  // This prevents the "engine not connected within timeout" error.
+  // Play sound helper
+  const playReactionSound = () => {
+    const audio = new Audio('https://www.soundjay.com/buttons_c2026/sounds/button-10.mp3'); 
+    audio.volume = 0.4;
+    audio.play().catch(() => {});
+  };
+
+  // Watch for remote hand raises to play sound
   useEffect(() => {
-    if (localParticipant) {
-      localParticipant.setCameraEnabled(true);
-      localParticipant.setMicrophoneEnabled(true);
+    if (reactionSounds) {
+      const activeHands = Object.values(raisedHands).filter(v => v).length;
+      if (activeHands > 0) playReactionSound();
     }
-  }, [localParticipant]);
+  }, [raisedHands, reactionSounds]);
+
+  // Handle Speaker Testing
+  const handleTestSpeakers = async () => {
+    const audio = new Audio('https://www.soundjay.com/buttons/beep-01a.mp3');
+    try {
+      if (selectedSpeaker && 'setSinkId' in audio) {
+        await (audio as any).setSinkId(selectedSpeaker);
+      }
+      await audio.play();
+    } catch (err) {
+      console.error("Speaker test failed:", err);
+    }
+  };
+
+  // Handle Background Upload
+  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        const newBg = {
+          id: `custom-${Date.now()}`,
+          label: 'Custom Image',
+          url: base64
+        };
+        setCustomBgs(prev => [newBg, ...prev].slice(0, 4));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Reactive Audio Constraints: Ensures Noise Suppression and AGC updates live
+  useEffect(() => {
+    if (localParticipant && connectionState === ConnectionState.Connected) {
+      localParticipant.setMicrophoneEnabled(true, {
+        noiseSuppression: noiseCancellation,
+        echoCancellation: echoCancellation,
+        autoGainControl: autoGainControl,
+      });
+    }
+  }, [localParticipant, noiseCancellation, echoCancellation, autoGainControl, connectionState]);
+
+  // Video Effects Logic (Background Blur & Virtual BGs)
+  useEffect(() => {
+    const applyVideoProcessor = async () => {
+      try {
+        if (!localParticipant || !localParticipant.isCameraEnabled) return;
+        const track = localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+        if (!track) return;
+
+        // Clean up previous processor if it exists
+        if (processorRef.current) {
+          await track.stopProcessor();
+          processorRef.current = null;
+        }
+
+        if (selectedBg === 'none') {
+          return;
+        } else if (selectedBg === 'blur') {
+          // Dynamically import to keep bundle small
+          const { BackgroundBlur } = await import('@livekit/track-processors');
+          processorRef.current = BackgroundBlur(10); // 10 is the blur radius
+          await track.setProcessor(processorRef.current);
+          console.log("Blur applied");
+        } else {
+          const allBgs = [...VIRTUAL_BGS, ...customBgs];
+          const bg = allBgs.find(b => b.id === selectedBg);
+          if (bg?.url) {
+            const { VirtualBackground } = await import('@livekit/track-processors');
+            // AI Optimization: Background removal works best with a high-quality image
+            processorRef.current = VirtualBackground(bg.url);
+            await track.setProcessor(processorRef.current);
+            console.log(`Virtual BG applied: ${bg.label}`);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to apply video processor:", error);
+        setSelectedBg('none');
+      }
+    };
+    applyVideoProcessor();
+    
+    return () => {
+      // Optional: Cleanup if component unmounts
+    };
+  }, [selectedBg, localParticipant]);
 
   // Stabilize the host logic: The person who joined first is the host.
   const isHost = useMemo(() => {
@@ -345,10 +555,12 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
     if (!tracks || tracks.length === 0) return [];
 
     const filtered = tracks.filter(t => {
-      // 2. Hide Non-Video Filter
       if (hideNonVideo && !t.participant?.isCameraEnabled && !t.participant?.isLocal) return false;
-      
       return true;
+    }).filter((t, i, self) => {
+      // Ensure each participant only appears once by SID to prevent pinning glitches
+      const firstIndex = self.findIndex(prev => prev.participant.sid === t.participant.sid);
+      return i === firstIndex;
     });
 
     return filtered.sort((a, b) => {
@@ -387,16 +599,14 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   };
 
   // Show all tracks in the grid, including local, so you can pin yourself
-  const mainGridTracks = useMemo(() => {
-    return processedTracks.filter((t, i, self) => self.findIndex(prev => prev.participant.sid === t.participant.sid) === i);
-  }, [processedTracks]);
-
+  const mainGridTracks = processedTracks;
   const { cols, rows } = getGridDimensions(mainGridTracks.length);
 
   // Priority Focus logic: Screenshare > Pinned > Active Speaker
   const focusTrack = useMemo(() => 
     tracks.find(t => t.source === Track.Source.ScreenShare && !t.participant.isLocal) || 
     processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || 
+    // AI Auto-Focus: The sorting logic in processedTracks already promotes speakers to index 0
     processedTracks[0],
   [tracks, processedTracks, pinnedIdentities]);
 
@@ -476,7 +686,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
         /* Glassmorphism Classes */
         .glass-panel {
-          background: rgba(103, 113, 142, 0.4) !important;
+          background: rgba(30, 31, 35, 0.7) !important;
           backdrop-filter: blur(24px) saturate(180%) !important;
           border: 1px solid rgba(255, 255, 255, 0.1) !important;
           box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
@@ -484,7 +694,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
         /* Device Menu Styling */
         .lk-device-menu {
-          background: rgba(32, 33, 36, 0.9) !important;
+          background: rgba(20, 21, 23, 0.95) !important;
           backdrop-filter: blur(24px) !important;
           border: 1px solid rgba(255, 255, 255, 0.15) !important;
           border-radius: 16px !important;
@@ -509,13 +719,19 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
         /* Device Menu Labels */
         .lk-device-menu h6 {
-          color: rgba(255, 255, 255, 0.4) !important;
+          color: #ffffff !important;
+          font-weight: 700 !important;
           font-size: 11px !important;
           text-transform: uppercase !important;
           padding: 8px 14px !important;
           margin: 0 !important;
           letter-spacing: 0.05em !important;
         }
+      `}</style>
+
+      <style jsx global>{`
+        /* Specific fix for Settings Scrollbars */
+        .custom-scroll::-webkit-scrollbar-track { background: transparent !important; }
       `}</style>
 
       <div className="flex flex-1 h-full overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex-col"> 
@@ -525,17 +741,16 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
                 {(effectiveLayout === 'sidebar' || effectiveLayout === 'spotlight') && focusTrack ? (
                   <div className="flex w-full h-full gap-4 animate-in fade-in duration-1000 p-4">
                     {/* Main Spotlight Section */}
-                    <div className="flex-[3] h-full relative p-2 lg:p-4 flex items-center justify-center">
+                    <div className="flex-1 h-full relative p-2 lg:p-4 flex items-center justify-center min-w-0">
                       <div className={`w-full ${isVideoActive(focusTrack) ? 'max-w-[720px]' : 'max-w-[900px]'} aspect-video h-auto shadow-2xl transition-all duration-500 rounded-2xl overflow-hidden`}>
                         <CustomParticipantTile trackRef={focusTrack} className="w-full h-full" raisedHands={raisedHands} onTogglePin={() => togglePin(focusTrack.participant.identity)} isPinned={pinnedIdentities.has(focusTrack.participant.identity)} />
                       </div>
                     </div>
 
                     {/* Vertical Sidebar Section */}
-                    <div className="w-[200px] lg:w-[280px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 hidden md:flex flex-col">
+                    <div className="w-[160px] sm:w-[220px] lg:w-[260px] h-full overflow-y-auto custom-scroll space-y-3 pr-2 flex flex-col shrink-0">
                       {processedTracks
-                        .filter(t => t.participant.identity !== focusTrack.participant.identity)
-                        .slice(0, 5) // Show up to 5 individual tiles
+                        .filter(t => t.participant.sid !== focusTrack.participant.sid)
                         .map(t => (
                           <div key={t.participant.identity} className="aspect-video w-full shrink-0">
                             <CustomParticipantTile 
@@ -546,33 +761,6 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
                             />
                           </div>
                         ))}
-
-                      {/* THE OTHERS STACK */}
-                      {processedTracks.length > 6 && (
-                        <div className="bg-[#3c4043] aspect-video rounded-2xl flex flex-col items-center justify-center p-4 gap-3 border border-white/5 shrink-0 shadow-lg">
-                          <div className="flex -space-x-3">
-                            {processedTracks.slice(6, 9).map((t, idx) => {
-                              const meta = getMetadata(t.participant);
-                              return (
-                                <div 
-                                  key={t.participant.identity} 
-                                  className="w-10 h-10 rounded-full border-2 border-[#3c4043] bg-indigo-600 flex items-center justify-center text-[12px] font-bold text-white overflow-hidden shadow-md"
-                                  style={{ zIndex: 3 - idx }}
-                                >
-                                  {meta.avatar ? (
-                                    <img src={meta.avatar} className="w-full h-full object-cover" />
-                                  ) : (
-                                    t.participant.identity.charAt(0).toUpperCase()
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <span className="text-white/70 text-[13px] font-medium tracking-wide">
-                            +{processedTracks.length - 6} others
-                          </span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 ) : (
@@ -590,6 +778,8 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
                           trackRef={t}
                           raisedHands={raisedHands}
                           isPinned={pinnedIdentities.has(t.participant.identity)}
+                          mirror={t.participant.isLocal && videoMirroring}
+                          showName={showParticipantNames}
                           onTogglePin={() => togglePin(t.participant.identity)}
                         />
                       ))}
@@ -607,8 +797,8 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
           
           {/* Clock & Connection Quality moved here to clear the bottom-left */}
           <div className="hidden md:flex items-center gap-3 glass-panel px-4 py-2.5 rounded-2xl text-white/80 text-sm font-medium">
-            <span className="opacity-60">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-            <div className="w-[1px] h-3 bg-white/10" />
+            {showClock && <span className="opacity-60">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+            {showClock && <div className="w-[1px] h-3 bg-white/10" />}
             <ConnectionQualityIndicator participant={localParticipant} />
           </div>
         </div>
@@ -766,42 +956,240 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
                 </div>
               )}
               {activeTab === 'settings' && (
-                <div className="space-y-8">
-                  <div className="space-y-4">
-                    <p className="text-[12px] font-bold text-[#5f6368] uppercase tracking-wider">Change layout</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      {['auto', 'tiled', 'sidebar', 'spotlight'].map((type) => (
-                        <button
-                          key={type}
-                          onClick={() => setLayoutMode(type as any)}
-                          className={`p-4 rounded-xl border text-sm font-medium transition-all flex flex-col items-center gap-2 ${layoutMode === type ? 'border-[#1a73e8] bg-blue-50 text-[#1a73e8]' : 'border-slate-200 text-[#5f6368] hover:bg-slate-50'}`}
-                        >
-                          <LayoutIcon size={20} />
-                          <span className="capitalize">{type}</span>
-                        </button>
-                      ))}
-                    </div>
+                <div className="flex flex-col h-full">
+                  {/* Category Tabs */}
+                  <div className="flex border-b border-slate-100 mb-6 shrink-0 overflow-x-auto no-scrollbar">
+                    {(['video', 'audio', 'general', 'effects'] as const).map((cat, idx) => (
+                      <button
+                        key={cat}
+                        onClick={() => setSettingsCategory(cat)}
+                        className={`px-4 pb-3 text-[11px] font-bold uppercase tracking-widest transition-all border-b-2 whitespace-nowrap ${
+                          settingsCategory === cat 
+                            ? 'border-[#1a73e8] text-[#1a73e8]' 
+                            : 'border-transparent text-[#5f6368] hover:text-[#202124]'
+                        }`}
+                      >
+                        {cat === 'effects' ? 'Visual Effects' : cat}
+                      </button>
+                    ))}
                   </div>
 
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <p className="text-[12px] font-bold text-[#5f6368] uppercase tracking-wider">Tiles ({maxParticipants})</p>
-                    </div>
-                    <input 
-                      type="range" min="6" max="49" value={maxParticipants}
-                      onChange={(e) => setMaxParticipants(parseInt(e.target.value))}
-                      className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#1a73e8]"
-                    />
-                  </div>
+                  <div className="flex-1 overflow-y-auto pr-1 custom-scroll space-y-10 pb-8">
+                    {settingsCategory === 'video' && (
+                      <div className="space-y-10">
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-bold text-black uppercase tracking-widest">Camera Source</label>
+                          <select 
+                            value={selectedCam}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setSelectedCam(id);
+                              localParticipant.setCameraEnabled(true, { deviceId: id });
+                            }}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-black font-medium"
+                          >
+                            {devices.filter(d => d.kind === 'videoinput').map(d => (
+                              <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0,5)}`}</option>
+                            ))}
+                          </select>
+                        </div>
 
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-sm font-medium text-[#3c4043]">Hide non-video participants</span>
-                    <button 
-                      onClick={() => setHideNonVideo(!hideNonVideo)}
-                      className={`w-10 h-5 rounded-full transition-colors relative ${hideNonVideo ? 'bg-[#1a73e8]' : 'bg-slate-300'}`}
-                    >
-                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${hideNonVideo ? 'left-6' : 'left-1'}`} />
-                    </button>
+                        <div className="space-y-3">
+                          <label className="text-[11px] font-bold text-black uppercase tracking-widest">Send Resolution (HD)</label>
+                          <div className="flex gap-2">
+                            {(['360p', '720p'] as const).map(res => (
+                              <button
+                                key={res}
+                                onClick={() => setSelectedResolution(res)}
+                                className={`flex-1 py-2 rounded-lg border text-[13px] font-medium transition-all ${
+                                  selectedResolution === res ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                                }`}
+                              >
+                                {res === '720p' ? 'High Definition (720p)' : 'Standard (360p)'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-2 border-t border-slate-100 pt-6">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <span className="text-sm font-bold text-black">Mirror my video</span>
+                              <p className="text-[11px] text-slate-600">Horizontally flip your self-view</p>
+                            </div>
+                            <button onClick={() => setVideoMirroring(!videoMirroring)} className={`w-10 h-5 rounded-full transition-colors relative ${videoMirroring ? 'bg-[#1a73e8]' : 'bg-slate-300'}`}>
+                              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${videoMirroring ? 'left-6' : 'left-1'}`} />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <span className="text-sm font-bold text-black">Adjust for low light</span>
+                              <p className="text-[11px] text-slate-600">Automatically brighten your video</p>
+                            </div>
+                            <button onClick={() => setLowLightCorrection(!lowLightCorrection)} className={`w-10 h-5 rounded-full transition-colors relative ${lowLightCorrection ? 'bg-[#1a73e8]' : 'bg-slate-300'}`}>
+                              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${lowLightCorrection ? 'left-6' : 'left-1'}`} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsCategory === 'audio' && (
+                      <div className="space-y-10">
+                        <div className="space-y-4">
+                          <label className="text-[11px] font-bold text-black uppercase tracking-widest">Microphone</label>
+                          <select 
+                            value={selectedMic}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setSelectedMic(id);
+                              localParticipant.setMicrophoneEnabled(true, { deviceId: id });
+                            }}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none text-black !text-black font-medium"
+                          >
+                            {devices.filter(d => d.kind === 'audioinput').map(d => (
+                              <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.slice(0,5)}`}</option>
+                            ))}
+                          </select>
+                          <div className="flex items-center gap-2 mt-3 px-1">
+                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden flex gap-[2px]">
+                              {[...Array(15)].map((_, i) => (
+                                <div key={i} className={`flex-1 h-full transition-colors ${inputLevel > (i / 15) ? (i > 11 ? 'bg-red-400' : 'bg-blue-500') : 'bg-slate-200'}`} />
+                              ))}
+                            </div>
+                            <Mic size={14} className={inputLevel > 0.05 ? "text-blue-500" : "text-slate-400"} />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-black uppercase tracking-widest">Speaker</label>
+                            <select 
+                              value={selectedSpeaker}
+                              onChange={(e) => setSelectedSpeaker(e.target.value)}
+                              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none text-black !text-black font-medium"
+                            >
+                              {devices.filter(d => d.kind === 'audiooutput').map(d => (
+                                <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${d.deviceId.slice(0,5)}`}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <button 
+                            onClick={handleTestSpeakers}
+                            className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors uppercase border border-slate-200"
+                          >
+                            Test Speakers
+                          </button>
+                        </div>
+
+                        <div className="space-y-4 pt-4 border-t border-slate-100">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <span className="text-sm font-bold text-black">Noise suppression</span>
+                              <p className="text-[11px] text-slate-600">Filter background noise</p>
+                            </div>
+                            <button onClick={() => setNoiseCancellation(!noiseCancellation)} className={`w-10 h-5 rounded-full transition-colors relative ${noiseCancellation ? 'bg-[#1a73e8]' : 'bg-slate-300'}`}>
+                              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${noiseCancellation ? 'left-6' : 'left-1'}`} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsCategory === 'general' && (
+                      <div className="space-y-10">
+                        <div className="space-y-4">
+                          <label className="text-[11px] font-bold text-black uppercase tracking-widest">Layout Preference</label>
+                          <div className="grid grid-cols-2 gap-3">
+                            {['auto', 'tiled', 'sidebar', 'spotlight'].map((type) => (
+                              <button
+                                key={type}
+                                onClick={() => setLayoutMode(type as any)}
+                                className={`p-4 rounded-xl border text-[13px] font-medium transition-all flex flex-col items-center gap-2 ${layoutMode === type ? 'border-[#1a73e8] bg-blue-50 text-[#1a73e8]' : 'border-slate-200 text-[#5f6368] hover:bg-slate-50'}`}
+                              >
+                                <LayoutIcon size={20} />
+                                <span className="capitalize">{type}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <label className="text-[11px] font-bold text-black uppercase tracking-widest">Maximum Tiles ({maxParticipants})</label>
+                          <input 
+                            type="range" min="6" max="49" value={maxParticipants}
+                            onChange={(e) => setMaxParticipants(parseInt(e.target.value))}
+                            className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#1a73e8]"
+                          />
+                        </div>
+
+                        <div className="space-y-4 pt-2 border-t border-slate-100 pt-6">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-bold text-black">Hide non-video participants</span>
+                            <button onClick={() => setHideNonVideo(!hideNonVideo)} className={`w-10 h-5 rounded-full transition-colors relative ${hideNonVideo ? 'bg-[#1a73e8]' : 'bg-slate-300'}`}>
+                              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${hideNonVideo ? 'left-6' : 'left-1'}`} />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-bold text-black">Show meeting clock</span>
+                            <button onClick={() => setShowClock(!showClock)} className={`w-10 h-5 rounded-full transition-colors relative ${showClock ? 'bg-[#1a73e8]' : 'bg-slate-300'}`}>
+                              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${showClock ? 'left-6' : 'left-1'}`} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {settingsCategory === 'effects' && (
+                      <div className="space-y-10">
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-black uppercase tracking-widest">Visual Effects</label>
+                            <label className="cursor-pointer bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-blue-100 transition-colors uppercase">
+                              Upload Image
+                              <input type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
+                            </label>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            {customBgs.map((bg) => (
+                              <button key={bg.id} onClick={() => setSelectedBg(bg.id)} className={`relative aspect-video rounded-xl border-2 overflow-hidden transition-all ${selectedBg === bg.id ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-100'}`}>
+                                <img src={bg.url} className="w-full h-full object-cover" alt="Custom" />
+                              </button>
+                            ))}
+                            {VIRTUAL_BGS.map((bg) => (
+                              <button
+                                key={bg.id}
+                                onClick={() => setSelectedBg(bg.id)}
+                                className={`relative aspect-video rounded-xl border-2 transition-all overflow-hidden group ${
+                                  selectedBg === bg.id ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-100'
+                                }`}
+                              >
+                                {bg.url ? (
+                                  <img src={bg.url} className="w-full h-full object-cover" alt={bg.label} />
+                                ) : (
+                                  <div className="w-full h-full bg-slate-100 flex items-center justify-center text-slate-400">
+                                    {bg.id === 'blur' ? <Monitor size={20} /> : <X size={20} />}
+                                  </div>
+                                )}
+                                <div className="absolute inset-0 bg-black/20 group-hover:bg-black/0 transition-colors" />
+                                <span className="absolute bottom-1 left-2 text-[10px] font-bold text-white drop-shadow-md">{bg.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                          
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <span className="text-sm font-bold text-black">Reaction sounds</span>
+                              <p className="text-[11px] text-slate-600">Audible pings for hand raises and emojis</p>
+                            </div>
+                            <button onClick={() => setReactionSounds(!reactionSounds)} className={`w-10 h-5 rounded-full transition-colors relative ${reactionSounds ? 'bg-[#1a73e8]' : 'bg-slate-300'}`}>
+                              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${reactionSounds ? 'left-6' : 'left-1'}`} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -857,17 +1245,17 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
 
         {/* Center: Main Taskbar */}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 glass-panel p-1.5 rounded-[22px] pointer-events-auto">
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 sm:gap-2 glass-panel p-1.5 rounded-[22px] pointer-events-auto max-w-[95vw]">
             <div className="flex items-center">
               <button 
                 onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
-                className={`p-2.5 rounded-xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
+                className={`p-2 sm:p-2.5 rounded-xl transition-all ${!localParticipant.isMicrophoneEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
               >
                 {localParticipant.isMicrophoneEnabled ? <Mic size={20} /> : <MicOff size={20} />}
               </button>
-              <MediaDeviceMenu 
+              <MediaDeviceMenu
                 kind="audioinput" 
-                className="p-1 text-white/40 hover:text-white transition-colors"
+                className="p-1 text-white/70 hover:text-white transition-colors hidden sm:block"
               >
                 <ChevronDown size={14} />
               </MediaDeviceMenu>
@@ -878,13 +1266,13 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
             <div className="flex items-center">
               <button 
                 onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
-                className={`p-2.5 rounded-xl transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
+                className={`p-2 sm:p-2.5 rounded-xl transition-all ${!localParticipant.isCameraEnabled ? 'bg-[#ea4335] text-white shadow-lg shadow-red-500/20' : 'text-white hover:bg-white/10'}`}
               >
                 {localParticipant.isCameraEnabled ? <VideoIcon size={20} /> : <VideoOff size={20} />}
               </button>
-              <MediaDeviceMenu 
+              <MediaDeviceMenu
                 kind="videoinput" 
-                className="p-1 text-white/40 hover:text-white transition-colors"
+                className="p-1 text-white/70 hover:text-white transition-colors hidden sm:block"
               >
                 <ChevronDown size={14} />
               </MediaDeviceMenu>
@@ -894,7 +1282,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
             <button 
               onClick={toggleHandRaise}
-              className={`p-2.5 rounded-xl transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124] shadow-lg shadow-yellow-500/20' : 'text-white hover:bg-white/10'}`}
+              className={`p-2 sm:p-2.5 rounded-xl transition-all ${isHandRaised ? 'bg-[#fbbc04] text-[#202124] shadow-lg shadow-yellow-500/20' : 'text-white hover:bg-white/10'}`}
             >
               <Hand size={20} />
             </button>
@@ -951,8 +1339,8 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
             <div className="w-[1px] h-6 bg-white/10 mx-1 hidden sm:block" />
 
             <button 
-              onClick={() => { if(window.innerWidth < 640) setIsMoreMenuOpen(!isMoreMenuOpen); else setActiveTab(activeTab === 'settings' ? null : 'settings'); }}
-              className={`p-2.5 rounded-xl transition-all ${(activeTab === 'settings' || isMoreMenuOpen) ? 'bg-[#8ab4f8] text-[#202124]' : 'text-white hover:bg-white/10'}`}
+              onClick={() => { if(typeof window !== 'undefined' && window.innerWidth < 640) setIsMoreMenuOpen(!isMoreMenuOpen); else setActiveTab(activeTab === 'settings' ? null : 'settings'); }}
+              className={`p-2 sm:p-2.5 rounded-xl transition-all ${(activeTab === 'settings' || isMoreMenuOpen) ? 'bg-[#8ab4f8] text-[#202124]' : 'text-white hover:bg-white/10'}`}
             >
               <MoreVertical size={20} /></button>
             
@@ -960,7 +1348,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
             <div className="w-[1px] h-8 bg-white/10 mx-1" />
             <button 
               onClick={() => router.push('/')}
-              className="p-2.5 rounded-xl bg-[#ea4335] hover:bg-[#d93025] text-white transition-all shadow-lg shadow-red-500/20 flex items-center justify-center"
+              className="p-2 sm:p-2.5 rounded-xl bg-[#ea4335] hover:bg-[#d93025] text-white transition-all shadow-lg shadow-red-500/20 flex items-center justify-center"
             >
               <PhoneOff size={20} />
             </button>
@@ -978,7 +1366,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
  * --- CustomParticipantTile Component ---
  * A wrapper around ParticipantTile to allow for custom styling and behavior.
  */
-function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onTogglePin, ...props }: any) {
+function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onTogglePin, mirror, showName = true, ...props }: any) {
   const trackRefFromContext = useMaybeTrackRefContext();
   const ref = trackRef || trackRefFromContext;
   const { localParticipant } = useLocalParticipant();
@@ -1009,20 +1397,20 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
       {/* IMPORTANT: We put the ParticipantTile directly here. 
          The CSS above handles making it 'contain' and 'big'.
       */}
-      <ParticipantTile trackRef={ref} {...props} />
+      <div className={mirror ? 'scale-x-[-1]' : ''}>
+        <ParticipantTile trackRef={ref} {...props} />
+      </div>
 
       {/* PAIR: Name and Volume Indicator (Top Right) - Google Style */}
-      <div className="absolute top-3 right-3 z-30 flex items-center gap-2 bg-[#202124]/60 backdrop-blur-xl px-2.5 py-1 rounded-xl border border-white/5 shadow-lg group-hover:bg-[#202124]/80 transition-all">
+      <div className={`absolute top-3 right-3 z-30 flex items-center gap-2 bg-[#000000]/85 backdrop-blur-xl px-2.5 py-1.5 rounded-xl border border-white/10 shadow-xl group-hover:bg-[#000000] transition-all ${!showName && !isSpeaking ? 'opacity-0 group-hover:opacity-100' : ''}`}>
         {!ref.participant.isMicrophoneEnabled && (
           <MicOff size={14} className="text-red-500 shrink-0" />
         )}
         
-        <span className="text-white text-[12px] font-medium truncate">
-          {ref.participant.identity === localParticipant.identity ? 'You' : ref.participant.identity.split('#')[0]}
-        </span>
+        {showName && <span className="text-white text-[12px] font-medium truncate">{ref.participant.identity === localParticipant.identity ? 'You' : ref.participant.identity.split('#')[0]}</span>}
         
         {isHost && (
-          <ShieldCheck size={12} className="text-blue-400" />
+          <ShieldCheck size={12} className="text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
         )}
         
         {isSpeaking && (
