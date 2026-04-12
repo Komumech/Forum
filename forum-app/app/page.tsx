@@ -26,7 +26,7 @@ import {
 
 export default function Home() {
   const router = useRouter();
-  const { user, signInWithGoogle, signOut, loading } = useAuth();
+  const { user, signInWithGoogle, logOut, loading } = useAuth();
   const [roomCode, setRoomCode] = useState("");
   const [barHeights, setBarHeights] = useState<number[]>([30, 35, 25, 40, 30]);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
@@ -113,12 +113,12 @@ export default function Home() {
                     </div>
                     <div className="pt-2 px-2">
                       <button 
-                        onClick={() => { signOut(); setIsProfileOpen(false); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors font-medium"
-                      >
-                        <LogOut className="w-4 h-4 text-slate-500" />
-                        Sign out
-                      </button>
+  onClick={() => { logOut(); setIsProfileOpen(false); }}
+  className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors font-medium"
+>
+  <LogOut className="w-4 h-4 text-slate-500" />
+  Sign out
+</button>
                     </div>
                   </div>
                 </>
