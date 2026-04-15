@@ -134,7 +134,7 @@ export default function MeetingPage() {
           /* Force all video feeds to maintain aspect ratio and letterbox (Google Meet style) */
           video {
             object-fit: contain !important;
-            background-color: #000 !important;
+            background-color: #202124 !important;
             width: 100% !important;
             height: 100% !important;
             border-radius: 16px !important;
@@ -667,7 +667,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
         /* 2. The Video Aspect Ratio Rule */
         .lk-participant-tile video {
           display: block !important;
-          object-fit: contain !important;
+          object-fit: cover !important;
           width: 100% !important;
           height: 100% !important;
           background-color: #000 !important;
@@ -1495,7 +1495,7 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
       
       {/* Overlay for when camera is off */}
       {isVideoOff && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#3c4043] z-[10] rounded-2xl">
+        <div className="absolute inset-0 flex items-center justify-center bg-[#202124] z-[10] rounded-2xl">
           <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl">
             {avatarUrl ? <img src={avatarUrl} className="rounded-full w-full h-full object-cover" /> : ref.participant.identity.charAt(0)}
           </div>
