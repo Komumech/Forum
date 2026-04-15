@@ -20,6 +20,7 @@ import {
   useMaybeTrackRefContext,
   useIsSpeaking,
   ConnectionQualityIndicator,
+  useVisualStableUpdate,
 } from '@livekit/components-react';
 import { isMobileBrowser } from '@livekit/components-core';
 import '@livekit/components-styles';
@@ -53,7 +54,8 @@ import {
   VolumeX,
   Volume2,
   Bell,
-  Monitor
+  Monitor,
+  ArrowLeftRight
 } from 'lucide-react';
 
 export default function MeetingPage() {
@@ -133,7 +135,7 @@ export default function MeetingPage() {
         <style jsx global>{`
           /* Force all video feeds to maintain aspect ratio and letterbox (Google Meet style) */
           video {
-            object-fit: contain !important;
+            object-fit: cover !important;
             background-color: #202124 !important;
             width: 100% !important;
             height: 100% !important;
@@ -250,7 +252,7 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const connectionState = useConnectionState();
   const processorRef = useRef<any>(null);
   const { send: sendData } = useDataChannel("hand-raise");
-  const tracks = useTracks(
+  const rawTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
@@ -265,6 +267,11 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
   const [copied, setCopied] = useState(false);
   const [meetingUrl, setMeetingUrl] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [isSwapped, setIsSwapped] = useState(false);
+
+  // Google Meet Level Stability: Only update the array when major changes occur 
+  // or use a visual stable update to prevent "Tile Flicker"
+  const tracks = useVisualStableUpdate(rawTracks, 16);
 
   // --- SPATIAL ENGINE STATES ---
   const containerRef = useRef<HTMLDivElement>(null);
@@ -563,51 +570,66 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
     setMeetingUrl(window.location.href);
   }, []);
 
-  // Filter and Sort Tracks based on Google rules
+  // --- DYNAMIC REORDERING SYSTEM (The "Google Meet" Brain) ---
   const processedTracks = useMemo(() => {
-    // If no tracks yet, return empty
     if (!tracks || tracks.length === 0) return [];
 
     const filtered = tracks.filter(t => {
       if (hideNonVideo && !t.participant?.isCameraEnabled && !t.participant?.isLocal) return false;
       return true;
     }).filter((t, i, self) => {
-      // Ensure each participant only appears once by SID to prevent pinning glitches
       const firstIndex = self.findIndex(prev => prev.participant.sid === t.participant.sid);
       return i === firstIndex;
     });
 
     return filtered.sort((a, b) => {
-      // 3. Priority: Pinned > Identity (Alphabetical for stability)
       const aId = a.participant?.identity || "";
       const bId = b.participant?.identity || "";
       
+      // 1. Priority: Pinned
       const aPinned = pinnedIdentities.has(aId) ? 1 : 0;
       const bPinned = pinnedIdentities.has(bId) ? 1 : 0;
-      if (aPinned !== bPinned) return bPinned - aPinned; // Pinned first
+      if (aPinned !== bPinned) return bPinned - aPinned;
 
-      // "AI" Alignment: Prioritize active speakers in the sorting order
-      if (a.participant.isSpeaking !== b.participant.isSpeaking) return b.participant.isSpeaking ? 1 : -1;
+      // 2. Priority: Screen Share
+      const aScreen = a.source === Track.Source.ScreenShare ? 1 : 0;
+      const bScreen = b.source === Track.Source.ScreenShare ? 1 : 0;
+      if (aScreen !== bScreen) return bScreen - aScreen;
 
-      // Local participant always goes last to prevent "swapping" positions with guests
+      // 3. Priority: Active Speaker
+      const aSpeaking = a.participant.isSpeaking ? 1 : 0;
+      const bSpeaking = b.participant.isSpeaking ? 1 : 0;
+      if (aSpeaking !== bSpeaking) return bSpeaking - aSpeaking;
+
+      // 4. Priority: Raised Hands
+      const aHand = raisedHands[aId] ? 1 : 0;
+      const bHand = raisedHands[bId] ? 1 : 0;
+      if (aHand !== bHand) return bHand - aHand;
+
+      // 5. Priority: Video ON vs Audio Only
+      const aVideo = a.participant.isCameraEnabled ? 1 : 0;
+      const bVideo = b.participant.isCameraEnabled ? 1 : 0;
+      if (aVideo !== bVideo) return bVideo - aVideo;
+
+      // Final stability: Local participant last, then alphabetical
       if (a.participant.isLocal !== b.participant.isLocal) return a.participant.isLocal ? 1 : -1;
-
       return aId.localeCompare(bId);
     }).slice(0, maxParticipants);
-  }, [tracks, pinnedIdentities, hideNonVideo, maxParticipants, localParticipant.identity, remoteParticipants]);
+  }, [tracks, pinnedIdentities, hideNonVideo, maxParticipants, raisedHands]);
   
   // --- 3. DYNAMIC GRID MATHEMATICS ---
   const gridConfig = useMemo(() => {
     const count = processedTracks.length;
-    if (count <= 1) return { cols: 1, rows: 1 };
+    if (count <= 1) return { cols: 1 };
     
-    // Rule 4: The "Portrait Tile" Shift (Stack vertically for 2 people on mobile)
-    if (isMobile && count === 2) return { cols: 1, rows: 2 };
+    if (isMobile) {
+      if (count === 2) return { cols: 1 };
+      return { cols: 2 };
+    }
 
-    if (count === 2) return { cols: 2, rows: 1 };
-    const cols = Math.ceil(Math.sqrt(count * (16/9)));
-    const rows = Math.ceil(count / cols);
-    return { cols, rows };
+    if (count <= 4) return { cols: 2 };
+    if (count <= 9) return { cols: 3 };
+    return { cols: 4 };
   }, [processedTracks, isMobile]);
 
   // Helper to determine if a track has active video
@@ -616,12 +638,13 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
   // Compute layout based on layoutMode and participant state
   const computedLayout = useMemo(() => {
+    const someoneIsSharing = processedTracks.some(t => t.source === Track.Source.ScreenShare);
+    
     if (layoutMode === 'auto') {
-      // Auto mode: use spotlight if there are pinned participants, otherwise tiled
-      return pinnedIdentities.size > 0 ? 'spotlight' : 'tiled';
+      return (pinnedIdentities.size > 0 || someoneIsSharing) ? 'sidebar' : 'tiled';
     }
     return layoutMode;
-  }, [layoutMode, pinnedIdentities]);
+  }, [layoutMode, pinnedIdentities, processedTracks]);
 
   // Derive focusTrack from pinned identities (first pinned participant's track)
   const focusTrack = useMemo(() => {
@@ -629,13 +652,20 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
     return processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || null;
   }, [processedTracks, pinnedIdentities]);
 
-  // Calculate hidden count for mobile
+  // Calculate hidden count
   const hiddenCount = useMemo(() => {
     const visibleCount = computedLayout === 'sidebar' || computedLayout === 'spotlight' 
       ? (focusTrack ? 1 : 0) + (computedLayout === 'sidebar' ? processedTracks.filter(t => t.participant.sid !== focusTrack?.participant.sid).length : 0)
       : processedTracks.length;
     return Math.max(0, processedTracks.length - visibleCount);
   }, [computedLayout, focusTrack, processedTracks]);
+
+  // Mobile 2-Participant View Logic
+  const isMobileTwoPerson = isMobile && processedTracks.length === 2;
+  const [mainTrack, floatingTrack] = useMemo(() => {
+    if (!isMobileTwoPerson) return [null, null];
+    return isSwapped ? [processedTracks[1], processedTracks[0]] : [processedTracks[0], processedTracks[1]];
+  }, [isMobileTwoPerson, isSwapped, processedTracks]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-[#202124] relative">
@@ -719,10 +749,10 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
         }
 
         /* Google Meet Style Spotlight/Speaking Border */
-        .lk-participant-tile[data-lk-speaking="true"] {
-           box-shadow: none !important; /* Removed blue speaking borders */
-           border: none !important;
-           outline: none !important;
+        .lk-participant-tile[data-lk-speaking="true"] video {
+           outline: 4px solid #8ab4f8 !important;
+           outline-offset: -4px !important;
+           border-radius: 16px !important;
         }
         
         .lk-participant-tile {
@@ -781,9 +811,40 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
 
       <div className="flex-1 overflow-hidden relative bg-[#202124] transition-all duration-[700ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] flex flex-col"> 
         <div className="flex-1 relative flex flex-col overflow-hidden min-h-0">
-            <div ref={containerRef} className="flex-1 flex items-center justify-center bg-[#202124] p-2 sm:p-4 pb-24 overflow-hidden min-h-0">
-              <div className="w-full max-w-[1600px] mx-auto h-full flex items-center justify-center overflow-hidden">
-                {(computedLayout === 'sidebar' || computedLayout === 'spotlight') && focusTrack ? (
+            <div ref={containerRef} className="flex-1 flex items-center justify-center bg-[#202124] p-2 md:p-6 lg:p-8 pb-20 md:pb-28 overflow-hidden min-h-0">
+              <div className={`w-full mx-auto h-full flex items-center justify-center overflow-hidden ${processedTracks.length <= 2 && !isMobile ? 'max-w-[1200px]' : 'max-w-[1600px]'}`}>
+                {isMobileTwoPerson ? (
+                  /* --- MOBILE 2-PARTICIPANT PIP VIEW --- */
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    <div className="w-full h-full max-h-[85vh] aspect-[9/16] sm:aspect-video rounded-3xl overflow-hidden shadow-2xl">
+                      <CustomParticipantTile 
+                        trackRef={mainTrack} 
+                        className="w-full h-full" 
+                        raisedHands={raisedHands} 
+                        onTogglePin={() => togglePin(mainTrack!.participant.identity)} 
+                        isPinned={pinnedIdentities.has(mainTrack!.participant.identity)} 
+                      />
+                    </div>
+                    
+                    {/* Floating Tile */}
+                    <div className="absolute top-4 right-4 w-[110px] h-[160px] rounded-2xl overflow-hidden shadow-2xl border border-white/10 z-[100] bg-black">
+                      <CustomParticipantTile 
+                        trackRef={floatingTrack} 
+                        className="w-full h-full" 
+                        raisedHands={raisedHands}
+                        showName={false}
+                      />
+                      <button 
+                        onClick={() => setIsSwapped(!isSwapped)}
+                        className="absolute inset-0 w-full h-full flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity z-[110]"
+                      >
+                        <div className="bg-white/20 backdrop-blur-md p-2 rounded-full text-white">
+                          <ArrowLeftRight size={20} />
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                ) : (computedLayout === 'sidebar' || computedLayout === 'spotlight') && focusTrack ? (
                   <div className="sidebar-container gap-4 animate-in fade-in duration-1000 p-4">
                     {/* Main Spotlight Section */}
                     <div className="flex-1 flex items-center justify-center relative min-w-0 h-full">
@@ -812,17 +873,19 @@ function MeetingRoomContent({ room, token }: { room: string; token: string }) {
                     )}
                   </div>
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center overflow-hidden"> 
-                    <div 
-                      className="grid gap-3 transition-all duration-500 w-full h-full max-w-full max-h-full"
-                      style={{ 
-                        gridTemplateColumns: `repeat(${gridConfig.cols}, minmax(0, 1fr))`,
-                        gridTemplateRows: `repeat(${gridConfig.rows}, minmax(0, 1fr))`,
-                        placeContent: 'center'
-                      }}
-                    >
+                  <div className={`w-full h-full flex items-center justify-center overflow-hidden ${!isMobile ? 'max-h-[88vh]' : ''}`}> 
+                    <div className="flex flex-wrap gap-3 justify-center items-center w-full max-w-full max-h-full">
                       {processedTracks.map((t) => (
-                        <div key={`${t.participant.sid}-${t.source}`} className="w-full h-full flex items-center justify-center overflow-hidden">
+                        <div 
+                          key={`${t.participant.sid}-${t.source}`} 
+                          className="flex items-center justify-center transition-all duration-500"
+                          style={{ 
+                            /* Dynamically calculate width based on columns to keep tiles large and centered */
+                            width: processedTracks.length === 1 ? '100%' : `calc(${100 / gridConfig.cols}% - 12px)`,
+                            aspectRatio: isMobile && processedTracks.length === 2 ? 'auto' : '16/9',
+                            maxHeight: isMobile && processedTracks.length === 2 ? '42%' : 'none'
+                          }}
+                        >
                           <CustomParticipantTile 
                             trackRef={t}
                             raisedHands={raisedHands}
@@ -1438,11 +1501,13 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
   const isSpeaking = useIsSpeaking(ref?.participant);
   if (!ref) return null;
 
-  // Check if the specific track being rendered is actually enabled/subscribed
   const isVideoOff = !ref.publication || ref.publication.isMuted || !ref.publication.isEnabled;
-
   const isHandRaised = raisedHands?.[ref.participant.identity];
   
+  // Speaking border logic matching Google Meet exactly
+  const speakingStyles = isSpeaking && !isVideoOff ? "ring-4 ring-[#8ab4f8] ring-inset" : "";
+  const speakingAvatarStyles = isSpeaking && isVideoOff ? "ring-4 ring-[#8ab4f8]" : "";
+
   let avatarUrl = "";
   try {
     const meta = JSON.parse(ref.participant.metadata || "{}");
@@ -1450,13 +1515,13 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
   } catch (e) {}
 
   return (
-    <div className={`relative aspect-video bg-black rounded-2xl overflow-hidden group shadow-lg flex items-center justify-center ${className}`} style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}>
+    <div className={`relative aspect-video bg-[#202124] rounded-2xl overflow-hidden group shadow-lg flex items-center justify-center border-none outline-none ${speakingStyles} ${className}`} style={{ width: '100%', height: '100%' }}>
       <div className={`w-full h-full ${mirror ? 'scale-x-[-1]' : ''}`}>
         <ParticipantTile trackRef={ref} {...props} />
       </div>
 
       {/* PAIR: Name and Volume Indicator (Top Right) - Google Style */}
-      <div className={`absolute top-3 right-3 z-30 flex items-center gap-2 bg-[#000000]/85 backdrop-blur-xl px-2.5 py-1.5 rounded-xl border border-white/10 shadow-xl group-hover:bg-[#000000] transition-all ${!showName && !isSpeaking ? 'opacity-0 group-hover:opacity-100' : ''}`}>
+      <div className={`absolute top-3 right-3 z-30 flex items-center gap-2 bg-[#000000]/60 backdrop-blur-xl px-2.5 py-1.5 rounded-xl border border-white/10 shadow-xl group-hover:bg-[#000000]/80 transition-all ${!showName && !isSpeaking ? 'opacity-0 group-hover:opacity-100' : ''}`}>
         {!ref.participant.isMicrophoneEnabled && (
           <MicOff size={14} className="text-red-500 shrink-0" />
         )}
@@ -1467,11 +1532,17 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
           <ShieldCheck size={12} className="text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
         )}
         
-        {isSpeaking && (
+        {isSpeaking ? (
           <div className="flex gap-[2px] items-center h-3 w-3">
             <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-1"></div>
             <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-2"></div>
             <div className="w-[2px] bg-[#8ab4f8] rounded-full animate-voice-bar-3"></div>
+          </div>
+        ) : (
+          <div className="flex gap-[3px] items-center h-3 px-0.5">
+            <div className="w-[3px] h-[3px] bg-white/40 rounded-full"></div>
+            <div className="w-[3px] h-[3px] bg-white/40 rounded-full"></div>
+            <div className="w-[3px] h-[3px] bg-white/40 rounded-full"></div>
           </div>
         )}
       </div>
@@ -1496,7 +1567,7 @@ function CustomParticipantTile({ trackRef, className, raisedHands, isPinned, onT
       {/* Overlay for when camera is off */}
       {isVideoOff && (
         <div className="absolute inset-0 flex items-center justify-center bg-[#202124] z-[10] rounded-2xl">
-          <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl">
+          <div className={`w-16 h-16 md:w-20 md:h-20 rounded-full bg-indigo-600 flex items-center justify-center text-2xl font-bold text-white shadow-xl transition-all duration-300 ${speakingAvatarStyles}`}>
             {avatarUrl ? <img src={avatarUrl} className="rounded-full w-full h-full object-cover" /> : ref.participant.identity.charAt(0)}
           </div>
         </div>
