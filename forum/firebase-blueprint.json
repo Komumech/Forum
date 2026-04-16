@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "A meeting room document",
+      "type": "object",
+      "properties": {
+        "hostId": { "type": "string", "description": "UID of the meeting host" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the room was created" }
+      },
+      "required": ["hostId", "createdAt"]
+    },
+    "AdmittedUser": {
+      "title": "AdmittedUser",
+      "description": "A participant admitted to a room",
+      "type": "object",
+      "properties": {
+        "admittedAt": { "type": "string", "format": "date-time", "description": "When the user was admitted" }
+      },
+      "required": ["admittedAt"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "A scheduled meeting",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "roomId": { "type": "string" },
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "startTime", "roomId", "hostId", "participants"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Meeting room metadata"
+    },
+    "/rooms/{roomId}/admitted/{userId}": {
+      "schema": "AdmittedUser",
+      "description": "List of admitted participants"
+    },
+    "/meetings/{meetingId}": {
+      "schema": "Meeting",
+      "description": "Scheduled meetings"
+    }
+  }
+}

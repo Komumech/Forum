@@ -1,0 +1,12 @@
+{
+  "name": "Forum",
+  "description": "A comprehensive communication platform for meetings, scheduling, and collaboration.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "video_conferencing",
+    "real_time_collaboration"
+  ]
+}

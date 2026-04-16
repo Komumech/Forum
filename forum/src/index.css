@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-bg-dark: #121212;
+  --color-surface: #1e1e1e;
+  --color-surface-lighter: #2a2a2a;
+  --color-accent-blue: #4285f4;
+  --color-accent-red: #ea4335;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #9aa0a6;
+  --color-success-green: #34a853;
+
+  /* Light Theme Variables */
+  --color-bg-light: #ffffff;
+  --color-surface-light: #f8f9fa;
+  --color-surface-lighter-light: #f1f3f4;
+  --color-text-primary-light: #202124;
+  --color-text-secondary-light: #5f6368;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-light text-text-primary-light antialiased transition-colors duration-300;
+    font-family: var(--font-sans);
+  }
+
+  .dark-theme {
+    @apply bg-bg-dark text-text-primary;
+  }
+}
+
+/* Custom Scrollbar for Sleek Interface feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-lighter);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+/* LiveKit Component Overrides */
+.lk-video-conference {
+  background-color: transparent !important;
+}
+
+.lk-participant-tile {
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  background-color: var(--color-surface) !important;
+  border: 2px solid transparent !important;
+}
+
+.lk-participant-tile[data-lk-speaking="true"] {
+  border-color: var(--color-accent-blue) !important;
+}
+
+.lk-grid-layout {
+  padding: 16px !important;
+  gap: 12px !important;
+}
