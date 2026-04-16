@@ -25,12 +25,14 @@ import {
   MonitorUp, MonitorOff, MoreVertical, Info, Users, MessageSquare,
   X, Send, ChevronDown, Settings, Copy, Check, Pin, PinOff,
   Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight,
-  Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart
+  Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
+  ChevronUp, FileText, Plus, Search, Trash2, Archive, Save
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { useAuth } from '../context/AuthContext';
-import { db, auth } from '../firebase';
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { db, auth, komuDb, komuAuth } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -43,6 +45,8 @@ export default function MeetingPage() {
   const [name, setName] = useState(preferences?.displayName || user?.displayName || "");
   const [isReady, setIsReady] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting' | 'participants' | 'notes' | null>(null);
+  const [isKomuToolsOpen, setIsKomuToolsOpen] = useState(false);
   const [meetingDetails, setMeetingDetails] = useState<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -79,6 +83,7 @@ export default function MeetingPage() {
   const [preJoinMic, setPreJoinMic] = useState(true);
   const [preJoinCam, setPreJoinCam] = useState(true);
   const [preJoinBg, setPreJoinBg] = useState<'none' | 'blur' | 'image'>('none');
+  const [cameraPermissionError, setCameraPermissionError] = useState<string | null>(null);
 
   // 1. Initial Camera Preview for "Green Room"
   useEffect(() => {
@@ -94,8 +99,10 @@ export default function MeetingPage() {
         .then(stream => {
           streamRef.current = stream;
           if (videoRef.current) videoRef.current.srcObject = stream;
+          setCameraPermissionError(null);
         }).catch(err => {
           console.error("Camera access denied", err);
+          setCameraPermissionError(err.message || "Permission denied");
         });
     }
     return () => {
@@ -151,7 +158,17 @@ export default function MeetingPage() {
       <div className="min-h-screen bg-bg-light flex flex-col items-center justify-center p-6">
         <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center gap-12 bg-white p-8 md:p-12 rounded-[24px] shadow-2xl border border-gray-100">
           <div className="flex-1 w-full relative aspect-video bg-bg-dark rounded-2xl overflow-hidden shadow-inner group">
-            {preJoinCam ? (
+            {cameraPermissionError ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 p-6 text-center space-y-4">
+                <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center text-red-500">
+                  <Camera size={32} />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-white font-bold">Camera access denied</p>
+                  <p className="text-slate-400 text-sm">Please enable camera and microphone permissions in your browser settings to continue.</p>
+                </div>
+              </div>
+            ) : preJoinCam ? (
               <video ref={videoRef} autoPlay muted playsInline className={cn("scale-x-[-1] w-full h-full object-cover", preJoinBg === 'blur' && "blur-md")} />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#1a1a1a] to-[#2a2a2a]">
@@ -265,7 +282,15 @@ export default function MeetingPage() {
       className="h-full w-full"
     >
       <div className="flex flex-col h-full relative">
-        <MeetingRoomHeader room={room || ""} isRecording={isRecording} setIsRecording={setIsRecording} />
+        <MeetingRoomHeader 
+          room={room || ""} 
+          isRecording={isRecording} 
+          setIsRecording={setIsRecording} 
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          isToolsMenuOpen={isKomuToolsOpen}
+          setIsToolsMenuOpen={setIsKomuToolsOpen}
+        />
         <MeetingRoomContent 
           room={room || ""} 
           videoDevices={videoDevices} 
@@ -274,6 +299,10 @@ export default function MeetingPage() {
           initialBg={preJoinBg}
           initialMic={preJoinMic}
           initialCam={preJoinCam}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          isToolsMenuOpen={isKomuToolsOpen}
+          setIsToolsMenuOpen={setIsKomuToolsOpen}
         />
       </div>
     </LiveKitRoom>
@@ -281,26 +310,40 @@ export default function MeetingPage() {
   );
 }
 
-function MeetingRoomHeader({ room, isRecording, setIsRecording }: { room: string, isRecording: boolean, setIsRecording: (v: boolean) => void }) {
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
-
+function MeetingRoomHeader({ room, isRecording, setIsRecording, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen }: { room: string, isRecording: boolean, setIsRecording: (v: boolean) => void, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void }) {
   return (
     <header className="absolute top-0 left-0 right-0 h-[72px] px-6 flex items-center justify-between bg-slate-950/90 z-[60] pointer-events-none">
       <div className="flex items-center gap-3 pointer-events-auto">
-        <button onClick={() => setIsToolsMenuOpen(!isToolsMenuOpen)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-800/90 px-3 py-2 text-sm font-semibold text-white border border-white/10 transition-all duration-200 ease-out hover:bg-slate-700">
+        {isKomuToolsOpen && (
+          <div className="fixed inset-0 z-[65] pointer-events-auto" onClick={() => setIsKomuToolsOpen(false)} />
+        )}
+        <button onClick={() => setIsKomuToolsOpen(!isKomuToolsOpen)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-800/90 px-3 py-2 text-sm font-semibold text-white border border-white/10 transition-all duration-200 ease-out hover:bg-slate-700 relative z-[70]">
           <Settings size={18} />
           <span>Tools</span>
-          <ChevronDown size={16} className={cn("transition-transform duration-200", isToolsMenuOpen && "rotate-180")} />
+          <ChevronDown size={16} className={cn("transition-transform duration-200", isKomuToolsOpen && "rotate-180")} />
         </button>
         <AnimatePresence>
-          {isToolsMenuOpen && (
+          {isKomuToolsOpen && (
             <motion.div
               initial={{ opacity: 0, y: -8, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.95 }}
-              className="absolute top-[72px] left-6 z-[70] w-56 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl p-3"
+              className="absolute top-[72px] left-6 z-[70] w-56 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl p-2"
             >
-              <div className="text-sm text-slate-300">Tools menu coming soon</div>
+              <button 
+                onClick={() => { setActiveTab(activeTab === 'notes' ? null : 'notes'); setIsKomuToolsOpen(false); }}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-sm transition-colors",
+                  activeTab === 'notes' ? "text-blue-400 bg-blue-600/10" : "text-white"
+                )}
+              >
+                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", activeTab === 'notes' ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400")}>
+                  <FileText size={18} />
+                </div>
+                <span>Notes</span>
+              </button>
+              <div className="h-px bg-white/5 my-2" />
+              <div className="px-3 py-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">More tools coming soon</div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -339,10 +382,29 @@ interface FirestoreErrorInfo {
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  console.error(`Firestore Error [${operationType}] on [${path}]:`, error);
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error:', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
 }
 
-function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam }: { room: string, videoDevices: MediaDeviceInfo[], audioDevices: MediaDeviceInfo[], speakerDevices: MediaDeviceInfo[], initialBg: string, initialMic: boolean, initialCam: boolean }) {
+function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen }: { room: string, videoDevices: MediaDeviceInfo[], audioDevices: MediaDeviceInfo[], speakerDevices: MediaDeviceInfo[], initialBg: 'none' | 'blur' | 'image', initialMic: boolean, initialCam: boolean, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void }) {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
   const { localParticipant } = useLocalParticipant();
@@ -492,9 +554,15 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     { onlySubscribed: true },
   );
 
-  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting'> (null);
+  const [spotlightIdentity, setSpotlightIdentity] = useState<string | null>(null);
+  const lastSpotlightChangeRef = useRef<number>(0);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
+  const [transcriptions, setTranscriptions] = useState<{ id: string, identity: string, text: string, timestamp: number }[]>([]);
+  const [localTranscript, setLocalTranscript] = useState("");
+  const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
+  const [isCamMenuOpen, setIsCamMenuOpen] = useState(false);
+  const recognitionRef = useRef<any>(null);
   const [raisedHands, setRaisedHands] = useState<Record<string, boolean>>({});
   const [chatInput, setChatInput] = useState("");
   const [chatRecipient, setChatRecipient] = useState<string>("everyone");
@@ -505,7 +573,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const tracks = useVisualStableUpdate(rawTracks, 16);
   const isMobile = useMemo(() => typeof window !== 'undefined' && isMobileBrowser(), []);
 
-  const [layoutMode, setLayoutMode] = useState<'auto' | 'tiled' | 'sidebar' | 'spotlight'>('auto');
+  const [layoutMode, setLayoutMode] = useState<'auto' | 'tiled' | 'sidebar' | 'spotlight' | 'imo'>('auto');
   const [pinnedIdentities, setPinnedIdentities] = useState<Set<string>>(new Set());
   const [hideNonVideo, setHideNonVideo] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState(16);
@@ -514,7 +582,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [mobileOverlaySide, setMobileOverlaySide] = useState<'right' | 'left'>('right');
 
   // Settings
-  const [settingsCategory, setSettingsCategory] = useState<'video' | 'audio' | 'general' | 'effects'>('video');
+  const [settingsCategory, setSettingsCategory] = useState<'video' | 'audio' | 'general' | 'effects' | 'captions' | 'reactions'>('video');
   const [videoMirroring, setVideoMirroring] = useState(true);
   const [noiseCancellation, setNoiseCancellation] = useState(true);
   const [echoCancellation, setEchoCancellation] = useState(true);
@@ -524,6 +592,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [selectedResolution, setSelectedResolution] = useState<'360p' | '720p'>('720p');
   const [selectedBg, setSelectedBg] = useState<'none' | 'blur' | 'image'>(initialBg || 'none');
   const [selectedBgImage, setSelectedBgImage] = useState('https://picsum.photos/seed/office/1920/1080');
+  const [customBgImage, setCustomBgImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [reactions, setReactions] = useState<{ id: number, emoji: string, x: number }[]>([]);
   const [isReactionsMenuOpen, setIsReactionsMenuOpen] = useState(false);
 
@@ -534,6 +604,75 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     { id: 'abstract', url: 'https://picsum.photos/seed/abstract/1920/1080', label: 'Abstract' },
   ];
 
+  // Live Captions Logic
+  useEffect(() => {
+    if (!isCaptionsEnabled || !localParticipant) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      const text = (finalTranscript + interimTranscript).trim();
+      if (text) {
+        setLocalTranscript(text);
+
+        // Broadcast transcription
+        sendTranscription(new TextEncoder().encode(JSON.stringify({
+          text: text,
+          identity: localParticipant.identity,
+          isFinal: finalTranscript !== ''
+        })), { reliable: true });
+
+        // Clear local transcript after a timeout if it was final
+        if (finalTranscript) {
+          setTimeout(() => setLocalTranscript(""), 3000);
+        }
+      }
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+
+    return () => {
+      recognition.stop();
+    };
+  }, [isCaptionsEnabled, localParticipant]);
+
+  // Handle Incoming Transcriptions
+  const { send: sendTranscription } = useDataChannel("transcription", (msg) => {
+    const payload = JSON.parse(new TextDecoder().decode(msg.payload));
+    setTranscriptions(prev => {
+      // Keep only recent transcriptions
+      const now = Date.now();
+      const filtered = prev.filter(t => now - t.timestamp < 5000 && t.identity !== payload.identity);
+      return [...filtered, {
+        id: Math.random().toString(),
+        identity: payload.identity,
+        text: payload.text,
+        timestamp: now
+      }];
+    });
+  });
+
   // Apply Background Effects
   useEffect(() => {
     const applyProcessor = async () => {
@@ -542,29 +681,36 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       const track = localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack as LocalVideoTrack;
       if (!track) return;
 
-      // Stop existing processor if any
       await track.stopProcessor();
 
       if (selectedBg === 'blur') {
         const processor = BackgroundBlur(10);
         await track.setProcessor(processor);
       } else if (selectedBg === 'image') {
-        const processor = VirtualBackground(selectedBgImage);
+        const bgUrl = customBgImage || selectedBgImage;
+        const processor = VirtualBackground(bgUrl);
         await track.setProcessor(processor);
       }
     };
 
     applyProcessor();
-  }, [selectedBg, selectedBgImage, localParticipant]);
+  }, [selectedBg, selectedBgImage, customBgImage, localParticipant]);
 
-  // Apply Device Changes
+  // Apply Device Changes & Settings
   useEffect(() => {
     if (selectedVideoId) localParticipant.setCameraEnabled(true, { deviceId: selectedVideoId });
   }, [selectedVideoId, localParticipant]);
 
   useEffect(() => {
-    if (selectedAudioId) localParticipant.setMicrophoneEnabled(true, { deviceId: selectedAudioId });
-  }, [selectedAudioId, localParticipant]);
+    if (selectedAudioId || noiseCancellation || echoCancellation) {
+      localParticipant.setMicrophoneEnabled(true, { 
+        deviceId: selectedAudioId,
+        noiseSuppression: noiseCancellation,
+        echoCancellation: echoCancellation,
+        autoGainControl: autoGainControl,
+      });
+    }
+  }, [selectedAudioId, noiseCancellation, echoCancellation, autoGainControl, localParticipant]);
 
   const sendReaction = (emoji: string) => {
     const id = Date.now();
@@ -713,15 +859,35 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const computedLayout = useMemo(() => {
     const someoneIsSharing = processedTracks.some(t => t.source === Track.Source.ScreenShare);
     if (layoutMode === 'auto') {
-      return (pinnedIdentities.size > 0 || someoneIsSharing) ? 'sidebar' : 'tiled';
+      if (pinnedIdentities.size > 0 || someoneIsSharing) return 'sidebar';
+      if (processedTracks.length > 3) return 'imo';
+      return 'tiled';
     }
     return layoutMode;
   }, [layoutMode, pinnedIdentities.size, processedTracks]);
 
+  // IMO View Spotlight Logic: minimum 1 minute hold
+  useEffect(() => {
+    if (computedLayout !== 'imo') return;
+    const now = Date.now();
+    const speakingParticipants = processedTracks.filter(t => t.participant.isSpeaking);
+    const candidate = speakingParticipants[0]?.participant.identity || processedTracks[0]?.participant.identity;
+    
+    if (candidate && candidate !== spotlightIdentity) {
+      if (now - lastSpotlightChangeRef.current > 60000 || !spotlightIdentity) {
+        setSpotlightIdentity(candidate);
+        lastSpotlightChangeRef.current = now;
+      }
+    }
+  }, [processedTracks, computedLayout, spotlightIdentity]);
+
   const focusTrack = useMemo(() => {
+    if (computedLayout === 'imo') {
+      return processedTracks.find(t => t.participant.identity === spotlightIdentity) || processedTracks[0];
+    }
     if (pinnedIdentities.size === 0) return processedTracks.find(t => t.source === Track.Source.ScreenShare) || processedTracks[0];
     return processedTracks.find(t => pinnedIdentities.has(t.participant.identity)) || processedTracks[0];
-  }, [processedTracks, pinnedIdentities]);
+  }, [processedTracks, pinnedIdentities, computedLayout, spotlightIdentity]);
 
   const togglePin = (identity: string) => {
     setPinnedIdentities((prev) => {
@@ -808,12 +974,56 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       </AnimatePresence>
 
       {/* Main Grid Area */}
-      <div className="flex-1 relative flex items-center justify-center p-4 pt-[60px] pb-[80px]">
+      <div className="flex-1 relative flex items-center justify-center p-4 pt-[60px] pb-[80px] bg-slate-950">
+        {/* Click Outside Backdrop for Dropdowns */}
+        {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen || isKomuToolsOpen) && (
+          <div 
+            className="fixed inset-0 z-[65]" 
+            onClick={() => {
+              setIsMicMenuOpen(false);
+              setIsCamMenuOpen(false);
+              setIsReactionsMenuOpen(false);
+              setIsMoreMenuOpen(false);
+              setIsKomuToolsOpen(false);
+            }} 
+          />
+        )}
         <div className={cn(
           "w-full h-full transition-all duration-500",
-          activeTab ? "lg:mr-[320px]" : ""
+          activeTab && activeTab !== 'settings' && !isMobile ? "lg:mr-[360px]" : ""
         )}>
-          {computedLayout === 'sidebar' && focusTrack ? (
+          {computedLayout === 'imo' && focusTrack ? (
+            <div className="flex flex-col h-full w-full gap-4">
+              {/* Top Filmstrip */}
+              <div className="h-[120px] md:h-[160px] flex items-center gap-3 overflow-x-auto pb-2 custom-scroll scroll-smooth px-2">
+                {processedTracks.filter(t => t.participant.identity !== focusTrack.participant.identity).map(t => (
+                  <div key={t.participant.sid} className="h-full aspect-video flex-shrink-0">
+                    <CustomParticipantTile 
+                      trackRef={t} 
+                      raisedHands={raisedHands}
+                      onTogglePin={() => togglePin(t.participant.identity)}
+                      isPinned={pinnedIdentities.has(t.participant.identity)}
+                      mirror={t.participant.isLocal && videoMirroring}
+                      showName={showParticipantNames}
+                    />
+                  </div>
+                ))}
+              </div>
+              {/* Central Person */}
+              <div className="flex-1 min-h-0 relative">
+                <div className="w-full h-full max-w-5xl max-h-[72vh] aspect-video mx-auto">
+                  <CustomParticipantTile 
+                    trackRef={focusTrack} 
+                    raisedHands={raisedHands}
+                    onTogglePin={() => togglePin(focusTrack.participant.identity)}
+                    isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
+                    mirror={focusTrack.participant.isLocal && videoMirroring}
+                    showName={showParticipantNames}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : computedLayout === 'sidebar' && focusTrack ? (
             <div className="flex flex-col md:flex-row gap-4 h-full w-full">
               <div className="flex-[3] bg-bg-dark rounded-2xl overflow-hidden relative shadow-2xl border border-white/5">
                 <CustomParticipantTile 
@@ -883,6 +1093,19 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   </div>
                 </div>
               </div>
+            ) : visibleTracks.length === 1 ? (
+              <div className="w-full h-full flex items-center justify-center p-4">
+                <div className="w-full h-full max-w-5xl max-h-[72vh] aspect-video">
+                  <CustomParticipantTile 
+                    trackRef={visibleTracks[0]} 
+                    raisedHands={raisedHands}
+                    onTogglePin={() => togglePin(visibleTracks[0].participant.identity)}
+                    isPinned={pinnedIdentities.has(visibleTracks[0].participant.identity)}
+                    mirror={visibleTracks[0].participant.isLocal && videoMirroring}
+                    showName={showParticipantNames}
+                  />
+                </div>
+              </div>
             ) : (
               <div 
                 className="grid gap-2 w-full h-full items-stretch"
@@ -918,30 +1141,62 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           )}
         </div>
 
-        {/* Sidebar Overlay */}
-        <AnimatePresence>
-          {activeTab && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-            >
-              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setActiveTab(null)} />
-              <motion.div
-                initial={{ y: 24, opacity: 0, scale: 0.96 }}
-                animate={{ y: 0, opacity: 1, scale: 1 }}
-                exit={{ y: 24, opacity: 0, scale: 0.96 }}
-                transition={{ type: 'spring', damping: 22, stiffness: 260 }}
-                className="relative w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-[32px] bg-white shadow-2xl"
+        {/* Live Captions Display */}
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-50 pointer-events-none">
+          <AnimatePresence>
+            {isCaptionsEnabled && (transcriptions.length > 0 || localTranscript) && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="flex flex-col items-center gap-2"
               >
-                <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                  <h2 className="text-lg font-bold text-slate-900 capitalize">{activeTab}</h2>
-                  <button onClick={() => setActiveTab(null)} className="inline-flex h-11 w-11 items-center justify-center rounded-full text-slate-600 transition-colors hover:bg-slate-100">
-                    <X size={20} />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-6 custom-scroll">
+                {transcriptions.map(t => (
+                  <div key={t.id} className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 text-white text-lg font-medium shadow-2xl">
+                    <span className="text-blue-400 font-bold mr-2">{t.identity.split('#')[0]}:</span>
+                    {t.text}
+                  </div>
+                ))}
+                {localTranscript && (
+                  <div className="bg-blue-600/80 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 text-white text-lg font-medium shadow-2xl">
+                    <span className="text-blue-200 font-bold mr-2">You:</span>
+                    {localTranscript}
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Sidebar Tabs (Participants, Chat, Info, Waiting) */}
+        <AnimatePresence mode="wait">
+          {activeTab && activeTab !== 'settings' && (
+            <motion.div
+              key="sidebar"
+              initial={{ x: '100%', opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className={cn(
+                "fixed top-[60px] bottom-[80px] right-0 z-40 bg-white border-l border-gray-200 overflow-hidden flex flex-col shadow-2xl transition-all",
+                isMobile ? "w-full" : "w-[360px]"
+              )}
+            >
+              <div className="flex items-center justify-between p-5 border-b border-gray-100 bg-white sticky top-0 z-10">
+                <h2 className="text-lg font-bold text-slate-800 capitalize flex items-center gap-2">
+                  {activeTab === 'info' && <Info size={20} className="text-blue-600" />}
+                  {(activeTab === 'participants' || activeTab === 'users') && <Users size={20} className="text-blue-600" />}
+                  {activeTab === 'chat' && <MessageSquare size={20} className="text-blue-600" />}
+                  {activeTab === 'waiting' && <ShieldCheck size={20} className="text-blue-600" />}
+                </h2>
+                <button 
+                  onClick={() => setActiveTab(null)}
+                  className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 custom-scroll bg-slate-50/30">
                 {activeTab === 'info' && (
                   <div className="space-y-6">
                     <div className="space-y-3">
@@ -956,15 +1211,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     </div>
                   </div>
                 )}
-                {activeTab === 'users' && (
+                {(activeTab === 'participants' || activeTab === 'users') && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-bold text-gray-600 uppercase tracking-widest">Participants</p>
-                      <span className="bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-full">
-                        {remoteParticipants.length + 1}
-                      </span>
+                      <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{remoteParticipants.length + 1}</span>
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 rounded-2xl overflow-hidden">
                       <ParticipantItem participant={localParticipant} isLocal />
                       {remoteParticipants.map(p => (
                         <ParticipantItem key={p.sid} participant={p} />
@@ -1066,171 +1319,236 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     )}
                   </div>
                 )}
-                {activeTab === 'settings' && (
-                  <div className="space-y-8">
-                    <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-                  <aside className="space-y-3 rounded-[32px] border border-slate-200 bg-slate-50 p-5">
-                    <div className="text-sm font-semibold uppercase tracking-wide text-slate-900">Settings</div>
-                    {(['video', 'audio', 'general', 'effects'] as const).map(cat => (
-                      <button 
-                        key={cat}
-                        onClick={() => setSettingsCategory(cat)}
+                {activeTab === 'notes' && (
+                  <NotesPanel user={user} navigate={navigate} />
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Settings Central Modal (Google Meet Style) */}
+        <AnimatePresence mode="wait">
+          {activeTab === 'settings' && (
+            <motion.div
+              key="settings-modal"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            >
+              <div className="absolute inset-0" onClick={() => setActiveTab(null)} />
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="relative w-full max-w-3xl h-[600px] overflow-hidden rounded-[8px] bg-white shadow-2xl flex flex-col"
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 px-6 border-b border-gray-200">
+                  <h2 className="text-xl font-normal text-gray-800">Settings</h2>
+                  <button 
+                    onClick={() => setActiveTab(null)}
+                    className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
+                  >
+                    <X size={24} strokeWidth={1.5} />
+                  </button>
+                </div>
+
+                <div className="flex flex-1 min-h-0 bg-white">
+                  {/* Left Sidebar */}
+                  <nav className="w-[240px] py-4 bg-white">
+                    {[
+                      { id: 'audio', label: 'Audio', icon: Mic },
+                      { id: 'video', label: 'Video', icon: VideoIcon },
+                      { id: 'general', label: 'General', icon: Settings },
+                      { id: 'captions', label: 'Captions', icon: MessageSquare },
+                      { id: 'reactions', label: 'Reactions', icon: Smile },
+                      { id: 'effects', label: 'Effects', icon: Sparkles }
+                    ].map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setSettingsCategory(cat.id as any)}
                         className={cn(
-                          "w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold transition-all",
-                          settingsCategory === cat ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-slate-600 hover:bg-slate-200"
+                          "w-full flex items-center gap-6 px-6 py-4 text-[14px] font-medium transition-all relative",
+                          settingsCategory === cat.id 
+                            ? "text-[#1a73e8] bg-[#e8f0fe] rounded-r-full" 
+                            : "text-[#5f6368] hover:bg-gray-50"
                         )}
                       >
-                        {cat}
+                        <cat.icon size={20} strokeWidth={settingsCategory === cat.id ? 2.5 : 1.5} />
+                        <span>{cat.label}</span>
+                        {settingsCategory === cat.id && (
+                          <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-[#1a73e8]" />
+                        )}
                       </button>
                     ))}
-                  </aside>
-                  <div className="space-y-6 overflow-y-auto max-h-[70vh] pr-1">
-                    
-                    {settingsCategory === 'video' && (
-                      <div className="space-y-6">
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-widest flex items-center gap-2">
-                            <Camera size={14} /> Camera
-                          </label>
-                          <select 
-                            value={selectedVideoId || videoDevices[0]?.deviceId}
-                            onChange={(e) => setSelectedVideoId(e.target.value)}
-                            className="w-full p-3 bg-gray-100 border border-gray-300 rounded-xl text-sm outline-none text-gray-900 focus:border-blue-400 transition-all"
-                          >
-                            {videoDevices.map(device => (
-                              <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-widest">Resolution</label>
-                          <select 
-                            value={selectedResolution}
-                            onChange={(e) => setSelectedResolution(e.target.value as any)}
-                            className="w-full p-3 bg-gray-100 border border-gray-300 rounded-xl text-sm outline-none text-gray-900 focus:border-blue-400 transition-all"
-                          >
-                            <option value="360p">Standard (360p)</option>
-                            <option value="720p">High Definition (720p)</option>
-                          </select>
-                        </div>
-                        <div className="flex items-center justify-between p-4 bg-gray-100 rounded-xl border border-gray-200">
-                          <span className="text-sm font-medium text-gray-900">Mirror my video</span>
-                          <button onClick={() => setVideoMirroring(!videoMirroring)} className={cn("w-10 h-5 rounded-full transition-colors relative", videoMirroring ? "bg-blue-600" : "bg-gray-300")}>
-                            <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all shadow-sm", videoMirroring ? "left-6" : "left-1")} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                  </nav>
 
+                  {/* Main Content */}
+                  <div className="flex-1 overflow-y-auto p-12 py-8 custom-scroll">
+                    {/* Audio Settings */}
                     {settingsCategory === 'audio' && (
-                      <div className="space-y-6">
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-widest flex items-center gap-2">
-                            <Mic size={14} /> Microphone
-                          </label>
-                          <select 
-                            value={selectedAudioId || audioDevices[0]?.deviceId}
-                            onChange={(e) => setSelectedAudioId(e.target.value)}
-                            className="w-full p-3 bg-gray-100 border border-gray-300 rounded-xl text-sm outline-none text-gray-900 focus:border-blue-400 transition-all"
-                          >
-                            {audioDevices.map(device => (
-                              <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-widest flex items-center gap-2">
-                            <Speaker size={14} /> Speaker
-                          </label>
-                          <div className="flex gap-2">
+                      <div className="max-w-md space-y-10">
+                        <section className="space-y-4">
+                          <label className="text-sm font-medium text-[#1a73e8] block">Microphone</label>
+                          <div className="relative">
                             <select 
-                              value={selectedSpeakerId || speakerDevices[0]?.deviceId}
-                              onChange={(e) => setSelectedSpeakerId(e.target.value)}
-                              className="flex-1 p-3 bg-gray-100 border border-gray-300 rounded-xl text-sm outline-none text-gray-900 focus:border-blue-400 transition-all"
+                              value={selectedAudioId || audioDevices[0]?.deviceId}
+                              onChange={(e) => setSelectedAudioId(e.target.value)}
+                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
                             >
-                              {speakerDevices.map(device => (
+                              {audioDevices.map(device => (
                                 <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
                               ))}
                             </select>
+                            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
+                          </div>
+                          <div className="flex items-center justify-between py-2 border-t border-gray-100 pt-4">
+                             <div className="flex flex-col">
+                                <span className="text-[14px] text-gray-700">Noise cancellation</span>
+                                <span className="text-[12px] text-gray-500">Filters out background noise</span>
+                             </div>
+                             <div 
+                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", noiseCancellation ? "bg-[#1a73e8]" : "bg-gray-300")}
+                               onClick={() => setNoiseCancellation(!noiseCancellation)}
+                             >
+                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", noiseCancellation ? "left-7" : "left-1")} />
+                             </div>
+                          </div>
+                        </section>
+
+                        <section className="space-y-4">
+                          <label className="text-sm font-medium text-[#1a73e8] block">Speaker</label>
+                          <div className="flex gap-4">
+                            <div className="relative flex-1">
+                              <select 
+                                value={selectedSpeakerId || speakerDevices[0]?.deviceId}
+                                onChange={(e) => setSelectedSpeakerId(e.target.value)}
+                                className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
+                              >
+                                {speakerDevices.map(device => (
+                                  <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                                ))}
+                              </select>
+                              <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
+                            </div>
                             <button 
                               onClick={() => {
                                 const audio = new Audio('https://www.soundjay.com/buttons/beep-01a.mp3');
-                                if (selectedSpeakerId) {
-                                  (audio as any).setSinkId?.(selectedSpeakerId);
-                                }
+                                if (selectedSpeakerId) (audio as any).setSinkId?.(selectedSpeakerId);
                                 audio.play();
                               }}
-                              className="px-4 bg-gray-100 hover:bg-gray-200 rounded-xl border border-gray-300 text-blue-600 text-xs font-bold transition-all"
+                              className="text-[#1a73e8] text-[14px] font-medium hover:bg-blue-50 px-4 py-2 rounded-md transition-all"
                             >
                               Test
                             </button>
                           </div>
-                        </div>
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between p-4 bg-gray-100 rounded-xl border border-gray-200">
-                            <span className="text-sm font-medium text-gray-900">Noise Cancellation</span>
-                            <button onClick={() => setNoiseCancellation(!noiseCancellation)} className={cn("w-10 h-5 rounded-full transition-colors relative", noiseCancellation ? "bg-blue-600" : "bg-gray-300")}>
-                              <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all shadow-sm", noiseCancellation ? "left-6" : "left-1")} />
-                            </button>
+                        </section>
+                      </div>
+                    )}
+
+                    {/* Video Settings */}
+                    {settingsCategory === 'video' && (
+                      <div className="max-w-md space-y-10">
+                        <section className="space-y-4">
+                          <label className="text-sm font-medium text-[#1a73e8] block">Camera</label>
+                          <div className="relative">
+                            <select 
+                              value={selectedVideoId || videoDevices[0]?.deviceId}
+                              onChange={(e) => setSelectedVideoId(e.target.value)}
+                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
+                            >
+                              {videoDevices.map(device => (
+                                <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
                           </div>
-                          <div className="flex items-center justify-between p-4 bg-gray-100 rounded-xl border border-gray-200">
-                            <span className="text-sm font-medium text-gray-900">Echo Cancellation</span>
-                            <button onClick={() => setEchoCancellation(!echoCancellation)} className={cn("w-10 h-5 rounded-full transition-colors relative", echoCancellation ? "bg-blue-600" : "bg-gray-300")}>
-                              <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all shadow-sm", echoCancellation ? "left-6" : "left-1")} />
-                            </button>
-                          </div>
+                        </section>
+                        <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center border border-gray-200">
+                           <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center text-gray-300">
+                             <VideoIcon size={32} strokeWidth={1} />
+                           </div>
                         </div>
                       </div>
                     )}
 
+                    {/* Effects Settings */}
                     {settingsCategory === 'effects' && (
-                      <div className="space-y-6">
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-widest flex items-center gap-2">
-                            <Sparkles size={14} /> Visual Effects
-                          </label>
-                          <div className="grid grid-cols-3 gap-2">
+                      <div className="space-y-8">
+                        <div>
+                          <label className="text-sm font-medium text-[#1a73e8] mb-4 block">Backgrounds</label>
+                          <div className="grid grid-cols-3 gap-4">
                             <button 
                               onClick={() => setSelectedBg('none')}
                               className={cn(
-                                "aspect-video rounded-lg border-2 flex flex-col items-center justify-center gap-1 transition-all",
-                                selectedBg === 'none' ? "border-blue-600 bg-blue-100" : "border-gray-300 hover:border-gray-400"
+                                "flex flex-col items-center justify-center gap-2 p-4 rounded-lg border transition-all",
+                                selectedBg === 'none' ? "bg-[#e8f0fe] border-[#1a73e8] text-[#1a73e8]" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
                               )}
                             >
-                              <X size={16} />
-                              <span className="text-xs text-gray-900">None</span>
+                              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+                                <X size={20} />
+                              </div>
+                              <span className="text-[12px] font-medium">None</span>
                             </button>
+                            
+                            <button 
+                              onClick={() => {
+                                fileInputRef.current?.click();
+                              }}
+                              className="flex flex-col items-center justify-center gap-2 p-4 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all"
+                            >
+                              <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-[#1a73e8]">
+                                <Monitor size={20} />
+                              </div>
+                              <span className="text-[12px] font-medium">Upload Image</span>
+                              <input 
+                                type="file" 
+                                ref={fileInputRef} 
+                                className="hidden" 
+                                accept="image/*"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const url = URL.createObjectURL(file);
+                                    setCustomBgImage(url);
+                                    setSelectedBg('image');
+                                  }
+                                }}
+                              />
+                            </button>
+
                             <button 
                               onClick={() => setSelectedBg('blur')}
                               className={cn(
-                                "aspect-video rounded-lg border-2 flex flex-col items-center justify-center gap-1 transition-all",
-                                selectedBg === 'blur' ? "border-blue-600 bg-blue-100" : "border-gray-300 hover:border-gray-400"
+                                "flex flex-col items-center justify-center gap-2 p-4 rounded-lg border transition-all",
+                                selectedBg === 'blur' ? "bg-[#e8f0fe] border-[#1a73e8] text-[#1a73e8]" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
                               )}
                             >
-                              <div className="w-6 h-6 rounded-full bg-gray-300 blur-[2px]" />
-                              <span className="text-xs text-gray-900">Blur</span>
+                              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center bg-gradient-to-tr from-gray-200 to-gray-50 blur-[2px]" />
+                              <span className="text-[12px] font-medium">Blur</span>
                             </button>
                           </div>
                         </div>
-                        <div className="space-y-3">
-                          <label className="text-xs font-bold text-gray-600 uppercase tracking-widest">Background Images</label>
-                          <div className="grid grid-cols-2 gap-3">
+
+                        <div className="space-y-4">
+                          <label className="text-[12px] font-medium text-gray-500">Preset backgrounds</label>
+                          <div className="grid grid-cols-4 gap-3">
                             {bgImages.map(img => (
                               <button 
                                 key={img.id}
                                 onClick={() => {
                                   setSelectedBg('image');
                                   setSelectedBgImage(img.url);
+                                  setCustomBgImage(null);
                                 }}
                                 className={cn(
-                                  "relative aspect-video rounded-xl overflow-hidden border-2 transition-all",
-                                  selectedBg === 'image' && selectedBgImage === img.url ? "border-blue-600 scale-[1.02]" : "border-transparent hover:border-gray-300"
+                                  "relative aspect-video rounded-md overflow-hidden border-2 transition-all",
+                                  selectedBg === 'image' && selectedBgImage === img.url && !customBgImage ? "border-[#1a73e8] scale-105 shadow-md" : "border-transparent hover:border-gray-200"
                                 )}
                               >
                                 <img src={img.url} alt={img.label} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                <div className="absolute inset-0 bg-black/20 flex items-end p-2">
-                                  <span className="text-xs font-medium text-white">{img.label}</span>
-                                </div>
                               </button>
                             ))}
                           </div>
@@ -1238,55 +1556,50 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       </div>
                     )}
 
+                    {/* Captions Settings */}
+                    {settingsCategory === 'captions' && (
+                      <div className="max-w-md space-y-6">
+                        <div className="p-6 bg-[#f8f9fa] rounded-xl flex items-center justify-between">
+                           <div className="space-y-1">
+                             <h4 className="text-[14px] font-medium text-gray-800">Live Captions</h4>
+                             <p className="text-[12px] text-gray-500">Show what participants are saying on screen</p>
+                           </div>
+                           <div 
+                             className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", isCaptionsEnabled ? "bg-[#1a73e8]" : "bg-gray-300")}
+                             onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
+                           >
+                              <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", isCaptionsEnabled ? "left-7" : "left-1")} />
+                           </div>
+                        </div>
+                        <div className="p-4 border border-gray-100 rounded-lg text-xs text-gray-500 leading-relaxed bg-white">
+                           Note: Client-side captions use the Web Speech API. For best results, use a modern browser like Chrome or Edge.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* General Settings */}
                     {settingsCategory === 'general' && (
-                      <div className="space-y-6">
-                        <div className="flex items-center justify-between p-4 bg-gray-100 rounded-xl border border-gray-200">
-                          <div className="space-y-1">
-                            <span className="text-sm font-medium text-gray-900 block">Show clock</span>
-                            <span className="text-xs text-gray-600">Display current time in meeting</span>
+                      <div className="max-w-md space-y-6">
+                         <div className="flex items-center justify-between py-2">
+                             <div className="flex flex-col">
+                                <span className="text-[14px] text-gray-700">Show current time</span>
+                                <span className="text-[12px] text-gray-500">Display Clock on the bottom bar</span>
+                             </div>
+                             <div 
+                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", showClock ? "bg-[#1a73e8]" : "bg-gray-300")}
+                               onClick={() => setShowClock(!showClock)}
+                             >
+                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", showClock ? "left-7" : "left-1")} />
+                             </div>
                           </div>
-                          <button onClick={() => setShowClock(!showClock)} className={cn("w-10 h-5 rounded-full transition-colors relative", showClock ? "bg-blue-600" : "bg-gray-300")}>
-                            <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all shadow-sm", showClock ? "left-6" : "left-1")} />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between p-4 bg-gray-100 rounded-xl border border-gray-200">
-                          <div className="space-y-1">
-                            <span className="text-sm font-medium text-gray-900 block">Participant names</span>
-                            <span className="text-xs text-gray-600">Show names on video tiles</span>
-                          </div>
-                          <button onClick={() => setShowParticipantNames(!showParticipantNames)} className={cn("w-10 h-5 rounded-full transition-colors relative", showParticipantNames ? "bg-blue-600" : "bg-gray-300")}>
-                            <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all shadow-sm", showParticipantNames ? "left-6" : "left-1")} />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between p-4 bg-gray-100 rounded-xl border border-gray-200">
-                          <div className="space-y-1">
-                            <span className="text-sm font-medium text-gray-900 block">Auto-admit users</span>
-                            <span className="text-xs text-gray-600">Automatically admit participants from your organization</span>
-                          </div>
-                          <button className="w-10 h-5 rounded-full bg-gray-300 relative cursor-not-allowed opacity-50">
-                            <div className="absolute top-1 left-1 w-3 h-3 bg-white rounded-full" />
-                          </button>
-                        </div>
-                        <div className="flex items-center justify-between p-4 bg-gray-100 rounded-xl border border-gray-200">
-                          <div className="space-y-1">
-                            <span className="text-sm font-medium text-gray-900 block">Noise reduction (AI)</span>
-                            <span className="text-xs text-gray-600">Use Gemini AI to filter background noise</span>
-                          </div>
-                          <button className="w-10 h-5 rounded-full bg-blue-600 relative">
-                            <div className="absolute top-1 left-6 w-3 h-3 bg-white rounded-full" />
-                          </button>
-                        </div>
                       </div>
                     )}
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </motion.div>
-      </motion.div>
-    )}
-  </AnimatePresence>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Taskbar */}
@@ -1304,27 +1617,107 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         </div>
 
         <div className="flex items-center gap-3 md:gap-4 justify-center w-full md:w-1/3">
-          <ControlButton 
-            active={localParticipant.isMicrophoneEnabled} 
-            onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
-            icon={localParticipant.isMicrophoneEnabled ? <Mic size={22} /> : <MicOff size={22} />}
-            micVideo={true}
-            enabled={localParticipant.isMicrophoneEnabled}
-          />
-          <ControlButton 
-            active={localParticipant.isCameraEnabled} 
-            onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
-            icon={localParticipant.isCameraEnabled ? <VideoIcon size={22} /> : <VideoOff size={22} />}
-            micVideo={true}
-            enabled={localParticipant.isCameraEnabled}
-          />
+          <div className={cn("relative", isMicMenuOpen && "z-[70]")}>
+            {isMicMenuOpen && (
+              <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsMicMenuOpen(false)} />
+            )}
+            <ControlButton 
+              onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
+              icon={localParticipant.isMicrophoneEnabled ? <Mic size={22} /> : <MicOff size={22} />}
+              micVideo={true}
+              enabled={localParticipant.isMicrophoneEnabled}
+              onDropdownClick={() => setIsMicMenuOpen(!isMicMenuOpen)}
+              hasDropdown
+            />
+            <AnimatePresence>
+              {isMicMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700 p-2 z-[70]"
+                >
+                  <p className="text-[10px] font-bold text-slate-500 px-3 py-1 uppercase tracking-wider">Microphone</p>
+                  <div className="max-h-48 overflow-y-auto custom-scroll">
+                    {audioDevices.map(d => (
+                      <button 
+                        key={d.deviceId}
+                        onClick={() => { setSelectedAudioId(d.deviceId); setIsMicMenuOpen(false); }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
+                          selectedAudioId === d.deviceId ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/5"
+                        )}
+                      >
+                        <Mic size={14} />
+                        <span className="truncate">{d.label || `Microphone ${d.deviceId.slice(0, 4)}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className={cn("relative", isCamMenuOpen && "z-[70]")}>
+            {isCamMenuOpen && (
+              <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsCamMenuOpen(false)} />
+            )}
+            <ControlButton 
+              onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
+              icon={localParticipant.isCameraEnabled ? <VideoIcon size={22} /> : <VideoOff size={22} />}
+              micVideo={true}
+              enabled={localParticipant.isCameraEnabled}
+              onDropdownClick={() => setIsCamMenuOpen(!isCamMenuOpen)}
+              hasDropdown
+            />
+            <AnimatePresence>
+              {isCamMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700 p-2 z-[70]"
+                >
+                  <p className="text-[10px] font-bold text-slate-500 px-3 py-1 uppercase tracking-wider">Camera</p>
+                  <div className="max-h-48 overflow-y-auto custom-scroll">
+                    {videoDevices.map(d => (
+                      <button 
+                        key={d.deviceId}
+                        onClick={() => { setSelectedVideoId(d.deviceId); setIsCamMenuOpen(false); }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
+                          selectedVideoId === d.deviceId ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/5"
+                        )}
+                      >
+                        <VideoIcon size={14} />
+                        <span className="truncate">{d.label || `Camera ${d.deviceId.slice(0, 4)}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="hidden sm:inline-flex">
             <ControlButton 
               active={isCaptionsEnabled} 
               onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
-              icon={<MessageSquare size={22} />}
+              icon={
+                <div className="relative">
+                  <Languages size={22} />
+                  {isCaptionsEnabled && (
+                    <motion.span 
+                      animate={{ opacity: [0.5, 1, 0.5], scale: [0.9, 1.1, 0.9] }}
+                      transition={{ repeat: Infinity, duration: 2 }}
+                      className="absolute -top-1.5 -right-1.5 px-1 bg-green-500 text-[8px] font-bold text-white rounded-md border border-slate-900 shadow-lg"
+                    >
+                      ON
+                    </motion.span>
+                  )}
+                </div>
+              }
               highlight={isCaptionsEnabled}
-              title="Turn on captions"
+              title={isCaptionsEnabled ? "Turn off captions" : "Turn on captions"}
             />
           </div>
           <ControlButton 
@@ -1339,17 +1732,20 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
             highlight={localParticipant.isScreenShareEnabled}
           />
-          <div className="relative flex items-center gap-2">
+          <div className={cn("relative flex items-center gap-2", (isReactionsMenuOpen || isMoreMenuOpen) && "z-[70]")}>
             {/* Reactions Dropdown Button */}
-            <div className="relative">
-<div className="hidden sm:inline-flex">
-              <ControlButton 
-                onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
-                icon={<Smile size={22} />}
-                active={isReactionsMenuOpen}
-                title="Reactions"
-              />
-            </div>
+            <div className={cn("relative", isReactionsMenuOpen && "z-[70]")}>
+              {isReactionsMenuOpen && (
+                <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsReactionsMenuOpen(false)} />
+              )}
+              <div className="hidden sm:inline-flex">
+                <ControlButton 
+                  onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
+                  icon={<Smile size={22} />}
+                  active={isReactionsMenuOpen}
+                  title="Reactions"
+                />
+              </div>
               
               {/* Reactions Dropdown Menu */}
               <AnimatePresence>
@@ -1380,20 +1776,24 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </AnimatePresence>
             </div>
 
-            <ControlButton 
-              onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-              icon={<MoreVertical size={22} />}
-              active={isMoreMenuOpen}
-            />
-
-            <AnimatePresence>
+            <div className={cn("relative px-1", isMoreMenuOpen && "z-[70]")}>
               {isMoreMenuOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-56 bg-surface/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[70]"
-                >
+                <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsMoreMenuOpen(false)} />
+              )}
+              <ControlButton 
+                onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                icon={<MoreVertical size={22} />}
+                active={isMoreMenuOpen}
+              />
+
+              <AnimatePresence>
+                {isMoreMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-56 bg-surface/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[70]"
+                  >
                   <button 
                     onClick={() => { setLayoutMode('tiled'); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
                     className={cn(
@@ -1413,6 +1813,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   >
                     <Monitor size={18} className={layoutMode === 'sidebar' ? "text-accent-blue" : "text-text-secondary"} />
                     Sidebar layout
+                  </button>
+                  <button 
+                    onClick={() => { setLayoutMode('imo'); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm transition-colors",
+                      layoutMode === 'imo' ? "text-accent-blue bg-accent-blue/5" : "text-text-primary"
+                    )}
+                  >
+                    <LayoutIcon size={18} className={cn("text-text-secondary", layoutMode === 'imo' && "text-accent-blue rotate-90")} />
+                    IMO View (Filmstrip)
                   </button>
                   <button 
                     onClick={() => { setHideNonVideo(!hideNonVideo); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
@@ -1440,8 +1850,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               )}
             </AnimatePresence>
           </div>
-          <button 
-            onClick={() => navigate('/')}
+        </div>
+        <button 
+          onClick={() => navigate('/')}
             className="w-[56px] h-[56px] bg-red-600 hover:bg-red-700 text-white rounded-[18px] flex items-center justify-center transition-all shadow-xl shadow-red-500/20 active:scale-95"
           >
             <PhoneOff size={24} />
@@ -1462,18 +1873,6 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           )}
         </div>
       </div>
-
-      {/* Captions Overlay */}
-      {isCaptionsEnabled && (
-        <div className="fixed bottom-[100px] left-1/2 -translate-x-1/2 w-full max-w-2xl px-6 pointer-events-none z-50">
-          <div className="bg-black/60 backdrop-blur-xl p-4 rounded-2xl border border-white/10 text-center">
-            <p className="text-text-secondary text-xs font-bold uppercase tracking-widest mb-1">Captions (Beta)</p>
-            <p className="text-white text-lg font-medium">
-              {remoteParticipants.some(p => p.isSpeaking) || localParticipant.isSpeaking ? "The speaker is currently talking... (Live captions would appear here)" : "Waiting for speech..."}
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Floating Reactions Overlay */}
       <div className="fixed inset-0 pointer-events-none z-[100] overflow-hidden">
@@ -1538,7 +1937,7 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         <div className={cn("w-full h-full", mirror ? "scale-x-[-1]" : "")}>
           <VideoTrack 
             trackRef={trackRef} 
-            className="w-full h-full object-cover" 
+            className="w-full h-full object-contain bg-black/40" 
           />
         </div>
       )}
@@ -1619,25 +2018,36 @@ function ParticipantItem(props: any) {
   );
 }
 
-function ControlButton({ active, onClick, icon, danger, warning, highlight, micVideo, enabled, title }: any) {
+function ControlButton({ active, onClick, icon, danger, warning, highlight, micVideo, enabled, title, hasDropdown, onDropdownClick }: any) {
   return (
-    <button 
-      onClick={onClick}
-      title={title}
-      className={cn(
-        "w-[56px] h-[56px] rounded-[18px] transition-all duration-200 ease-out flex items-center justify-center flex-shrink-0 shadow-sm shadow-black/10",
-        micVideo ? (
-          "bg-[#1a2639] text-white hover:bg-slate-700"
-        ) : (
-          danger && !active ? "bg-red-600 text-white hover:bg-red-700" : 
-          warning && active ? "bg-yellow-300 text-slate-900 hover:bg-yellow-400" :
-          highlight && active ? "bg-[#1a2639] text-white hover:bg-slate-700" :
-          active ? "bg-[#1a2639] text-white hover:bg-slate-700" : "bg-[#1a2639] text-white hover:bg-slate-700"
-        )
+    <div className="flex items-center group/btn">
+      <button 
+        onClick={onClick}
+        title={title}
+        className={cn(
+          "w-[56px] h-[56px] transition-all duration-200 ease-out flex items-center justify-center flex-shrink-0 shadow-sm shadow-black/10",
+          hasDropdown ? "rounded-l-[18px] border-r border-white/5" : "rounded-[18px]",
+          micVideo ? (
+            "bg-[#1a2639] text-white hover:bg-slate-700"
+          ) : (
+            danger && !active ? "bg-red-600 text-white hover:bg-red-700" : 
+            warning && active ? "bg-yellow-300 text-slate-900 hover:bg-yellow-400" :
+            highlight && active ? "bg-[#1a2639] text-white hover:bg-slate-700" :
+            active ? "bg-[#1a2639] text-white hover:bg-slate-700" : "bg-[#1a2639] text-white hover:bg-slate-700"
+          )
+        )}
+      >
+        {icon}
+      </button>
+      {hasDropdown && (
+        <button
+          onClick={onDropdownClick}
+          className="w-[24px] h-[56px] bg-[#1a2639] text-white/70 hover:text-white rounded-r-[18px] hover:bg-slate-700 transition-all flex items-center justify-center border-l border-white/5"
+        >
+          <ChevronUp size={14} className="group-hover/btn:translate-y-[-1px] transition-transform" />
+        </button>
       )}
-    >
-      {icon}
-    </button>
+    </div>
   );
 }
 
@@ -1659,3 +2069,203 @@ function TabButton({ active, onClick, icon, badge }: any) {
     </button>
   );
 }
+
+const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any }) => {
+  const { login } = useAuth();
+  const [notes, setNotes] = useState<any[]>([]);
+  const [isCreatingNote, setIsCreatingNote] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState("");
+  const [newNoteBody, setNewNoteBody] = useState("");
+  const [searchNotesTerm, setSearchNotesTerm] = useState("");
+  const [komuUser, setKomuUser] = useState(komuAuth.currentUser);
+
+  useEffect(() => {
+    return onAuthStateChanged(komuAuth, (u) => {
+      setKomuUser(u);
+    });
+  }, []);
+
+  const uid = komuUser?.uid;
+
+  useEffect(() => {
+    if (!uid) return;
+    console.log("[NotesPanel] Fetching notes for Komu UID:", uid);
+    try {
+      // Query notes collection for this user's UID in the komu project
+      const q = query(
+        collection(komuDb, 'notes'),
+        where('uid', '==', uid),
+        where('isTrash', '==', false)
+      );
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Manual sort in client
+        data.sort((a: any, b: any) => {
+          const tA = a.updatedAt?.toMillis?.() || 0;
+          const tB = b.updatedAt?.toMillis?.() || 0;
+          return tB - tA;
+        });
+        setNotes(data);
+      }, (err) => {
+        console.error("NotesPanel fetch error (komu-notes project):", err);
+      });
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("Firestore error in NotesPanel:", err);
+    }
+  }, [uid]);
+
+  const handleAddNote = async () => {
+    if (!komuUser || (!newNoteTitle.trim() && !newNoteBody.trim())) return;
+    try {
+      await addDoc(collection(komuDb, 'notes'), {
+        uid: komuUser.uid,
+        title: newNoteTitle,
+        body: newNoteBody,
+        type: 'text',
+        isArchive: false,
+        isTrash: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        color: '#ffffff'
+      });
+      setNewNoteTitle("");
+      setNewNoteBody("");
+      setIsCreatingNote(false);
+    } catch (err) {
+      console.error("Failed to add note to komu-notes project:", err);
+    }
+  };
+
+  const toggleArchive = async (id: string, isArchive: boolean) => {
+    try {
+      await updateDoc(doc(komuDb, 'notes', id), { isArchive, updatedAt: serverTimestamp() });
+    } catch (err) {
+      console.error("Failed to archive note:", err);
+    }
+  };
+
+  const toggleTrash = async (id: string, isTrash: boolean) => {
+    try {
+      await updateDoc(doc(komuDb, 'notes', id), { isTrash, updatedAt: serverTimestamp() });
+    } catch (err) {
+      console.error("Failed to trash note:", err);
+    }
+  };
+
+  const filteredNotes = notes.filter(n => 
+    n.title?.toLowerCase().includes(searchNotesTerm.toLowerCase()) || 
+    n.body?.toLowerCase().includes(searchNotesTerm.toLowerCase())
+  );
+
+  if (!user || !komuUser) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
+        <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center text-blue-600 shadow-inner">
+          <FileText size={40} />
+        </div>
+        <div className="space-y-2">
+           <h3 className="text-lg font-bold text-gray-900 leading-tight">Sync your notes</h3>
+           <p className="text-sm text-gray-500">Sign in with Google to access your saved notes from Komu Notes.</p>
+        </div>
+        <button 
+          onClick={login}
+          className="px-8 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"
+        >
+          {user ? "Sync Komu Account" : "Sign in with Google"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="mb-4 space-y-3 shrink-0">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+          <input 
+            type="text"
+            placeholder="Search notes..."
+            value={searchNotesTerm}
+            onChange={(e) => setSearchNotesTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none transition-all"
+          />
+        </div>
+        {!isCreatingNote ? (
+          <button 
+            onClick={() => setIsCreatingNote(true)}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl hover:bg-blue-700 transition-all font-bold shadow-lg shadow-blue-600/20"
+          >
+            <Plus size={18} />
+            Take a note
+          </button>
+        ) : (
+          <div className="bg-white border border-blue-200 rounded-2xl p-4 shadow-xl space-y-3">
+            <input 
+              type="text"
+              placeholder="Title"
+              autoFocus
+              value={newNoteTitle}
+              onChange={(e) => setNewNoteTitle(e.target.value)}
+              className="w-full text-base font-bold bg-transparent border-none outline-none placeholder:text-gray-400"
+            />
+            <textarea 
+              placeholder="Take a note..."
+              value={newNoteBody}
+              onChange={(e) => setNewNoteBody(e.target.value)}
+              className="w-full text-sm bg-transparent border-none outline-none resize-none min-h-[100px] placeholder:text-gray-400"
+            />
+            <div className="flex items-center justify-between pt-2">
+               <button 
+                onClick={() => { setIsCreatingNote(false); setNewNoteTitle(""); setNewNoteBody(""); }}
+                className="text-xs font-bold text-gray-500 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+              <button 
+                disabled={!newNoteTitle.trim() && !newNoteBody.trim()}
+                onClick={handleAddNote}
+                className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all"
+              >
+                Save note
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 space-y-3 overflow-y-auto custom-scroll pr-2">
+        {notes
+          .filter(n => n.title.toLowerCase().includes(searchNotesTerm.toLowerCase()) || n.body.toLowerCase().includes(searchNotesTerm.toLowerCase()))
+          .map(note => (
+          <div key={note.id} className="group p-4 bg-white border border-gray-100 rounded-2xl hover:border-blue-200 hover:shadow-md transition-all relative">
+            <h4 className="font-bold text-gray-900 text-sm mb-1">{note.title || "Untitled"}</h4>
+            <p className="text-gray-600 text-xs line-clamp-3 leading-relaxed whitespace-pre-wrap">
+              {note.body}
+            </p>
+            <div className="mt-3 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="text-[10px] text-gray-400 font-medium">
+                {note.updatedAt?.toDate() ? new Date(note.updatedAt.toDate()).toLocaleDateString() : 'Just now'}
+              </span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => toggleArchive(note.id, !note.isArchive)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all">
+                  <Archive size={14} />
+                </button>
+                <button onClick={() => toggleTrash(note.id, true)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {notes.length === 0 && !isCreatingNote && (
+          <div className="h-40 flex flex-col items-center justify-center text-center p-6 space-y-3 text-gray-400">
+            <FileText size={32} />
+            <p className="text-xs">Your saved notes will appear here.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
