@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInWithCredential } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -26,4 +26,4 @@ export const komuDb = getFirestore(komuApp);
 // ADD THIS LINE:
 export const komuAuth = getAuth(komuApp); 
 
-export { signInWithPopup, signOut };
+export { signInWithPopup, signOut, signInWithCredential };

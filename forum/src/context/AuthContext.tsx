@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
-import { auth, googleProvider, signInWithPopup, signOut } from '../firebase';
+import { User, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, signInWithCredential } from 'firebase/auth';
+import { auth, komuAuth, googleProvider } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -28,8 +28,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
 
   useEffect(() => {
+    // Listen for main app auth changes
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
+      
+      // Also listen for komu auth changes to ensure we are synced
+      // If we have a user on main auth but not on komu auth, we might need to handle that,
+      // but usually the login function will handle the initial sync.
+      
       if (user) {
         try {
           // Fetch preferences from Firestore
@@ -51,6 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         setPreferences(null);
+        // Ensure komuAuth is also signed out
+        if (komuAuth.currentUser) {
+          signOut(komuAuth).catch(err => console.error("Komu sign out failed:", err));
+        }
       }
       setLoading(false);
     });
@@ -60,7 +70,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      
+      if (credential) {
+        // Sign in to secondary app as well using the same credential
+        await signInWithCredential(komuAuth, credential);
+        console.log("Successfully signed in to both apps");
+      }
     } catch (error) {
       console.error("Login failed:", error);
     }
@@ -69,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       await signOut(auth);
+      await signOut(komuAuth);
     } catch (error) {
       console.error("Logout failed:", error);
     }

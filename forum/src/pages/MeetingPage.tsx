@@ -30,8 +30,7 @@ import {
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { useAuth } from '../context/AuthContext';
-import { db, auth, komuDb, komuAuth } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { db, auth, komuDb } from '../firebase';
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -288,8 +287,8 @@ export default function MeetingPage() {
           setIsRecording={setIsRecording} 
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          isToolsMenuOpen={isKomuToolsOpen}
-          setIsToolsMenuOpen={setIsKomuToolsOpen}
+          isKomuToolsOpen={isKomuToolsOpen}
+          setIsKomuToolsOpen={setIsKomuToolsOpen}
         />
         <MeetingRoomContent 
           room={room || ""} 
@@ -301,8 +300,8 @@ export default function MeetingPage() {
           initialCam={preJoinCam}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          isToolsMenuOpen={isKomuToolsOpen}
-          setIsToolsMenuOpen={setIsKomuToolsOpen}
+          isKomuToolsOpen={isKomuToolsOpen}
+          setIsKomuToolsOpen={setIsKomuToolsOpen}
         />
       </div>
     </LiveKitRoom>
@@ -2071,19 +2070,12 @@ function TabButton({ active, onClick, icon, badge }: any) {
 }
 
 const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any }) => {
-  const { login } = useAuth();
+  const { login, komuLogin, komuUser } = useAuth();
   const [notes, setNotes] = useState<any[]>([]);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteBody, setNewNoteBody] = useState("");
   const [searchNotesTerm, setSearchNotesTerm] = useState("");
-  const [komuUser, setKomuUser] = useState(komuAuth.currentUser);
-
-  useEffect(() => {
-    return onAuthStateChanged(komuAuth, (u) => {
-      setKomuUser(u);
-    });
-  }, []);
 
   const uid = komuUser?.uid;
 
@@ -2170,7 +2162,7 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
            <p className="text-sm text-gray-500">Sign in with Google to access your saved notes from Komu Notes.</p>
         </div>
         <button 
-          onClick={login}
+          onClick={komuLogin}
           className="px-8 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"
         >
           {user ? "Sync Komu Account" : "Sign in with Google"}
