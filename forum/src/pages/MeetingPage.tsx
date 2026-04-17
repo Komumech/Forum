@@ -26,7 +26,7 @@ import {
   X, Send, ChevronDown, Settings, Copy, Check, Pin, PinOff,
   Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight, ArrowLeft,
   Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
-  ChevronUp, FileText, Plus, Search, Trash2, Archive, Save
+  ChevronUp, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { useAuth } from '../context/AuthContext';
@@ -115,10 +115,15 @@ export default function MeetingPage() {
     if (!name || !room) return;
     console.log(`[MeetingPage] Attempting to join room: ${room} as ${name}`);
     try {
+      // Proactive host check for metadata
+      const isAdmin = user?.email === "komumech@gmail.com";
+      const isScheduledHost = meetingDetails && (meetingDetails.hostId === user?.uid || meetingDetails.hostEmail === user?.email);
+      const hostDetected = !!(isAdmin || isScheduledHost);
+
       const metadata = JSON.stringify({ 
-        pending: true, // Default to pending for waiting room
+        pending: !hostDetected, // Hosts are never pending
         avatar: user?.photoURL || "",
-        isHost: false // Will be determined by host check
+        isHost: hostDetected
       });
 
       streamRef.current?.getTracks().forEach(track => track.stop());
@@ -304,6 +309,7 @@ export default function MeetingPage() {
           setActiveTab={setActiveTab}
           isKomuToolsOpen={isKomuToolsOpen}
           setIsKomuToolsOpen={setIsKomuToolsOpen}
+          meetingDetails={meetingDetails}
         />
       </div>
     </LiveKitRoom>
@@ -312,41 +318,94 @@ export default function MeetingPage() {
 }
 
 function MeetingRoomHeader({ room, isRecording, setIsRecording, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen }: { room: string, isRecording: boolean, setIsRecording: (v: boolean) => void, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void }) {
+  const [isAppsOpen, setIsAppsOpen] = useState(false);
+
+  const apps = [
+    { name: 'Search', url: 'https://komu-search.streamlit.app/', icon: <Search size={24} />, color: 'bg-blue-500' },
+    { name: 'Dashboard', url: 'https://komuthemedashboard.vercel.app/', icon: <LayoutDashboard size={24} />, color: 'bg-indigo-500' },
+    { name: 'Calendar', url: 'https://komucalendar.vercel.app/', icon: <img src="https://komuhost.vercel.app/calendarlogo.png" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />, color: 'bg-red-500' },
+    { name: 'Notes', url: 'https://komunotes.vercel.app/', icon: <FileText size={24} />, color: 'bg-yellow-500' },
+    { name: 'Forum', url: 'https://forum-bykomu.vercel.app/', icon: <img src="https://komuhost.vercel.app/favicon.ico" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />, color: 'bg-green-500' },
+  ];
+
   return (
     <header className="absolute top-0 left-0 right-0 h-[72px] px-6 flex items-center justify-between bg-slate-950/90 z-[70] pointer-events-none">
       <div className="flex items-center gap-3 pointer-events-auto">
-        <button onClick={() => setIsKomuToolsOpen(!isKomuToolsOpen)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-800/90 px-3 py-2 text-sm font-semibold text-white border border-white/10 transition-all duration-200 ease-out hover:bg-slate-700 relative z-[75]">
-          <Settings size={18} />
-          <span>Tools</span>
-          <ChevronDown size={16} className={cn("transition-transform duration-200", isKomuToolsOpen && "rotate-180")} />
-        </button>
-        <AnimatePresence>
-          {isKomuToolsOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: -8, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.95 }}
-              className="absolute top-[72px] left-6 z-[70] w-56 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl p-2"
-            >
-              <button 
-                onClick={() => { setActiveTab(activeTab === 'notes' ? null : 'notes'); setIsKomuToolsOpen(false); }}
-                className={cn(
-                  "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-sm transition-colors",
-                  activeTab === 'notes' ? "text-blue-400 bg-blue-600/10" : "text-white"
-                )}
+        <div className="relative">
+          <button onClick={() => setIsKomuToolsOpen(!isKomuToolsOpen)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-800/90 px-3 py-2 text-sm font-semibold text-white border border-white/10 transition-all duration-200 ease-out hover:bg-slate-700 relative z-[75]">
+            <Settings size={18} />
+            <span>Tools</span>
+            <ChevronDown size={16} className={cn("transition-transform duration-200", isKomuToolsOpen && "rotate-180")} />
+          </button>
+          <AnimatePresence>
+            {isKomuToolsOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                className="absolute top-[52px] left-0 z-[70] w-56 rounded-2xl bg-slate-900/95 border border-slate-700 shadow-2xl p-2"
               >
-                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", activeTab === 'notes' ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400")}>
-                  <FileText size={18} />
-                </div>
-                <span>Notes</span>
-              </button>
-              <div className="h-px bg-white/5 my-2" />
-              <div className="px-3 py-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">More tools coming soon</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                <button 
+                  onClick={() => { setActiveTab(activeTab === 'notes' ? null : 'notes'); setIsKomuToolsOpen(false); }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-sm transition-colors",
+                    activeTab === 'notes' ? "text-blue-400 bg-blue-600/10" : "text-white"
+                  )}
+                >
+                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", activeTab === 'notes' ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400")}>
+                    <FileText size={18} />
+                  </div>
+                  <span>Notes</span>
+                </button>
+                <div className="h-px bg-white/5 my-2" />
+                <div className="px-3 py-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">More tools coming soon</div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
-      <div className="pointer-events-auto" />
+      <div className="flex items-center gap-4 pointer-events-auto">
+        <div className="relative">
+          <button 
+            onClick={() => setIsAppsOpen(!isAppsOpen)}
+            className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-all"
+            title="Komu Apps"
+          >
+            <LayoutGrid size={24} />
+          </button>
+          
+          <AnimatePresence>
+            {isAppsOpen && (
+              <>
+                <div className="fixed inset-0 z-[80]" onClick={() => setIsAppsOpen(false)} />
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  className="absolute top-12 right-0 z-[100] w-[320px] bg-white rounded-3xl shadow-2xl border border-gray-100 p-6"
+                >
+                  <div className="grid grid-cols-3 gap-2">
+                    {apps.map((app) => (
+                      <a 
+                        key={app.name}
+                        href={app.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center justify-center p-3 rounded-2xl hover:bg-gray-50 transition-all group"
+                      >
+                        <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-2 shadow-sm group-hover:shadow-md transition-shadow bg-gray-50 text-gray-600")}>
+                          {app.icon}
+                        </div>
+                        <span className="text-[11px] font-bold text-gray-600 group-hover:text-gray-900">{app.name}</span>
+                      </a>
+                    ))}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
     </header>
   );
 }
@@ -402,29 +461,79 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen }: { room: string, videoDevices: MediaDeviceInfo[], audioDevices: MediaDeviceInfo[], speakerDevices: MediaDeviceInfo[], initialBg: 'none' | 'blur' | 'image', initialMic: boolean, initialCam: boolean, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void }) {
+function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen, meetingDetails }: { room: string, videoDevices: MediaDeviceInfo[], audioDevices: MediaDeviceInfo[], speakerDevices: MediaDeviceInfo[], initialBg: 'none' | 'blur' | 'image', initialMic: boolean, initialCam: boolean, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void, meetingDetails: any }) {
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
+  const { user, loading, komuUser } = useAuth();
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send: sendChat } = useChat();
   const connectionState = useConnectionState();
   const { send: sendHandRaise, message: handRaiseMessage } = useDataChannel("hand-raise");
   const { send: sendReactionData, message: reactionMessage } = useDataChannel("reaction");
+  
+  const [isAdmitted, setIsAdmitted] = useState(() => {
+    const isAdmin = user?.email === "komumech@gmail.com";
+    const isScheduledHost = meetingDetails && (meetingDetails.hostId === user?.uid || meetingDetails.hostEmail === user?.email);
+    return !!(isAdmin || isScheduledHost);
+  });
+  const [isHost, setIsHost] = useState(() => {
+    const isAdmin = user?.email === "komumech@gmail.com";
+    const isScheduledHost = meetingDetails && (meetingDetails.hostId === user?.uid || meetingDetails.hostEmail === user?.email);
+    return !!(isAdmin || isScheduledHost);
+  });
+  const [isMicEnabled, setIsMicEnabled] = useState(initialMic);
+  const [isCamEnabled, setIsCamEnabled] = useState(initialCam);
+  const [layoutMode, setLayoutMode] = useState<'auto' | 'tiled' | 'sidebar' | 'spotlight' | 'imo'>('auto');
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [isTranscriptActive, setIsTranscriptActive] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [showParticipantList, setShowParticipantList] = useState(false);
+  const [spotlightIdentity, setSpotlightIdentity] = useState<string | null>(null);
+
+  // Load initial settings from Dashboard/Settings
+  useEffect(() => {
+    if (user?.uid) {
+      const saved = localStorage.getItem(`settings_${user.uid}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.muteOnJoin) setIsMicEnabled(false);
+        if (parsed.videoOffOnJoin) setIsCamEnabled(false);
+      }
+    }
+  }, [user]);
+
+  // Re-sync if state was false but user/details loaded later
+  useEffect(() => {
+    if (!isHost && user && meetingDetails) {
+       const isAdmin = user.email === "komumech@gmail.com";
+       const isScheduledHost = meetingDetails.hostId === user.uid || meetingDetails.hostEmail === user.email;
+       if (isAdmin || isScheduledHost) {
+          setIsHost(true);
+          setIsAdmitted(true);
+       }
+    }
+  }, [user, meetingDetails, isHost]);
+
   // Handle admission data message
   const { send: sendAdmit } = useDataChannel("admit-user", (msg) => {
     if (new TextDecoder().decode(msg.payload) === "admitted") {
+      console.log("[MeetingPage] Admission received via Data Channel");
       setIsAdmitted(true);
+    }
+  });
+
+  // Track admission state to metadata
+  useEffect(() => {
+    if (isAdmitted && localParticipant && connectionState === ConnectionState.Connected) {
       localParticipant.setMetadata(JSON.stringify({
         pending: false,
         avatar: user?.photoURL || "",
         isHost: isHost
       }));
     }
-  });
-
-  const [isAdmitted, setIsAdmitted] = useState(false);
-  const [isHost, setIsHost] = useState(false);
+  }, [isAdmitted, localParticipant, isHost, user, connectionState]);
   const [pendingParticipants, setPendingParticipants] = useState<Participant[]>([]);
   const [admittedSids, setAdmittedSids] = useState<Set<string>>(new Set());
   const [lobbyEnabled, setLobbyEnabled] = useState(true);
@@ -434,23 +543,38 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     if (!localParticipant || !room || loading) return;
 
     // Apply initial mic/cam settings
-    localParticipant.setMicrophoneEnabled(initialMic);
-    localParticipant.setCameraEnabled(initialCam);
+    const savedSettings = user?.uid ? localStorage.getItem(`settings_${user.uid}`) : null;
+    const parsed = savedSettings ? JSON.parse(savedSettings) : null;
+    
+    localParticipant.setMicrophoneEnabled(parsed?.muteOnJoin === true ? false : initialMic);
+    localParticipant.setCameraEnabled(parsed?.videoOffOnJoin === true ? false : initialCam);
 
     // Host Election & Admission Check
     const initializeRoom = async () => {
-      if (!room || !localParticipant.identity) return;
+      if (!room || !localParticipant.identity || !user) return;
       const myIdentity = localParticipant.identity;
       const roomRef = doc(db, 'rooms', room);
 
       try {
+        // 1. Fetch meeting record FIRST to find the true host
+        const meetingsRef = collection(db, 'meetings');
+        const qMeeting = query(meetingsRef, where('roomId', '==', room));
+        const meetingSnap = await getDocs(qMeeting);
+        let scheduledHostInfo = null;
+        if (!meetingSnap.empty) {
+          scheduledHostInfo = meetingSnap.docs[0].data();
+        }
+
+        // 2. Sync room state with transaction
         const roomData = await runTransaction(db, async (transaction) => {
           const snap = await transaction.get(roomRef);
           if (snap.exists()) {
             return snap.data();
           }
+          // Prioritize the scheduled host from the meeting record
+          const initialHostId = scheduledHostInfo?.hostId || scheduledHostInfo?.hostEmail || myIdentity;
           const defaultData = { 
-            hostId: myIdentity, 
+            hostId: initialHostId, 
             createdAt: Date.now(),
             lobby: true 
           };
@@ -462,24 +586,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         const currentLobby = roomData.lobby !== false;
         setLobbyEnabled(currentLobby);
 
-        // Check against scheduled host
-        const meetingsRef = collection(db, 'meetings');
-        const q = query(meetingsRef, where('roomId', '==', room));
-        const meetingSnap = await getDocs(q);
-        let scheduledHostId = null;
-        let scheduledHostEmail = null;
-        
-        if (!meetingSnap.empty) {
-          const meetingData = meetingSnap.docs[0].data();
-          scheduledHostId = meetingData.hostId;
-          scheduledHostEmail = meetingData.hostEmail;
-        }
-
+        // 3. Determine if I am the host
         const isAdmin = user?.email === "komumech@gmail.com";
-        const isScheduledHost = scheduledHostId && (scheduledHostId === user?.uid || scheduledHostId === localParticipant.identity);
-        const isScheduledHostByEmail = scheduledHostEmail && user?.email === scheduledHostEmail;
+        const isScheduledHost = scheduledHostInfo && (scheduledHostInfo.hostId === user?.uid || scheduledHostInfo.hostEmail === user?.email);
+        const isElectedHost = roomData.hostId === user?.uid || roomData.hostId === user?.email || roomData.hostId === myIdentity;
 
-        if (isAdmin || isScheduledHost || isScheduledHostByEmail || roomData.hostId === myIdentity) {
+        if (isAdmin || isScheduledHost || isElectedHost) {
           console.log("[MeetingPage] Authorized as host");
           setIsHost(true);
           setIsAdmitted(true);
@@ -490,15 +602,17 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           }));
         } else {
           // Check if already admitted
-          const admittedRef = doc(db, 'rooms', room, 'admitted', myIdentity);
-          const admittedSnap = await getDoc(admittedRef);
-          if (admittedSnap.exists() || !currentLobby) {
-            setIsAdmitted(true);
-            localParticipant.setMetadata(JSON.stringify({
-              pending: false,
-              avatar: user?.photoURL || "",
-              isHost: false
-            }));
+          if (myIdentity) {
+            const admittedRef = doc(db, 'rooms', room, 'admitted', myIdentity);
+            const admittedSnap = await getDoc(admittedRef);
+            if (admittedSnap.exists() || !currentLobby) {
+              setIsAdmitted(true);
+              localParticipant.setMetadata(JSON.stringify({
+                pending: false,
+                avatar: user?.photoURL || "",
+                isHost: false
+              }));
+            }
           }
         }
       } catch (err) {
@@ -528,24 +642,19 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     });
 
     // Listen for admission
-    const myIdentity = localParticipant.identity;
-    if (myIdentity && room) {
+    if (room && localParticipant && localParticipant.identity) {
+      const myIdentity = localParticipant.identity;
       const admittedRef = doc(db, 'rooms', room, 'admitted', myIdentity);
       const unsubAdmit = onSnapshot(admittedRef, (docSnap) => {
         if (docSnap.exists()) {
-          console.log("[MeetingPage] Admission detected via Firestore");
+          console.log("[MeetingPage] Admission detected via Firestore for:", myIdentity);
           setIsAdmitted(true);
-          localParticipant.setMetadata(JSON.stringify({
-             pending: false,
-             avatar: user?.photoURL || "",
-             isHost: isHost
-          }));
         }
       });
       return () => { unsubRoom(); unsubAdmit(); };
     }
     return () => unsubRoom();
-  }, [localParticipant, room, user, loading, initialMic, initialCam]);
+  }, [localParticipant, localParticipant?.identity, room, user, loading, initialMic, initialCam, isHost]);
 
   // Host: Listen for pending participants
   useEffect(() => {
@@ -594,7 +703,6 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     { onlySubscribed: true },
   );
 
-  const [spotlightIdentity, setSpotlightIdentity] = useState<string | null>(null);
   const lastSpotlightChangeRef = useRef<number>(0);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
@@ -609,17 +717,25 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [copied, setCopied] = useState(false);
   const [isSwapped, setIsSwapped] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const tracks = useVisualStableUpdate(rawTracks, 16);
   const isMobile = useMemo(() => typeof window !== 'undefined' && isMobileBrowser(), []);
 
-  const [layoutMode, setLayoutMode] = useState<'auto' | 'tiled' | 'sidebar' | 'spotlight' | 'imo'>('auto');
   const [pinnedIdentities, setPinnedIdentities] = useState<Set<string>>(new Set());
   const [hideNonVideo, setHideNonVideo] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState(16);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [mobilePrimaryIdentity, setMobilePrimaryIdentity] = useState<string | null>(null);
   const [mobileOverlaySide, setMobileOverlaySide] = useState<'right' | 'left'>('right');
+  const [autoSaveTranscript, setAutoSaveTranscript] = useState(false);
+  const [transcriptNoteId, setTranscriptNoteId] = useState<string | null>(null);
+  const transcriptNoteIdRef = useRef<string | null>(null);
+  const isCreatingTranscriptRef = useRef(false);
+  const transcriptQueueRef = useRef<string[]>([]);
+  const transcriptBufferRef = useRef<string[]>([]);
+  const lastFlushTimeRef = useRef<number>(0);
+  const flushIntervalRef = useRef<any>(null);
 
   // Settings
   const [settingsCategory, setSettingsCategory] = useState<'video' | 'audio' | 'general' | 'effects' | 'captions' | 'reactions'>('video');
@@ -643,6 +759,93 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     { id: 'nature', url: 'https://picsum.photos/seed/nature/1920/1080', label: 'Nature' },
     { id: 'abstract', url: 'https://picsum.photos/seed/abstract/1920/1080', label: 'Abstract' },
   ];
+
+  // Transcript Auto-save Logic with Buffering
+  const flushTranscriptBuffer = async () => {
+    if (!transcriptNoteIdRef.current || transcriptBufferRef.current.length === 0) return;
+    
+    const linesToFlush = [...transcriptBufferRef.current];
+    transcriptBufferRef.current = [];
+    
+    try {
+      const noteRef = doc(komuDb, 'notes', transcriptNoteIdRef.current);
+      await runTransaction(komuDb, async (transaction) => {
+        const snap = await transaction.get(noteRef);
+        if (snap.exists()) {
+          const currentBody = snap.data().body || "";
+          transaction.update(noteRef, {
+            body: currentBody + linesToFlush.join(""),
+            updatedAt: serverTimestamp()
+          });
+        }
+      });
+      lastFlushTimeRef.current = Date.now();
+    } catch (err) {
+      console.error("[MeetingPage] Failed to flush transcript buffer:", err);
+      // Put back in queue if it failed
+      transcriptBufferRef.current = [...linesToFlush, ...transcriptBufferRef.current];
+    }
+  };
+
+  const appendToTranscriptNote = async (speaker: string, text: string) => {
+    if (!autoSaveTranscript || !komuUser || !text) return;
+
+    try {
+      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const line = `\n[${timestamp}] ${speaker}: ${text}`;
+
+      if (transcriptNoteIdRef.current) {
+        transcriptBufferRef.current.push(line);
+        
+        // Flush if enough time passed (5 seconds)
+        if (Date.now() - lastFlushTimeRef.current > 5000) {
+          flushTranscriptBuffer();
+        }
+      } else if (!isCreatingTranscriptRef.current) {
+        isCreatingTranscriptRef.current = true;
+        const title = `Meeting Transcript: ${meetingDetails?.title || room} (${format(new Date(), 'PP')})`;
+        const initialBody = `Meeting started at ${new Date().toLocaleString()}${line}`;
+        
+        const newDoc = await addDoc(collection(komuDb, 'notes'), {
+          uid: komuUser.uid,
+          title: title,
+          body: initialBody + transcriptQueueRef.current.join(""),
+          type: 'text',
+          isArchive: false,
+          isTrash: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          color: '#ffffff'
+        });
+        
+        transcriptNoteIdRef.current = newDoc.id;
+        setTranscriptNoteId(newDoc.id);
+        transcriptQueueRef.current = [];
+        isCreatingTranscriptRef.current = false;
+        lastFlushTimeRef.current = Date.now();
+      } else {
+        // Queue messages while creating
+        transcriptQueueRef.current.push(line);
+      }
+    } catch (err) {
+      console.error("Failed to auto-save transcript to note:", err);
+      isCreatingTranscriptRef.current = false;
+    }
+  };
+
+  // Periodic flush interval
+  useEffect(() => {
+    if (autoSaveTranscript) {
+      flushIntervalRef.current = setInterval(() => {
+        flushTranscriptBuffer();
+      }, 7000);
+    } else {
+      if (flushIntervalRef.current) clearInterval(flushIntervalRef.current);
+    }
+    return () => {
+      if (flushIntervalRef.current) clearInterval(flushIntervalRef.current);
+    };
+  }, [autoSaveTranscript]);
 
   // Live Captions Logic
   useEffect(() => {
@@ -682,6 +885,11 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           isFinal: finalTranscript !== ''
         })), { reliable: true });
 
+        // Auto-save if final
+        if (finalTranscript !== '') {
+          appendToTranscriptNote("You", finalTranscript);
+        }
+
         // Clear local transcript after a timeout if it was final
         if (finalTranscript) {
           setTimeout(() => setLocalTranscript(""), 3000);
@@ -700,6 +908,11 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   // Handle Incoming Transcriptions
   const { send: sendTranscription } = useDataChannel("transcription", (msg) => {
     const payload = JSON.parse(new TextDecoder().decode(msg.payload));
+    
+    if (payload.isFinal) {
+      appendToTranscriptNote(payload.identity.split('#')[0], payload.text);
+    }
+
     setTranscriptions(prev => {
       // Keep only recent transcriptions
       const now = Date.now();
@@ -742,15 +955,18 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   }, [selectedVideoId, localParticipant]);
 
   useEffect(() => {
-    if (selectedAudioId || noiseCancellation || echoCancellation) {
-      localParticipant.setMicrophoneEnabled(true, { 
-        deviceId: selectedAudioId,
-        noiseSuppression: noiseCancellation,
-        echoCancellation: echoCancellation,
-        autoGainControl: autoGainControl,
-      });
+    if (localParticipant) {
+      // Only apply if the track is actually enabled
+      if (isMicEnabled) {
+        localParticipant.setMicrophoneEnabled(true, { 
+          deviceId: selectedAudioId,
+          noiseSuppression: noiseCancellation,
+          echoCancellation: echoCancellation,
+          autoGainControl: autoGainControl,
+        });
+      }
     }
-  }, [selectedAudioId, noiseCancellation, echoCancellation, autoGainControl, localParticipant]);
+  }, [selectedAudioId, noiseCancellation, echoCancellation, autoGainControl, localParticipant, isMicEnabled]);
 
   const sendReaction = (emoji: string) => {
     const id = Date.now();
@@ -827,6 +1043,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         const meta = JSON.parse(t.participant.metadata || "{}");
         if (t.participant.isLocal) return true;
         
+        // Hosts and Admitted participants are always visible
+        if (meta.isHost === true) return true;
+        
         // Show if explicitly admitted by host locally OR if metadata is not pending
         if (meta.pending === true) {
           if (isHost && admittedSids.has(t.participant.sid)) return true;
@@ -873,7 +1092,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   }, [tracks, pinnedIdentities, hideNonVideo, maxParticipants, raisedHands, localParticipant.identity]);
 
   const visibleTracks = useMemo(() => {
-    const MAX_TILES = isMobile ? 8 : 12;
+    const MAX_TILES = isMobile ? 6 : 12;
     if (processedTracks.length <= MAX_TILES) {
       return processedTracks;
     }
@@ -1027,7 +1246,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       </AnimatePresence>
 
       {/* Main Grid Area */}
-      <div className="flex-1 relative flex items-center justify-center p-4 pt-[72px] pb-[80px] bg-slate-950 overflow-hidden">
+      <div className="flex-1 relative flex items-center justify-center p-4 pt-[72px] pb-[80px] bg-slate-950 overflow-hidden min-h-0">
         {/* Click Outside Backdrop for Dropdowns */}
         {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen || isKomuToolsOpen) && (
           <div 
@@ -1042,13 +1261,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           />
         )}
         <div className={cn(
-          "w-full h-full transition-all duration-500",
+          "relative w-full h-full transition-all duration-500 min-h-0",
           activeTab && activeTab !== 'settings' && !isMobile ? "lg:mr-[360px]" : ""
         )}>
           {computedLayout === 'imo' && focusTrack ? (
             <div className="flex flex-col h-full w-full gap-4">
-              {/* Top Filmstrip */}
-              <div className="h-[120px] md:h-[160px] flex items-center gap-3 overflow-x-auto pb-2 custom-scroll scroll-smooth px-2">
+              {/* Top Filmstrip - Smaller and more compact */}
+              <div className="h-[90px] md:h-[130px] flex items-center gap-3 overflow-x-auto pb-2 custom-scroll scroll-smooth px-2">
                 {processedTracks.filter(t => t.participant.identity !== focusTrack.participant.identity).map(t => (
                   <div key={t.participant.sid} className="h-full aspect-video flex-shrink-0">
                     <CustomParticipantTile 
@@ -1058,13 +1277,17 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       isPinned={pinnedIdentities.has(t.participant.identity)}
                       mirror={t.participant.isLocal && videoMirroring}
                       showName={showParticipantNames}
+                      onSpotlight={() => {
+                        setSpotlightIdentity(t.participant.identity);
+                        setLayoutMode('imo');
+                      }}
                     />
                   </div>
                 ))}
               </div>
-              {/* Central Person */}
-              <div className="flex-1 min-h-0 relative">
-                <div className="w-full h-full max-w-5xl max-h-[72vh] aspect-video mx-auto">
+              {/* Central Person - Improved aspect ratio handling to prevent over-cropping */}
+              <div className="flex-1 min-h-0 relative flex items-center justify-center">
+                <div className="w-full h-full max-w-3xl max-h-[68dvh] aspect-video">
                   <CustomParticipantTile 
                     trackRef={focusTrack} 
                     raisedHands={raisedHands}
@@ -1072,6 +1295,11 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
                     mirror={focusTrack.participant.isLocal && videoMirroring}
                     showName={showParticipantNames}
+                    isFocal
+                    onSpotlight={() => {
+                      setSpotlightIdentity(focusTrack.participant.identity);
+                      setLayoutMode('imo');
+                    }}
                   />
                 </div>
               </div>
@@ -1085,17 +1313,23 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
                   onTogglePin={() => togglePin(focusTrack.participant.identity)}
                   showName={showParticipantNames}
+                  isFocal
                 />
               </div>
-              <div className="w-[280px] overflow-y-auto space-y-3 custom-scroll pr-2 hidden md:block shrink-0">
+              {/* Sidebar Rail - Fixed for mobile visibility */}
+              <div className="w-full md:w-[280px] h-[120px] md:h-full overflow-x-auto md:overflow-y-auto flex md:flex-col gap-3 custom-scroll p-1 shrink-0">
                 {processedTracks.filter(t => t.participant.sid !== focusTrack.participant.sid).map(t => (
-                  <div key={t.participant.sid} className="aspect-video">
+                  <div key={t.participant.sid} className="h-full md:h-auto aspect-video flex-shrink-0">
                     <CustomParticipantTile 
                       trackRef={t} 
                       raisedHands={raisedHands}
                       onTogglePin={() => togglePin(t.participant.identity)}
                       isPinned={pinnedIdentities.has(t.participant.identity)}
                       showName={showParticipantNames}
+                      onSpotlight={() => {
+                        setSpotlightIdentity(t.participant.identity);
+                        setLayoutMode('imo');
+                      }}
                     />
                   </div>
                 ))}
@@ -1111,11 +1345,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     isPinned={pinnedIdentities.has(mobilePrimaryTrack.participant.identity)}
                     mirror={mobilePrimaryTrack.participant.isLocal && videoMirroring}
                     showName={showParticipantNames}
+                    isFocal
                   />
                 </div>
 
-                <div className={cn(
-                  "absolute bottom-4 z-20 w-[140px] h-[190px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-bg-dark",
+                <motion.div 
+                  drag
+                  dragConstraints={containerRef}
+                  dragMomentum={false}
+                  className={cn(
+                  "absolute bottom-4 z-20 w-[140px] h-[190px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-bg-dark active:scale-105 transition-transform cursor-move",
                   mobileOverlaySide === 'right' ? 'right-4' : 'left-4'
                 )}>
                   <div className="relative w-full h-full">
@@ -1127,24 +1366,18 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       mirror={mobileSecondaryTrack.participant.isLocal && videoMirroring}
                       showName={showParticipantNames}
                     />
-                    <div className="absolute top-3 right-3 flex flex-col gap-2">
+                    <div className="absolute top-3 right-3 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => {
                           setMobilePrimaryIdentity(mobileSecondaryTrack.participant.identity);
                         }}
-                        className="px-2 py-1 rounded-full bg-black/70 text-white text-[11px] font-semibold hover:bg-black/90 transition-all"
+                        className="px-2 py-1 rounded-full bg-black/70 text-white text-[11px] font-semibold hover:bg-black/90 transition-all shadow-lg"
                       >
                         Swap
                       </button>
-                      <button
-                        onClick={() => setMobileOverlaySide(prev => prev === 'right' ? 'left' : 'right')}
-                        className="px-2 py-1 rounded-full bg-black/70 text-white text-[11px] font-semibold hover:bg-black/90 transition-all"
-                      >
-                        Move
-                      </button>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               </div>
             ) : visibleTracks.length === 1 ? (
               <div className="w-full h-full flex items-center justify-center p-4">
@@ -1164,7 +1397,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 className="grid gap-2 w-full h-full items-stretch"
                 style={{ 
                   gridTemplateColumns: isMobile
-                    ? 'repeat(2, minmax(0, 1fr))'
+                    ? 'repeat(1, minmax(0, 1fr))'
                     : visibleTracks.length === 2 
                       ? 'repeat(2, 1fr)' 
                       : `repeat(auto-fit, minmax(280px, 1fr))`,
@@ -1237,18 +1470,20 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 isMobile ? "w-full" : "w-[360px]"
               )}
             >
-              <div className="flex items-center justify-between p-5 border-b border-gray-100 bg-white sticky top-0 z-10">
-                <h2 className="text-lg font-bold text-slate-800 capitalize flex items-center gap-2">
-                  {activeTab === 'info' && <Info size={20} className="text-blue-600" />}
-                  {(activeTab === 'participants' || activeTab === 'users') && <Users size={20} className="text-blue-600" />}
-                  {activeTab === 'chat' && <MessageSquare size={20} className="text-blue-600" />}
-                  {activeTab === 'waiting' && <ShieldCheck size={20} className="text-blue-600" />}
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 bg-white sticky top-0 z-10">
+                <h2 className="text-base font-bold text-slate-800 capitalize flex items-center gap-2">
+                  {activeTab === 'info' && <Info size={18} className="text-blue-600" />}
+                  {(activeTab === 'participants' || activeTab === 'users') && <Users size={18} className="text-blue-600" />}
+                  {activeTab === 'chat' && <MessageSquare size={18} className="text-blue-600" />}
+                  {activeTab === 'waiting' && <ShieldCheck size={18} className="text-blue-600" />}
+                  {activeTab === 'notes' && <FileText size={18} className="text-blue-600" />}
+                  {activeTab}
                 </h2>
                 <button 
                   onClick={() => setActiveTab(null)}
-                  className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
+                  className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 transition-colors"
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 custom-scroll bg-slate-50/30">
@@ -1375,7 +1610,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   </div>
                 )}
                 {activeTab === 'notes' && (
-                  <NotesPanel user={user} navigate={navigate} />
+                  <NotesPanel 
+                    user={user} 
+                    navigate={navigate} 
+                    autoSaveTranscript={autoSaveTranscript}
+                    setAutoSaveTranscript={setAutoSaveTranscript}
+                    activeTranscriptNoteId={transcriptNoteId}
+                  />
                 )}
               </div>
             </motion.div>
@@ -1963,10 +2204,11 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   );
 }
 
-function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, mirror, showName = true }: any) {
+function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, mirror, showName = true, isFocal, onSpotlight }: any) {
   const isSpeaking = useIsSpeaking(trackRef?.participant);
   const isVideoOff = !trackRef?.publication || trackRef.publication.isMuted || !trackRef.publication.isEnabled;
   const isHandRaised = raisedHands?.[trackRef?.participant.identity];
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   
   // Parse metadata for avatar
   const metadata = useMemo(() => {
@@ -2004,7 +2246,7 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         <div className={cn("w-full h-full", mirror ? "scale-x-[-1]" : "")}>
           <VideoTrack 
             trackRef={trackRef} 
-            className="w-full h-full object-cover bg-black/40" 
+            className={cn("w-full h-full bg-black/40", isFocal ? "object-contain" : "object-cover")}
           />
         </div>
       )}
@@ -2041,9 +2283,43 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         >
           {isPinned ? <PinOff size={16} /> : <Pin size={16} />}
         </button>
-        <button className="p-2 rounded-lg bg-black/40 text-white/70 hover:bg-black/60 backdrop-blur-md transition-all">
-          <MoreVertical size={16} />
-        </button>
+        <div className="relative">
+          <button 
+            onClick={(e) => { e.stopPropagation(); setIsMenuOpen(!isMenuOpen); }}
+            className="p-2 rounded-lg bg-black/40 text-white/70 hover:bg-black/60 backdrop-blur-md transition-all"
+          >
+            <MoreVertical size={16} />
+          </button>
+          
+          <AnimatePresence>
+            {isMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-[100] cursor-default" onClick={(e) => { e.stopPropagation(); setIsMenuOpen(false); }} />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 5 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: 5 }}
+                  className="absolute top-full right-0 mt-1 w-40 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1 z-[110]"
+                >
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onSpotlight?.(); setIsMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-white hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <LayoutIcon size={14} />
+                    Spotlight
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onTogglePin(); setIsMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-white hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    {isPinned ? 'Unpin' : 'Pin for me'}
+                  </button>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
       {/* Hand Raised */}
@@ -2137,7 +2413,7 @@ function TabButton({ active, onClick, icon, badge }: any) {
   );
 }
 
-const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
+const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript, activeTranscriptNoteId }: { user: any, navigate: any, autoSaveTranscript: boolean, setAutoSaveTranscript: (v: boolean) => void, activeTranscriptNoteId?: string | null }) => {
   const { komuLogin, komuUser } = useAuth();
   const [notes, setNotes] = useState<any[]>([]);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
@@ -2148,6 +2424,15 @@ const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
   const [isSaving, setIsSaving] = useState(false);
 
   const uid = komuUser?.uid;
+
+  useEffect(() => {
+    if (activeTranscriptNoteId && notes.length > 0 && !selectedNote) {
+      const activeNote = notes.find(n => n.id === activeTranscriptNoteId);
+      if (activeNote) {
+        setSelectedNote(activeNote);
+      }
+    }
+  }, [activeTranscriptNoteId, notes.length, selectedNote]);
 
   useEffect(() => {
     if (!uid) return;
@@ -2161,7 +2446,7 @@ const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
       );
       
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
         // Manual sort in client
         data.sort((a: any, b: any) => {
           const tA = a.updatedAt?.toMillis?.() || 0;
@@ -2173,8 +2458,8 @@ const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
         // Update selected note if it was updated in background
         if (selectedNote) {
           const updatedSelected = data.find(n => n.id === selectedNote.id);
-          if (updatedSelected) {
-             // Only update if we are not actively editing or if someone else changed it (unlikely in single user note)
+          if (updatedSelected && updatedSelected.body !== selectedNote.body) {
+             setSelectedNote(updatedSelected);
           }
         }
       }, (err) => {
@@ -2269,39 +2554,39 @@ const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
 
   if (selectedNote) {
     return (
-      <div className="flex flex-col h-full bg-white -m-5 p-5 z-20">
-        <div className="flex items-center gap-4 mb-6 sticky top-0 bg-white z-10">
+      <div className="flex flex-col h-full bg-white -m-5 p-4 z-20">
+        <div className="flex items-center gap-3 mb-4 sticky top-0 bg-white z-10 pb-2 border-b border-gray-50">
           <button 
              onClick={() => { handleUpdateNote(); setSelectedNote(null); }} 
-             className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-all flex items-center justify-center"
+             className="p-1.5 hover:bg-gray-100 rounded-full text-gray-500 transition-all flex items-center justify-center"
              title="Back to list"
           >
-            <ArrowLeft size={24} />
+            <ArrowLeft size={20} />
           </button>
           <div className="flex-1">
              <input 
                 value={selectedNote.title}
                 onChange={(e) => setSelectedNote({...selectedNote, title: e.target.value})}
                 placeholder="Title"
-                className="w-full text-xl font-bold text-gray-900 bg-transparent border-none outline-none placeholder:text-gray-300"
+                className="w-full text-lg font-bold text-gray-900 bg-transparent border-none outline-none placeholder:text-gray-300"
                 onBlur={handleUpdateNote}
              />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button 
               onClick={handleUpdateNote} 
               disabled={isSaving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md shadow-blue-500/10"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md shadow-blue-500/10"
             >
-              <Save size={16} />
+              <Save size={14} />
               <span>{isSaving ? "Saving..." : "Save"}</span>
             </button>
             <button 
               onClick={() => toggleTrash(selectedNote.id, true)} 
-              className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
               title="Delete note"
             >
-              <Trash2 size={20} />
+              <Trash2 size={18} />
             </button>
           </div>
         </div>
@@ -2309,7 +2594,7 @@ const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
           value={selectedNote.body}
           onChange={(e) => setSelectedNote({...selectedNote, body: e.target.value})}
           placeholder="Start writing..."
-          className="flex-1 w-full text-base text-gray-800 bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-gray-300 custom-scroll"
+          className="flex-1 w-full text-sm text-gray-800 bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-gray-300 custom-scroll"
           onBlur={handleUpdateNote}
         />
         <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
@@ -2323,7 +2608,33 @@ const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="mb-4 space-y-3 shrink-0">
+      <div className="mb-4 space-y-4 shrink-0">
+        <div className="bg-blue-50/50 rounded-2xl p-4 border border-blue-100/50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
+                <Languages size={20} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-gray-900 leading-none mb-1">Auto-Transcript</span>
+                <span className="text-[10px] text-gray-500 font-medium leading-none">Save meeting to notes</span>
+              </div>
+            </div>
+            <button 
+               onClick={() => setAutoSaveTranscript(!autoSaveTranscript)}
+               className={cn(
+                 "w-10 h-5 rounded-full relative transition-all duration-300",
+                 autoSaveTranscript ? "bg-blue-600" : "bg-gray-300"
+               )}
+            >
+              <div className={cn(
+                "absolute top-1 w-3 h-3 bg-white rounded-full transition-all duration-300",
+                autoSaveTranscript ? "left-6" : "left-1"
+              )} />
+            </button>
+          </div>
+        </div>
+
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 peer-focus:text-blue-500 transition-colors" size={16} />
           <input 
