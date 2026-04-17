@@ -24,21 +24,23 @@ import {
   Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Hand, 
   MonitorUp, MonitorOff, MoreVertical, Info, Users, MessageSquare,
   X, Send, ChevronDown, Settings, Copy, Check, Pin, PinOff,
-  Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight,
+  Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight, ArrowLeft,
   Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
   ChevronUp, FileText, Plus, Search, Trash2, Archive, Save
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { useAuth } from '../context/AuthContext';
-import { db, auth, komuDb } from '../firebase';
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
+import { db, auth, komuDb, komuAuth } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, orderBy, runTransaction } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { format } from 'date-fns';
 
 export default function MeetingPage() {
   const { id: room } = useParams();
   const navigate = useNavigate();
-  const { user, preferences, updatePreferences } = useAuth();
+  const { user, preferences, updatePreferences, komuUser, komuLogin } = useAuth();
   
   const [token, setToken] = useState("");
   const [name, setName] = useState(preferences?.displayName || user?.displayName || "");
@@ -311,12 +313,9 @@ export default function MeetingPage() {
 
 function MeetingRoomHeader({ room, isRecording, setIsRecording, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen }: { room: string, isRecording: boolean, setIsRecording: (v: boolean) => void, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void }) {
   return (
-    <header className="absolute top-0 left-0 right-0 h-[72px] px-6 flex items-center justify-between bg-slate-950/90 z-[60] pointer-events-none">
+    <header className="absolute top-0 left-0 right-0 h-[72px] px-6 flex items-center justify-between bg-slate-950/90 z-[70] pointer-events-none">
       <div className="flex items-center gap-3 pointer-events-auto">
-        {isKomuToolsOpen && (
-          <div className="fixed inset-0 z-[65] pointer-events-auto" onClick={() => setIsKomuToolsOpen(false)} />
-        )}
-        <button onClick={() => setIsKomuToolsOpen(!isKomuToolsOpen)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-800/90 px-3 py-2 text-sm font-semibold text-white border border-white/10 transition-all duration-200 ease-out hover:bg-slate-700 relative z-[70]">
+        <button onClick={() => setIsKomuToolsOpen(!isKomuToolsOpen)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-800/90 px-3 py-2 text-sm font-semibold text-white border border-white/10 transition-all duration-200 ease-out hover:bg-slate-700 relative z-[75]">
           <Settings size={18} />
           <span>Tools</span>
           <ChevronDown size={16} className={cn("transition-transform duration-200", isKomuToolsOpen && "rotate-180")} />
@@ -417,6 +416,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [isAdmitted, setIsAdmitted] = useState(false);
   const [isHost, setIsHost] = useState(false);
   const [pendingParticipants, setPendingParticipants] = useState<Participant[]>([]);
+  const [admittedSids, setAdmittedSids] = useState<Set<string>>(new Set());
+  const [lobbyEnabled, setLobbyEnabled] = useState(true);
 
   // Waiting Room Logic
   useEffect(() => {
@@ -426,92 +427,113 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     localParticipant.setMicrophoneEnabled(initialMic);
     localParticipant.setCameraEnabled(initialCam);
 
-    // Check if I am the host
-    const checkHost = async () => {
-      const myUid = user?.uid;
-      const mySid = localParticipant.sid;
+    // Host Election & Admission Check
+    const initializeRoom = async () => {
       if (!room) return;
-
-      // CRITICAL: Default admin always has access
-      if (user?.email === "komumech@gmail.com") {
-        console.log("[MeetingPage] Admin access granted");
-        setIsHost(true);
-        setIsAdmitted(true);
-        return;
-      }
-
+      const myId = user?.uid || localParticipant.sid;
       const roomRef = doc(db, 'rooms', room);
+
       try {
-        const roomSnap = await getDoc(roomRef);
-        
-        // Always check meetings collection as source of truth for scheduled meetings
+        const roomData = await runTransaction(db, async (transaction) => {
+          const snap = await transaction.get(roomRef);
+          if (snap.exists()) {
+            return snap.data();
+          }
+          const defaultData = { 
+            hostId: myId, 
+            createdAt: Date.now(),
+            lobby: true 
+          };
+          transaction.set(roomRef, defaultData);
+          return defaultData;
+        });
+
+        if (!roomData) return;
+        setLobbyEnabled(roomData.lobby !== false);
+
+        // Check against scheduled host
         const meetingsRef = collection(db, 'meetings');
         const q = query(meetingsRef, where('roomId', '==', room));
         const meetingSnap = await getDocs(q);
         let scheduledHostId = null;
+        let scheduledHostEmail = null;
         
         if (!meetingSnap.empty) {
-          scheduledHostId = meetingSnap.docs[0].data().hostId;
+          const meetingData = meetingSnap.docs[0].data();
+          scheduledHostId = meetingData.hostId;
+          scheduledHostEmail = meetingData.hostEmail;
         }
 
-        if (scheduledHostId && (scheduledHostId === myUid || scheduledHostId === mySid)) {
-          console.log("[MeetingPage] Recognized as scheduled host");
-          if (!roomSnap.exists()) {
-            await setDoc(roomRef, { hostId: myUid || mySid, createdAt: serverTimestamp() });
-          }
-          setIsHost(true);
-          setIsAdmitted(true);
-          return;
-        }
+        const isAdmin = user?.email === "komumech@gmail.com";
+        const isScheduledHost = scheduledHostId && (scheduledHostId === user?.uid || scheduledHostId === localParticipant.sid);
+        const isScheduledHostByEmail = scheduledHostEmail && user?.email === scheduledHostEmail;
 
-        if (!roomSnap.exists()) {
-          // No room and no scheduled host match, first person in becomes host
-          console.log("[MeetingPage] Creating new room, becoming host");
-          await setDoc(roomRef, { hostId: myUid || mySid, createdAt: serverTimestamp() });
+        if (isAdmin || isScheduledHost || isScheduledHostByEmail || roomData.hostId === myId) {
+          console.log("[MeetingPage] Authorized as host");
           setIsHost(true);
           setIsAdmitted(true);
+          // Metadata update to reflect host status
+          localParticipant.setMetadata(JSON.stringify({
+             pending: false,
+             avatar: user?.photoURL || "",
+             isHost: true
+          }));
         } else {
-          const hostId = roomSnap.data().hostId;
-          if (hostId === myUid || hostId === mySid) {
-            console.log("[MeetingPage] Recognized as room host");
-            setIsHost(true);
+          // Check if already admitted
+          const admittedRef = doc(db, 'rooms', room, 'admitted', myId);
+          const admittedSnap = await getDoc(admittedRef);
+          if (admittedSnap.exists() || roomData.lobby === false) {
             setIsAdmitted(true);
-          } else {
-            console.log("[MeetingPage] Not recognized as host, checking admission");
-            // Check if already admitted
-            const myId = myUid || mySid;
-            const admittedRef = doc(db, 'rooms', room, 'admitted', myId);
-            const admittedSnap = await getDoc(admittedRef);
-            if (admittedSnap.exists()) {
-              setIsAdmitted(true);
-            }
+            localParticipant.setMetadata(JSON.stringify({
+              pending: false,
+              avatar: user?.photoURL || "",
+              isHost: false
+            }));
           }
         }
       } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `rooms/${room}`);
+        console.error("Room initialization failed", err);
       }
     };
 
-    checkHost();
+    initializeRoom();
+
+    // Listen for room changes (lobby toggle)
+    const roomRef = doc(db, 'rooms', room);
+    const unsubRoom = onSnapshot(roomRef, (snapshot) => {
+       if (snapshot.exists()) {
+         const data = snapshot.data();
+         const isLobby = data.lobby !== false;
+         setLobbyEnabled(isLobby);
+         if (!isLobby) setIsAdmitted(true);
+       }
+    });
 
     // Listen for admission
     const myId = user?.uid || localParticipant.sid;
-    if (!isHost && myId && room) {
+    if (myId && room) {
       const admittedRef = doc(db, 'rooms', room, 'admitted', myId);
-      const unsubscribe = onSnapshot(admittedRef, (doc) => {
-        if (doc.exists()) setIsAdmitted(true);
-      }, (err) => {
-        // Silent fail for admission check as it might not exist yet
+      const unsubAdmit = onSnapshot(admittedRef, (docSnap) => {
+        if (docSnap.exists()) {
+          setIsAdmitted(true);
+          localParticipant.setMetadata(JSON.stringify({
+             pending: false,
+             avatar: user?.photoURL || "",
+             isHost: false
+          }));
+        }
       });
-      return () => unsubscribe();
+      return () => { unsubRoom(); unsubAdmit(); };
     }
-  }, [localParticipant, room, user, loading, isHost, initialMic, initialCam]);
+    return () => unsubRoom();
+  }, [localParticipant, room, user, loading, initialMic, initialCam]);
 
   // Host: Listen for pending participants
   useEffect(() => {
     if (!isHost) return;
     
     const pending = remoteParticipants.filter(p => {
+      if (admittedSids.has(p.sid)) return false;
       try {
         const meta = JSON.parse(p.metadata || "{}");
         return meta.pending === true;
@@ -520,7 +542,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       }
     });
     setPendingParticipants(pending);
-  }, [remoteParticipants, isHost]);
+  }, [remoteParticipants, isHost, admittedSids]);
 
   const admitUser = async (participant: Participant) => {
     if (!room || !isHost) return;
@@ -528,15 +550,15 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     if (!participantId) return;
 
     try {
+      // Track locally for instant UI update
+      setAdmittedSids(prev => new Set(prev).add(participant.sid));
+
       // Add to admitted collection in Firestore
       const admittedRef = doc(db, 'rooms', room, 'admitted', participantId);
       await setDoc(admittedRef, { admittedAt: serverTimestamp() });
       
       // Also send a data message as a fallback/speedup
       sendAdmit(new TextEncoder().encode("admitted"), { reliable: true, destinationIdentities: [participant.identity] });
-
-      // Remove the participant from the local waiting list immediately so the admit button feels responsive
-      setPendingParticipants(prev => prev.filter(p => p.sid !== participant.sid));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `rooms/${room}/admitted/${participantId}`);
     }
@@ -780,6 +802,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     // Filter and deduplicate tracks by participant
     const filtered = tracks.filter(t => {
       if (hideNonVideo && !t.participant?.isCameraEnabled && !t.participant?.isLocal && t.source !== Track.Source.ScreenShare) return false;
+      
+      // Filter out pending participants
+      try {
+        const meta = JSON.parse(t.participant.metadata || "{}");
+        if (meta.pending && !t.participant.isLocal) return false;
+      } catch {}
+
       return true;
     }).filter((t, i, self) => {
       // If someone is screen sharing, we want to show both their camera and their screen share?
@@ -831,7 +860,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const participantGridColumns = useMemo(() => {
     if (visibleTracks.length <= 1) return "grid-cols-1";
     if (isMobile) return "grid-cols-2";
-    if (visibleTracks.length <= 2) return "grid-cols-2 md:grid-cols-4";
+    if (visibleTracks.length === 2) return "grid-cols-1 md:grid-cols-2";
     if (visibleTracks.length <= 4) return "grid-cols-2 md:grid-cols-4";
     if (visibleTracks.length <= 6) return "grid-cols-3 md:grid-cols-4";
     return "grid-cols-4";
@@ -973,7 +1002,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       </AnimatePresence>
 
       {/* Main Grid Area */}
-      <div className="flex-1 relative flex items-center justify-center p-4 pt-[60px] pb-[80px] bg-slate-950">
+      <div className="flex-1 relative flex items-center justify-center p-4 pt-[72px] pb-[80px] bg-slate-950 overflow-hidden">
         {/* Click Outside Backdrop for Dropdowns */}
         {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen || isKomuToolsOpen) && (
           <div 
@@ -1111,8 +1140,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 style={{ 
                   gridTemplateColumns: isMobile
                     ? 'repeat(2, minmax(0, 1fr))'
-                    : `repeat(auto-fit, minmax(280px, 1fr))`,
-                  gridAutoRows: visibleTracks.length === 1 ? '1fr' : 'minmax(180px, 1fr)'
+                    : visibleTracks.length === 2 
+                      ? 'repeat(2, 1fr)' 
+                      : `repeat(auto-fit, minmax(280px, 1fr))`,
+                  gridAutoRows: (visibleTracks.length === 1 || (!isMobile && visibleTracks.length === 2)) ? '1fr' : 'minmax(180px, 1fr)'
                 }}
               >
               {visibleTracks.map(t => (
@@ -1395,10 +1426,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                             <select 
                               value={selectedAudioId || audioDevices[0]?.deviceId}
                               onChange={(e) => setSelectedAudioId(e.target.value)}
-                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
+                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] text-gray-900 appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
                             >
                               {audioDevices.map(device => (
-                                <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                                <option key={device.deviceId} value={device.deviceId} className="text-gray-900">{device.label}</option>
                               ))}
                             </select>
                             <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
@@ -1424,10 +1455,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                               <select 
                                 value={selectedSpeakerId || speakerDevices[0]?.deviceId}
                                 onChange={(e) => setSelectedSpeakerId(e.target.value)}
-                                className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
+                                className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] text-gray-900 appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
                               >
                                 {speakerDevices.map(device => (
-                                  <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                                  <option key={device.deviceId} value={device.deviceId} className="text-gray-900">{device.label}</option>
                                 ))}
                               </select>
                               <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
@@ -1450,16 +1481,18 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     {/* Video Settings */}
                     {settingsCategory === 'video' && (
                       <div className="max-w-md space-y-10">
-                        <section className="space-y-4">
+                         <section className="space-y-4">
                           <label className="text-sm font-medium text-[#1a73e8] block">Camera</label>
                           <div className="relative">
                             <select 
                               value={selectedVideoId || videoDevices[0]?.deviceId}
                               onChange={(e) => setSelectedVideoId(e.target.value)}
-                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
+                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] text-gray-900 appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
                             >
                               {videoDevices.map(device => (
-                                <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                                <option key={device.deviceId} value={device.deviceId} className="text-gray-900 bg-white">
+                                  {device.label || `Camera ${device.deviceId.slice(0, 4)}`}
+                                </option>
                               ))}
                             </select>
                             <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
@@ -1578,17 +1611,39 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
                     {/* General Settings */}
                     {settingsCategory === 'general' && (
-                      <div className="max-w-md space-y-6">
+                      <div className="max-w-md space-y-8">
+                         <div className="flex items-center justify-between py-2 border-b border-gray-100 pb-6">
+                             <div className="flex flex-col">
+                                <span className="text-[14px] font-medium text-gray-800">Waiting Room</span>
+                                <span className="text-[12px] text-gray-500">New participants must be admitted by host</span>
+                             </div>
+                             <div 
+                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", lobbyEnabled ? "bg-blue-600 shadow-inner" : "bg-gray-200")}
+                               onClick={async (e) => {
+                                 e.stopPropagation();
+                                 if (!isHost || !room) return;
+                                 const next = !lobbyEnabled;
+                                 setLobbyEnabled(next);
+                                 try {
+                                   await updateDoc(doc(db, 'rooms', room), { lobby: next });
+                                 } catch (err) {
+                                   console.error("Failed to update lobby setting:", err);
+                                 }
+                               }}
+                             >
+                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm", lobbyEnabled ? "left-7" : "left-1")} />
+                             </div>
+                          </div>
                          <div className="flex items-center justify-between py-2">
                              <div className="flex flex-col">
-                                <span className="text-[14px] text-gray-700">Show current time</span>
+                                <span className="text-[14px] font-medium text-gray-800">Show current time</span>
                                 <span className="text-[12px] text-gray-500">Display Clock on the bottom bar</span>
                              </div>
                              <div 
-                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", showClock ? "bg-[#1a73e8]" : "bg-gray-300")}
+                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", showClock ? "bg-blue-600 shadow-inner" : "bg-gray-200")}
                                onClick={() => setShowClock(!showClock)}
                              >
-                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", showClock ? "left-7" : "left-1")} />
+                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm", showClock ? "left-7" : "left-1")} />
                              </div>
                           </div>
                       </div>
@@ -1602,7 +1657,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       </div>
 
       {/* Taskbar */}
-      <div className="absolute bottom-0 left-0 right-0 h-[80px] flex items-center justify-between px-8 bg-transparent backdrop-blur-sm z-[60]">
+      <div className="absolute bottom-0 left-0 right-0 h-[80px] flex items-center justify-between px-8 bg-transparent backdrop-blur-sm z-[70]">
         <div className="hidden md:flex items-center gap-4 w-1/3">
           {showClock && (
             <div className="text-white drop-shadow-lg">
@@ -1616,10 +1671,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         </div>
 
         <div className="flex items-center gap-3 md:gap-4 justify-center w-full md:w-1/3">
-          <div className={cn("relative", isMicMenuOpen && "z-[70]")}>
-            {isMicMenuOpen && (
-              <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsMicMenuOpen(false)} />
-            )}
+          <div className="relative">
             <ControlButton 
               onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
               icon={localParticipant.isMicrophoneEnabled ? <Mic size={22} /> : <MicOff size={22} />}
@@ -1657,10 +1709,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             </AnimatePresence>
           </div>
 
-          <div className={cn("relative", isCamMenuOpen && "z-[70]")}>
-            {isCamMenuOpen && (
-              <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsCamMenuOpen(false)} />
-            )}
+          <div className="relative">
             <ControlButton 
               onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
               icon={localParticipant.isCameraEnabled ? <VideoIcon size={22} /> : <VideoOff size={22} />}
@@ -1731,12 +1780,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
             highlight={localParticipant.isScreenShareEnabled}
           />
-          <div className={cn("relative flex items-center gap-2", (isReactionsMenuOpen || isMoreMenuOpen) && "z-[70]")}>
+          <div className="relative flex items-center gap-2">
             {/* Reactions Dropdown Button */}
-            <div className={cn("relative", isReactionsMenuOpen && "z-[70]")}>
-              {isReactionsMenuOpen && (
-                <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsReactionsMenuOpen(false)} />
-              )}
+            <div className="relative">
               <div className="hidden sm:inline-flex">
                 <ControlButton 
                   onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
@@ -1775,10 +1821,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </AnimatePresence>
             </div>
 
-            <div className={cn("relative px-1", isMoreMenuOpen && "z-[70]")}>
-              {isMoreMenuOpen && (
-                <div className="fixed inset-0 z-[-1] cursor-default" onClick={() => setIsMoreMenuOpen(false)} />
-              )}
+            <div className="relative px-1">
               <ControlButton 
                 onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
                 icon={<MoreVertical size={22} />}
@@ -1936,7 +1979,7 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         <div className={cn("w-full h-full", mirror ? "scale-x-[-1]" : "")}>
           <VideoTrack 
             trackRef={trackRef} 
-            className="w-full h-full object-contain bg-black/40" 
+            className="w-full h-full object-cover bg-black/40" 
           />
         </div>
       )}
@@ -2069,13 +2112,15 @@ function TabButton({ active, onClick, icon, badge }: any) {
   );
 }
 
-const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any }) => {
-  const { login, komuLogin, komuUser } = useAuth();
+const NotesPanel = React.memo(({ user }: { user: any, navigate: any }) => {
+  const { komuLogin, komuUser } = useAuth();
   const [notes, setNotes] = useState<any[]>([]);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState("");
   const [newNoteBody, setNewNoteBody] = useState("");
   const [searchNotesTerm, setSearchNotesTerm] = useState("");
+  const [selectedNote, setSelectedNote] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const uid = komuUser?.uid;
 
@@ -2099,14 +2144,38 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
           return tB - tA;
         });
         setNotes(data);
+
+        // Update selected note if it was updated in background
+        if (selectedNote) {
+          const updatedSelected = data.find(n => n.id === selectedNote.id);
+          if (updatedSelected) {
+             // Only update if we are not actively editing or if someone else changed it (unlikely in single user note)
+          }
+        }
       }, (err) => {
-        console.error("NotesPanel fetch error (komu-notes project):", err);
+        console.error("NotesPanel fetch error (komu-notes project)::", err);
       });
       return () => unsubscribe();
     } catch (err) {
       console.error("Firestore error in NotesPanel:", err);
     }
-  }, [uid]);
+  }, [uid, selectedNote?.id]);
+
+  const handleUpdateNote = async () => {
+    if (!selectedNote || isSaving) return;
+    setIsSaving(true);
+    try {
+      await updateDoc(doc(komuDb, 'notes', selectedNote.id), {
+        title: selectedNote.title,
+        body: selectedNote.body,
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Failed to update note:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleAddNote = async () => {
     if (!komuUser || (!newNoteTitle.trim() && !newNoteBody.trim())) return;
@@ -2141,32 +2210,88 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
   const toggleTrash = async (id: string, isTrash: boolean) => {
     try {
       await updateDoc(doc(komuDb, 'notes', id), { isTrash, updatedAt: serverTimestamp() });
+      if (selectedNote?.id === id) {
+        setSelectedNote(null);
+      }
     } catch (err) {
       console.error("Failed to trash note:", err);
     }
   };
 
-  const filteredNotes = notes.filter(n => 
-    n.title?.toLowerCase().includes(searchNotesTerm.toLowerCase()) || 
-    n.body?.toLowerCase().includes(searchNotesTerm.toLowerCase())
-  );
-
   if (!user || !komuUser) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
-        <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center text-blue-600 shadow-inner">
-          <FileText size={40} />
+      <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-8">
+        <div className="w-24 h-24 bg-blue-50 rounded-3xl flex items-center justify-center text-blue-600 shadow-inner relative">
+          <FileText size={48} />
+          <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg">
+             <ShieldCheck size={18} className="text-green-500" />
+          </div>
         </div>
-        <div className="space-y-2">
-           <h3 className="text-lg font-bold text-gray-900 leading-tight">Sync your notes</h3>
-           <p className="text-sm text-gray-500">Sign in with Google to access your saved notes from Komu Notes.</p>
+        <div className="space-y-3">
+           <h3 className="text-xl font-bold text-gray-900 leading-tight">Secure Notes Sync</h3>
+           <p className="text-sm text-gray-500 max-w-[240px] mx-auto">Access your Komu Notes directly in the meeting. Your notes are private and encrypted.</p>
         </div>
         <button 
           onClick={komuLogin}
-          className="px-8 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"
+          className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-500/20 active:scale-95 flex items-center justify-center gap-2"
         >
-          {user ? "Sync Komu Account" : "Sign in with Google"}
+          <Plus size={20} />
+          <span>{user ? "Link Komu Account" : "Sign in with Google"}</span>
         </button>
+      </div>
+    );
+  }
+
+  if (selectedNote) {
+    return (
+      <div className="flex flex-col h-full bg-white -m-5 p-5 z-20">
+        <div className="flex items-center gap-4 mb-6 sticky top-0 bg-white z-10">
+          <button 
+             onClick={() => { handleUpdateNote(); setSelectedNote(null); }} 
+             className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-all flex items-center justify-center"
+             title="Back to list"
+          >
+            <ArrowLeft size={24} />
+          </button>
+          <div className="flex-1">
+             <input 
+                value={selectedNote.title}
+                onChange={(e) => setSelectedNote({...selectedNote, title: e.target.value})}
+                placeholder="Title"
+                className="w-full text-xl font-bold text-gray-900 bg-transparent border-none outline-none placeholder:text-gray-300"
+                onBlur={handleUpdateNote}
+             />
+          </div>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleUpdateNote} 
+              disabled={isSaving}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md shadow-blue-500/10"
+            >
+              <Save size={16} />
+              <span>{isSaving ? "Saving..." : "Save"}</span>
+            </button>
+            <button 
+              onClick={() => toggleTrash(selectedNote.id, true)} 
+              className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+              title="Delete note"
+            >
+              <Trash2 size={20} />
+            </button>
+          </div>
+        </div>
+        <textarea 
+          value={selectedNote.body}
+          onChange={(e) => setSelectedNote({...selectedNote, body: e.target.value})}
+          placeholder="Start writing..."
+          className="flex-1 w-full text-base text-gray-800 bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-gray-300 custom-scroll"
+          onBlur={handleUpdateNote}
+        />
+        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+           <span className="text-[10px] text-gray-400 font-medium">
+             Last edited {selectedNote.updatedAt?.toDate() ? format(selectedNote.updatedAt.toDate(), 'PPp') : 'Just now'}
+           </span>
+        </div>
       </div>
     );
   }
@@ -2175,13 +2300,13 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
     <div className="flex flex-col h-full overflow-hidden">
       <div className="mb-4 space-y-3 shrink-0">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 peer-focus:text-blue-500 transition-colors" size={16} />
           <input 
             type="text"
             placeholder="Search notes..."
             value={searchNotesTerm}
             onChange={(e) => setSearchNotesTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 outline-none transition-all"
+            className="peer w-full pl-10 pr-4 py-2 bg-gray-100 border-2 border-transparent rounded-xl text-sm text-black focus:ring-4 focus:ring-blue-500/10 focus:bg-white focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
           />
         </div>
         {!isCreatingNote ? (
@@ -2200,13 +2325,13 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
               autoFocus
               value={newNoteTitle}
               onChange={(e) => setNewNoteTitle(e.target.value)}
-              className="w-full text-base font-bold bg-transparent border-none outline-none placeholder:text-gray-400"
+              className="w-full text-base font-bold bg-transparent border-none outline-none text-gray-900 placeholder:text-gray-400"
             />
             <textarea 
               placeholder="Take a note..."
               value={newNoteBody}
               onChange={(e) => setNewNoteBody(e.target.value)}
-              className="w-full text-sm bg-transparent border-none outline-none resize-none min-h-[100px] placeholder:text-gray-400"
+              className="w-full text-sm bg-transparent border-none outline-none resize-none min-h-[100px] text-gray-800 placeholder:text-gray-400"
             />
             <div className="flex items-center justify-between pt-2">
                <button 
@@ -2218,7 +2343,7 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
               <button 
                 disabled={!newNoteTitle.trim() && !newNoteBody.trim()}
                 onClick={handleAddNote}
-                className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all"
+                className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all font-medium"
               >
                 Save note
               </button>
@@ -2231,7 +2356,11 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
         {notes
           .filter(n => n.title.toLowerCase().includes(searchNotesTerm.toLowerCase()) || n.body.toLowerCase().includes(searchNotesTerm.toLowerCase()))
           .map(note => (
-          <div key={note.id} className="group p-4 bg-white border border-gray-100 rounded-2xl hover:border-blue-200 hover:shadow-md transition-all relative">
+          <div 
+            key={note.id} 
+            onClick={() => setSelectedNote(note)}
+            className="group p-4 bg-white border border-gray-100 rounded-2xl hover:border-blue-200 hover:shadow-md transition-all relative cursor-pointer"
+          >
             <h4 className="font-bold text-gray-900 text-sm mb-1">{note.title || "Untitled"}</h4>
             <p className="text-gray-600 text-xs line-clamp-3 leading-relaxed whitespace-pre-wrap">
               {note.body}
@@ -2241,10 +2370,16 @@ const NotesPanel = React.memo(({ user, navigate }: { user: any, navigate: any })
                 {note.updatedAt?.toDate() ? new Date(note.updatedAt.toDate()).toLocaleDateString() : 'Just now'}
               </span>
               <div className="flex items-center gap-1">
-                <button onClick={() => toggleArchive(note.id, !note.isArchive)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); toggleArchive(note.id, !note.isArchive); }} 
+                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all"
+                >
                   <Archive size={14} />
                 </button>
-                <button onClick={() => toggleTrash(note.id, true)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); toggleTrash(note.id, true); }} 
+                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all"
+                >
                   <Trash2 size={14} />
                 </button>
               </div>

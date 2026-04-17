@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, signInWithCredential } from 'firebase/auth';
-import { auth, komuAuth, googleProvider } from '../firebase';
+import { User, onAuthStateChanged, GoogleAuthProvider } from 'firebase/auth';
+import { auth, komuAuth, googleProvider, signInWithPopup, signOut, signInWithCredential } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -13,9 +13,11 @@ interface UserPreferences {
 
 interface AuthContextType {
   user: User | null;
+  komuUser: User | null;
   loading: boolean;
   preferences: UserPreferences | null;
   login: () => Promise<void>;
+  komuLogin: () => Promise<void>;
   logout: () => Promise<void>;
   updatePreferences: (prefs: Partial<UserPreferences>) => Promise<void>;
 }
@@ -24,29 +26,26 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [komuUser, setKomuUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
 
   useEffect(() => {
     // Listen for main app auth changes
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
       
-      // Also listen for komu auth changes to ensure we are synced
-      // If we have a user on main auth but not on komu auth, we might need to handle that,
-      // but usually the login function will handle the initial sync.
-      
-      if (user) {
+      if (u) {
         try {
           // Fetch preferences from Firestore
-          const docRef = doc(db, 'users', user.uid);
+          const docRef = doc(db, 'users', u.uid);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
             setPreferences(docSnap.data() as UserPreferences);
           } else {
             // Create default preferences
             const defaultPrefs: UserPreferences = {
-              displayName: user.displayName || 'Guest',
+              displayName: u.displayName || 'Guest',
               theme: 'light',
             };
             await setDoc(docRef, defaultPrefs);
@@ -57,15 +56,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         setPreferences(null);
-        // Ensure komuAuth is also signed out
-        if (komuAuth.currentUser) {
-          signOut(komuAuth).catch(err => console.error("Komu sign out failed:", err));
-        }
       }
       setLoading(false);
     });
 
-    return unsubscribe;
+    // Listen for komu auth changes
+    const unsubscribeKomu = onAuthStateChanged(komuAuth, (u) => {
+      setKomuUser(u);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeKomu();
+    };
   }, []);
 
   const login = async () => {
@@ -83,10 +86,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const komuLogin = async () => {
+    try {
+      // If we don't have a main user, login to both
+      if (!user) {
+        await login();
+      } else if (!komuUser) {
+        // If we have main but no komu, try to sign in to komu specifically
+        await signInWithPopup(komuAuth, googleProvider);
+        console.log("Successfully synced with Komu Notes");
+      }
+    } catch (error) {
+      console.error("Komu login failed:", error);
+    }
+  };
+
   const logout = async () => {
     try {
-      await signOut(auth);
-      await signOut(komuAuth);
+      await Promise.all([
+        signOut(auth),
+        signOut(komuAuth)
+      ]);
     } catch (error) {
       console.error("Logout failed:", error);
     }
@@ -105,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, preferences, login, logout, updatePreferences }}>
+    <AuthContext.Provider value={{ user, komuUser, loading, preferences, login, komuLogin, logout, updatePreferences }}>
       {children}
     </AuthContext.Provider>
   );
