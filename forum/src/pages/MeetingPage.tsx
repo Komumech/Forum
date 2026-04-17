@@ -411,8 +411,18 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const connectionState = useConnectionState();
   const { send: sendHandRaise, message: handRaiseMessage } = useDataChannel("hand-raise");
   const { send: sendReactionData, message: reactionMessage } = useDataChannel("reaction");
-  const { send: sendAdmit } = useDataChannel("admit-user");
-  
+  // Handle admission data message
+  const { send: sendAdmit } = useDataChannel("admit-user", (msg) => {
+    if (new TextDecoder().decode(msg.payload) === "admitted") {
+      setIsAdmitted(true);
+      localParticipant.setMetadata(JSON.stringify({
+        pending: false,
+        avatar: user?.photoURL || "",
+        isHost: isHost
+      }));
+    }
+  });
+
   const [isAdmitted, setIsAdmitted] = useState(false);
   const [isHost, setIsHost] = useState(false);
   const [pendingParticipants, setPendingParticipants] = useState<Participant[]>([]);
@@ -429,8 +439,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
     // Host Election & Admission Check
     const initializeRoom = async () => {
-      if (!room) return;
-      const myId = user?.uid || localParticipant.sid;
+      if (!room || !localParticipant.identity) return;
+      const myIdentity = localParticipant.identity;
       const roomRef = doc(db, 'rooms', room);
 
       try {
@@ -440,7 +450,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             return snap.data();
           }
           const defaultData = { 
-            hostId: myId, 
+            hostId: myIdentity, 
             createdAt: Date.now(),
             lobby: true 
           };
@@ -449,7 +459,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         });
 
         if (!roomData) return;
-        setLobbyEnabled(roomData.lobby !== false);
+        const currentLobby = roomData.lobby !== false;
+        setLobbyEnabled(currentLobby);
 
         // Check against scheduled host
         const meetingsRef = collection(db, 'meetings');
@@ -465,14 +476,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         }
 
         const isAdmin = user?.email === "komumech@gmail.com";
-        const isScheduledHost = scheduledHostId && (scheduledHostId === user?.uid || scheduledHostId === localParticipant.sid);
+        const isScheduledHost = scheduledHostId && (scheduledHostId === user?.uid || scheduledHostId === localParticipant.identity);
         const isScheduledHostByEmail = scheduledHostEmail && user?.email === scheduledHostEmail;
 
-        if (isAdmin || isScheduledHost || isScheduledHostByEmail || roomData.hostId === myId) {
+        if (isAdmin || isScheduledHost || isScheduledHostByEmail || roomData.hostId === myIdentity) {
           console.log("[MeetingPage] Authorized as host");
           setIsHost(true);
           setIsAdmitted(true);
-          // Metadata update to reflect host status
           localParticipant.setMetadata(JSON.stringify({
              pending: false,
              avatar: user?.photoURL || "",
@@ -480,9 +490,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           }));
         } else {
           // Check if already admitted
-          const admittedRef = doc(db, 'rooms', room, 'admitted', myId);
+          const admittedRef = doc(db, 'rooms', room, 'admitted', myIdentity);
           const admittedSnap = await getDoc(admittedRef);
-          if (admittedSnap.exists() || roomData.lobby === false) {
+          if (admittedSnap.exists() || !currentLobby) {
             setIsAdmitted(true);
             localParticipant.setMetadata(JSON.stringify({
               pending: false,
@@ -505,21 +515,30 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
          const data = snapshot.data();
          const isLobby = data.lobby !== false;
          setLobbyEnabled(isLobby);
-         if (!isLobby) setIsAdmitted(true);
+         if (!isLobby) {
+           setIsAdmitted(true);
+           // If lobby is turned off, everyone is admitted. Update metadata to be visible.
+           localParticipant.setMetadata(JSON.stringify({
+              pending: false,
+              avatar: user?.photoURL || "",
+              isHost: isHost // Preserve host status if we are host
+           }));
+         }
        }
     });
 
     // Listen for admission
-    const myId = user?.uid || localParticipant.sid;
-    if (myId && room) {
-      const admittedRef = doc(db, 'rooms', room, 'admitted', myId);
+    const myIdentity = localParticipant.identity;
+    if (myIdentity && room) {
+      const admittedRef = doc(db, 'rooms', room, 'admitted', myIdentity);
       const unsubAdmit = onSnapshot(admittedRef, (docSnap) => {
         if (docSnap.exists()) {
+          console.log("[MeetingPage] Admission detected via Firestore");
           setIsAdmitted(true);
           localParticipant.setMetadata(JSON.stringify({
              pending: false,
              avatar: user?.photoURL || "",
-             isHost: false
+             isHost: isHost
           }));
         }
       });
@@ -546,21 +565,21 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   const admitUser = async (participant: Participant) => {
     if (!room || !isHost) return;
-    const participantId = participant.identity.split('#')[0] || participant.sid;
-    if (!participantId) return;
+    const participantIdentity = participant.identity;
+    if (!participantIdentity) return;
 
     try {
       // Track locally for instant UI update
       setAdmittedSids(prev => new Set(prev).add(participant.sid));
 
-      // Add to admitted collection in Firestore
-      const admittedRef = doc(db, 'rooms', room, 'admitted', participantId);
+      // Add to admitted collection in Firestore using full identity
+      const admittedRef = doc(db, 'rooms', room, 'admitted', participantIdentity);
       await setDoc(admittedRef, { admittedAt: serverTimestamp() });
       
       // Also send a data message as a fallback/speedup
-      sendAdmit(new TextEncoder().encode("admitted"), { reliable: true, destinationIdentities: [participant.identity] });
+      sendAdmit(new TextEncoder().encode("admitted"), { reliable: true, destinationIdentities: [participantIdentity] });
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `rooms/${room}/admitted/${participantId}`);
+      handleFirestoreError(err, OperationType.WRITE, `rooms/${room}/admitted/${participantIdentity}`);
     }
   };
   const [selectedVideoId, setSelectedVideoId] = useState<string>("");
@@ -806,7 +825,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       // Filter out pending participants
       try {
         const meta = JSON.parse(t.participant.metadata || "{}");
-        if (meta.pending && !t.participant.isLocal) return false;
+        if (t.participant.isLocal) return true;
+        
+        // Show if explicitly admitted by host locally OR if metadata is not pending
+        if (meta.pending === true) {
+          if (isHost && admittedSids.has(t.participant.sid)) return true;
+          return false;
+        }
       } catch {}
 
       return true;
