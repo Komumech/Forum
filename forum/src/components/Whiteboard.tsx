@@ -1,4 +1,5 @@
-import { useRef, useEffect, useState, MouseEvent, TouchEvent } from 'react';
+import * as React from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Download, Trash2, Undo, Redo, Type, MousePointer, Square, Circle, Minus, Pencil, Eraser } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -16,7 +17,7 @@ interface Shape {
   id: string;
 }
 
-function Whiteboard({ meetingId }: { meetingId?: string }) {
+export default function Whiteboard({ meetingId }: { meetingId?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -26,6 +27,7 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [undoStack, setUndoStack] = useState<Shape[][]>([]);
   const [currentShape, setCurrentShape] = useState<Shape | null>(null);
+  const [textInput, setTextInput] = useState<{ x: number, y: number, value: string } | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -34,23 +36,21 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
       const container = containerRef.current;
       const { width, height } = container.getBoundingClientRect();
       
-      // Save content
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = canvas.width;
-      tempCanvas.height = canvas.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      if (tempCtx) tempCtx.drawImage(canvas, 0, 0);
+      if (width === 0 || height === 0) return;
 
       canvas.width = width;
       canvas.height = height;
       
-      // Restore content if needed or redraw shapes
       redraw();
     };
 
-    window.addEventListener('resize', handleResize);
+    const observer = new ResizeObserver(handleResize);
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+    
     handleResize();
-    return () => window.removeEventListener('resize', handleResize);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -63,7 +63,10 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Set white background for the whole canvas
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
@@ -88,31 +91,42 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
         const radius = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
         ctx.arc(start.x, start.y, radius, 0, 2 * Math.PI);
         ctx.stroke();
+      } else if (shape.type === 'text' && shape.text) {
+        ctx.font = `${shape.width * 5}px Inter, sans-serif`;
+        ctx.fillStyle = shape.color;
+        ctx.fillText(shape.text, shape.points[0].x, shape.points[0].y);
       }
     });
   };
 
-  const startDrawing = (e: MouseEvent | TouchEvent) => {
+  const startDrawing = (e: React.PointerEvent) => {
     const pos = getPos(e);
     setIsDrawing(true);
     
+    // Set pointer capture to ensure we get events even if user moves outside canvas
+    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+
     if (tool === 'pencil') {
       setCurrentShape({
         type: 'pencil',
-        points: [pos],
+        points: [pos, { x: pos.x + 0.1, y: pos.y + 0.1 }], // Add a second point to ensure dot visibility
         color: color,
         width: lineWidth,
         id: Math.random().toString(36).substr(2, 9)
       });
     } else if (tool === 'eraser') {
-       // Eraser logic is just a white pencil for now or we could filter shapes
+       // Eraser logic is just a white pencil for now
        setCurrentShape({
         type: 'pencil',
-        points: [pos],
+        points: [pos, { x: pos.x + 0.1, y: pos.y + 0.1 }],
         color: '#ffffff',
         width: lineWidth * 4,
         id: Math.random().toString(36).substr(2, 9)
       });
+    } else if (tool === 'text') {
+      setTextInput({ x: pos.x, y: pos.y, value: '' });
+      setIsDrawing(false);
+      return;
     } else {
       setCurrentShape({
         type: tool as any,
@@ -124,7 +138,7 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
     }
   };
 
-  const draw = (e: MouseEvent | TouchEvent) => {
+  const draw = (e: React.PointerEvent) => {
     if (!isDrawing || !currentShape) return;
     const pos = getPos(e);
 
@@ -149,23 +163,14 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
     setCurrentShape(null);
   };
 
-  const getPos = (e: MouseEvent | TouchEvent): Point => {
+  const getPos = (e: React.PointerEvent): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     
-    let clientX, clientY;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
-
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
     };
   };
 
@@ -196,6 +201,7 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
         <div className="flex items-center gap-2">
           <ToolButton active={tool === 'pencil'} icon={<Pencil size={18} />} onClick={() => setTool('pencil')} />
           <ToolButton active={tool === 'eraser'} icon={<Eraser size={18} />} onClick={() => setTool('eraser')} />
+          <ToolButton active={tool === 'text'} icon={<Type size={18} />} onClick={() => setTool('text')} />
           <div className="w-px h-6 bg-gray-200 mx-1" />
           <ToolButton active={tool === 'line'} icon={<Minus size={18} />} onClick={() => setTool('line')} />
           <ToolButton active={tool === 'rect'} icon={<Square size={18} />} onClick={() => setTool('rect')} />
@@ -228,18 +234,64 @@ function Whiteboard({ meetingId }: { meetingId?: string }) {
           </button>
         </div>
       </div>
-      <div ref={containerRef} className="flex-1 bg-white cursor-crosshair relative">
+      <div ref={containerRef} className="flex-1 bg-white cursor-crosshair relative overflow-hidden">
         <canvas
           ref={canvasRef}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={endDrawing}
-          onMouseLeave={endDrawing}
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={endDrawing}
-          className="absolute inset-0"
+          onPointerDown={startDrawing}
+          onPointerMove={draw}
+          onPointerUp={endDrawing}
+          onPointerLeave={endDrawing}
+          className="absolute inset-0 touch-none w-full h-full bg-white select-none"
+          style={{ imageRendering: 'auto' }}
         />
+        {textInput && (
+          <div 
+            className="absolute z-10 p-2 bg-white rounded-lg shadow-xl border border-gray-100 min-w-[200px]"
+            style={{ left: textInput.x, top: textInput.y }}
+          >
+            <input
+              autoFocus
+              className="w-full px-2 py-1 text-sm border-none outline-none focus:ring-0"
+              placeholder="Type something..."
+              value={textInput.value}
+              onChange={e => setTextInput({ ...textInput, value: e.target.value })}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  if (textInput.value) {
+                    const newShape: Shape = {
+                      type: 'text',
+                      points: [{ x: textInput.x, y: textInput.y }],
+                      color: color,
+                      width: lineWidth,
+                      text: textInput.value,
+                      id: Math.random().toString(36).substr(2, 9)
+                    };
+                    setUndoStack([...undoStack, shapes]);
+                    setShapes([...shapes, newShape]);
+                  }
+                  setTextInput(null);
+                } else if (e.key === 'Escape') {
+                  setTextInput(null);
+                }
+              }}
+              onBlur={() => {
+                if (textInput.value) {
+                  const newShape: Shape = {
+                    type: 'text',
+                    points: [{ x: textInput.x, y: textInput.y }],
+                    color: color,
+                    width: lineWidth,
+                    text: textInput.value,
+                    id: Math.random().toString(36).substr(2, 9)
+                  };
+                  setUndoStack([...undoStack, shapes]);
+                  setShapes([...shapes, newShape]);
+                }
+                setTextInput(null);
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -258,5 +310,3 @@ function ToolButton({ active, icon, onClick }: { active: boolean, icon: React.Re
     </button>
   );
 }
-
-export default Whiteboard;

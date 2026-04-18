@@ -1,17 +1,18 @@
-import { useState, useEffect, FormEvent } from 'react';
+import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Whiteboard from '../components/Whiteboard';
+import Whiteboard from '../components/Whiteboard.tsx';
 import { 
   Video, Calendar, Plus, Search, Settings, Clock, 
   MessageSquare, Users, ChevronRight, LogOut, 
   LayoutDashboard, FileText, Bell, RefreshCw, X, MoreVertical,
   Copy, Check, Monitor, ChevronLeft, Calendar as CalendarIcon,
-  Filter, Grid, List as ListIcon, Trash2, Edit2
+  Filter, Grid, List as ListIcon, Trash2, Edit2, Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { db, auth, komuDb, komuAuth, googleProvider } from '../firebase';
-import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, setDoc, writeBatch, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { format, isToday, isTomorrow, parseISO } from 'date-fns';
 import { cn } from '../lib/utils';
@@ -28,6 +29,9 @@ interface Meeting {
   tags?: string[];
   notes?: string;
   isKomu?: boolean;
+  isGoogle?: boolean;
+  isMeeting?: boolean;
+  type?: 'event' | 'task' | 'focus' | 'meeting';
 }
 
 enum OperationType {
@@ -77,20 +81,41 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [showPastInUpcoming, setShowPastInUpcoming] = useState(false);
+  const [meetingsPage, setMeetingsPage] = useState(1);
+  const meetingsPerPage = 6;
   const [joinCode, setJoinCode] = useState('');
   const [isNewMeetingMenuOpen, setIsNewMeetingMenuOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
   const [newContact, setNewContact] = useState({ displayName: '', email: '' });
   const [editingNote, setEditingNote] = useState<any>(null);
+  const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
+  const [editMeetingForm, setEditMeetingForm] = useState({ title: '', description: '', date: '', time: '' });
   const [contacts, setContacts] = useState<any[]>([]);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [notes, setNotes] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [calendarView, setCalendarView] = useState<'month' | 'week'>('month');
+  const [showAllEvents, setShowAllEvents] = useState(true);
   const [settings, setSettings] = useState({
     muteOnJoin: false,
     videoOffOnJoin: false,
     mirrorVideo: true,
   });
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const searchRef = React.useRef<HTMLDivElement>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setSearchQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -117,11 +142,17 @@ export default function Dashboard() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const localMeetings = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        startTime: doc.data().startTime.toDate(),
-      })) as Meeting[];
+      const localMeetings = snapshot.docs.map(doc => {
+        const data = doc.data();
+        const startTime = data.startTime.toDate();
+        return {
+          id: doc.id,
+          ...data,
+          startTime,
+          endTime: data.endTime?.toDate() || new Date(startTime.getTime() + 3600000),
+          notes: data.description || '', // Ensure notes/description are synced
+        };
+      }) as Meeting[];
       
       setMeetings(prev => {
         const komuOnes = prev.filter(m => m.isKomu);
@@ -133,11 +164,13 @@ export default function Dashboard() {
     });
 
     // Initial Komu Sync
-    if (user) {
-      syncKomuCalendar();
-    }
+    const komuUnsubscribe = syncKomuCalendar();
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      profileUnsubscribe();
+      if (komuUnsubscribe && typeof komuUnsubscribe === 'function') komuUnsubscribe();
+    };
   }, [user]);
 
   // Fetch Contacts
@@ -182,12 +215,27 @@ export default function Dashboard() {
     }
   };
 
-  const handleAddContact = async (e: FormEvent) => {
+  const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newContact.email) return;
     try {
+      // Try to find if user exists to get their photo
+      let photoURL = '';
+      const profilesRef = collection(db, 'userProfiles');
+      const q = query(profilesRef, where('email', '==', newContact.email));
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        photoURL = snap.docs[0].data().photoURL || '';
+        // Also update displayName if it's missing or generic
+        if (!newContact.displayName || newContact.displayName === newContact.email) {
+          newContact.displayName = snap.docs[0].data().displayName || newContact.displayName;
+        }
+      }
+
       await addDoc(collection(db, 'contacts'), {
         ...newContact,
+        photoURL,
         ownerId: user.uid,
         createdAt: Timestamp.now()
       });
@@ -211,6 +259,79 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteMeeting = async (meetingId: string) => {
+    if (!user) return;
+    if (!confirm("Are you sure you want to delete this meeting?")) return;
+    try {
+      await deleteDoc(doc(db, 'meetings', meetingId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `meetings/${meetingId}`);
+    }
+  };
+
+  const handleEditMeeting = (meeting: Meeting) => {
+    setEditingMeeting(meeting);
+    setEditMeetingForm({
+      title: meeting.title,
+      description: meeting.description || '',
+      date: format(meeting.startTime, 'yyyy-MM-dd'),
+      time: format(meeting.startTime, 'HH:mm')
+    });
+  };
+
+  const handleUpdateMeeting = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !editingMeeting) return;
+
+    const startTime = new Date(`${editMeetingForm.date}T${editMeetingForm.time}`);
+    const endTime = new Date(startTime.getTime() + (editingMeeting.endTime ? editingMeeting.endTime.getTime() - editingMeeting.startTime.getTime() : 3600000));
+    
+    try {
+      if (editingMeeting.isKomu) {
+        try {
+          await updateDoc(doc(komuDb, 'events', editingMeeting.id), {
+            title: editMeetingForm.title,
+            description: editMeetingForm.description, // Synchronize notes/desc
+            start: Timestamp.fromDate(startTime),
+            end: Timestamp.fromDate(endTime),
+            isMeeting: true, // Mark it so it stays a meeting
+            updatedAt: Timestamp.now()
+          });
+        } catch (komuErr) {
+          console.warn("Failed to sync update to Komu:", komuErr);
+        }
+      }
+
+      // If it's a Google event and we have a token, try to update it there too
+      // Note: This is an optimistic update, we don't block on Google API success
+      if (editingMeeting.isGoogle && googleToken) {
+        fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${editingMeeting.roomId}`, {
+          method: 'PATCH',
+          headers: { 
+            'Authorization': `Bearer ${googleToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            summary: editMeetingForm.title,
+            description: editMeetingForm.description,
+            start: { dateTime: startTime.toISOString() },
+            end: { dateTime: new Date(startTime.getTime() + 3600000).toISOString() }
+          })
+        }).catch(err => console.warn("Google Sync Update failed:", err));
+      }
+
+      await updateDoc(doc(db, 'meetings', editingMeeting.id), {
+        title: editMeetingForm.title,
+        description: editMeetingForm.description,
+        notes: editMeetingForm.description, // Keep notes synced with description
+        startTime: Timestamp.fromDate(startTime)
+      });
+      setEditingMeeting(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `meetings/${editingMeeting.id}`);
+    }
+  };
+
   const saveSettings = (newSettings: any) => {
     setSettings(newSettings);
     if (user) {
@@ -218,43 +339,50 @@ export default function Dashboard() {
     }
   };
 
-  const syncKomuCalendar = async () => {
+  const syncKomuCalendar = () => {
     if (!user) return;
     setSyncing(true);
     try {
-      const uid = komuAuth.currentUser?.uid || user.uid;
+      // Use the email as a fallback link if UIDs differ, but standard is using current user UID
+      const uid = user.uid;
       const q = query(collection(komuDb, 'events'), where('uid', '==', uid));
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+      return onSnapshot(q, (snapshot) => {
         const komuMeetings = snapshot.docs
           .map(doc => {
             const data = doc.data();
-            const isEvent = data.type === 'event';
-            const hasMeetingTag = data.title?.toLowerCase().includes('meeting') || 
+            // Perfectly sync by including all events, identifying meetings specifically
+            const isMeeting = data.type === 'meeting' || 
+                                 data.isMeeting || 
+                                 data.title?.toLowerCase().includes('meeting') || 
                                  data.description?.toLowerCase().includes('meeting') ||
                                  (data.tags && data.tags.includes('meeting'));
             
-            if (!isEvent && !hasMeetingTag) return null;
-
+            // We return all Komu events to show in calendar, but mark them
             return {
               id: doc.id,
               title: data.title,
               description: data.description,
               startTime: data.start?.toDate() || new Date(),
+              endTime: data.end?.toDate() || new Date((data.start?.toDate()?.getTime() || Date.now()) + 3600000),
               roomId: data.roomId || doc.id,
               hostId: data.uid,
-              hostName: 'Komu User',
-              notes: data.description,
-              isKomu: true
+              hostName: data.hostName || 'Komu User',
+              notes: data.description, // Synced notes
+              isKomu: true,
+              isMeeting: isMeeting,
+              type: data.type || (isMeeting ? 'meeting' : 'event')
             };
           })
-          .filter(m => m !== null) as Meeting[];
+          .filter(m => m !== null && m.isMeeting) as Meeting[];
 
         setMeetings(prev => {
           const localOnes = prev.filter(m => !m.isKomu);
           return [...localOnes, ...komuMeetings].sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
         });
+        setSyncing(false);
       }, (err) => {
+        setSyncing(false);
         if (err.message.includes('permission')) {
           console.warn("[Dashboard] Komu Sync Permissions Restricted.");
         } else {
@@ -263,8 +391,8 @@ export default function Dashboard() {
       });
     } catch (err) {
       console.error("Komu Sync Failed:", err);
-    } finally {
       setSyncing(false);
+      return undefined;
     }
   };
 
@@ -276,6 +404,7 @@ export default function Dashboard() {
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const token = credential?.accessToken;
       if (!token) throw new Error("No access token");
+      setGoogleToken(token);
 
       // Fetch from Google Calendar
       const now = new Date();
@@ -300,6 +429,7 @@ export default function Dashboard() {
           hostName: 'Google Calendar',
           participants: [user.uid],
           isGoogle: true,
+          isMeeting: true, // Google calendar events are treated as meetings/appointments
           createdAt: Timestamp.now()
         });
       });
@@ -313,7 +443,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleSchedule = async (e: FormEvent) => {
+  const handleSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
@@ -324,11 +454,13 @@ export default function Dashboard() {
       await addDoc(collection(db, 'meetings'), {
         title: newMeeting.title,
         description: newMeeting.description,
+        notes: newMeeting.description,
         startTime: Timestamp.fromDate(startTime),
         roomId,
         hostId: user.uid,
         hostName: user.displayName || 'Anonymous',
         participants: [user.uid],
+        isMeeting: true,
         createdAt: Timestamp.now()
       });
       setIsScheduling(false);
@@ -349,6 +481,7 @@ export default function Dashboard() {
           hostId: user.uid,
           hostName: user.displayName || 'Anonymous',
           participants: [user.uid],
+          isMeeting: true,
           createdAt: Timestamp.now()
         });
       } catch (err) {
@@ -360,16 +493,16 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#f8f9fa] flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col hidden md:flex sticky top-0 h-screen">
+      {/* Sidebar - Desktop */}
+      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col hidden md:flex sticky top-0 h-screen shrink-0">
         <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 bg-accent-blue rounded-xl flex items-center justify-center shadow-lg shadow-accent-blue/20">
-            <Video className="text-white" size={24} />
+          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg border border-gray-100 p-1.5 overflow-hidden">
+            <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
           </div>
           <span className="text-2xl font-bold text-gray-900 tracking-tight">Forum</span>
         </div>
 
-        <nav className="flex-1 px-4 py-6 space-y-2">
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scroll">
           <SidebarItem 
             icon={<LayoutDashboard size={20} />} 
             label="Dashboard" 
@@ -425,20 +558,253 @@ export default function Dashboard() {
         </div>
       </aside>
 
+      {/* Sidebar - Mobile Overlay */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] md:hidden"
+            />
+            <motion.aside 
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 left-0 bottom-0 w-[280px] bg-white z-[110] flex flex-col md:hidden"
+            >
+              <div className="p-6 flex items-center justify-between border-b border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-md border border-gray-100 p-1.5 overflow-hidden">
+                    <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
+                  </div>
+                  <span className="text-2xl font-bold text-gray-900 tracking-tight">Forum</span>
+                </div>
+                <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-all">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+                <SidebarItem 
+                  icon={<LayoutDashboard size={20} />} 
+                  label="Dashboard" 
+                  active={activeSidebarTab === 'dashboard'} 
+                  onClick={() => { setActiveSidebarTab('dashboard'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Video size={20} />} 
+                  label="Meetings" 
+                  active={activeSidebarTab === 'meetings'} 
+                  onClick={() => { setActiveSidebarTab('meetings'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Calendar size={20} />} 
+                  label="Calendar" 
+                  active={activeSidebarTab === 'calendar'} 
+                  onClick={() => { setActiveSidebarTab('calendar'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Users size={20} />} 
+                  label="Contacts" 
+                  active={activeSidebarTab === 'contacts'} 
+                  onClick={() => { setActiveSidebarTab('contacts'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<FileText size={20} />} 
+                  label="Notes" 
+                  active={activeSidebarTab === 'notes'} 
+                  onClick={() => { setActiveSidebarTab('notes'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Monitor size={20} />} 
+                  label="Whiteboard" 
+                  active={activeSidebarTab === 'whiteboard'} 
+                  onClick={() => { setActiveSidebarTab('whiteboard'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Settings size={20} />} 
+                  label="Settings" 
+                  active={activeSidebarTab === 'settings'} 
+                  onClick={() => { setActiveSidebarTab('settings'); setIsMobileMenuOpen(false); }}
+                />
+              </nav>
+
+              <div className="p-4 border-t border-gray-100">
+                <button 
+                  onClick={logout}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-accent-red hover:bg-red-50 rounded-xl transition-all"
+                >
+                  <LogOut size={20} />
+                  <span className="font-medium">Sign out</span>
+                </button>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Top Header */}
-        <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8 sticky top-0 z-10">
+        <header className="h-16 lg:h-20 bg-white border-b border-gray-100 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-[60] shrink-0">
           <div className="flex items-center gap-4 flex-1 max-w-xl">
-            <div className="relative w-full">
+            <button 
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-all"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="relative w-full group/search" ref={searchRef}>
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input 
                 type="text" 
-                placeholder="Search meetings, notes..." 
-                className="w-full pl-12 pr-4 py-2.5 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none text-sm"
+                placeholder="Search meetings, contacts or notes..." 
+                className="w-full pl-10 lg:pl-12 pr-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none text-sm transition-all"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setShowSearchDropdown(true)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setShowSearchDropdown(true);
+                }}
               />
+              
+              {/* Outlook-style Search Results Card */}
+              <AnimatePresence>
+                {showSearchDropdown && searchQuery.trim().length > 0 && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 p-2 z-[100] max-h-[480px] overflow-y-auto custom-scroll"
+                  >
+                    <div className="p-2 space-y-4">
+                      {/* Meetings Results */}
+                      {meetings.filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase())).length > 0 && (
+                        <div>
+                          <p className="px-2 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">Meetings</p>
+                          <div className="space-y-1">
+                            {meetings.filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5).map(m => (
+                              <button 
+                                key={m.id}
+                                onClick={() => { 
+                                  const isPast = m.startTime.getTime() < Date.now();
+                                  // Keep the search query so the tab shows "just results"
+                                  setShowSearchDropdown(false);
+                                  setActiveSidebarTab('meetings');
+                                  setMeetingSubTab(isPast ? 'previous' : 'upcoming');
+                                  
+                                  // Calculate page for when search is cleared
+                                  let sortedList = meetings.filter(item => {
+                                    const itemPast = item.startTime.getTime() < Date.now();
+                                    return isPast ? itemPast : !itemPast;
+                                  });
+                                  if (isPast) sortedList = [...sortedList].sort((a,b) => b.startTime.getTime() - a.startTime.getTime());
+                                  
+                                  const index = sortedList.findIndex(item => item.id === m.id);
+                                  if (index !== -1) {
+                                    setMeetingsPage(Math.floor(index / meetingsPerPage) + 1);
+                                  }
+
+                                  // Close dropdown by blurring search or clearing temporarily if needed
+                                  // For now, we scroll to it. If searchQuery is kept, results will be filtered.
+                                  setTimeout(() => {
+                                    const el = document.getElementById(`meeting-${m.id}`);
+                                    if (el) {
+                                      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                      el.classList.add('ring-2', 'ring-accent-blue', 'ring-offset-4', 'duration-500');
+                                      setTimeout(() => el.classList.remove('ring-2', 'ring-accent-blue', 'ring-offset-4'), 3000);
+                                    }
+                                  }, 500);
+                                }}
+                                className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-all text-left group"
+                              >
+                                <div className="w-10 h-10 bg-blue-50 text-accent-blue rounded-lg flex items-center justify-center shrink-0">
+                                  <Video size={18} />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{m.title}</p>
+                                  <p className="text-[10px] text-gray-500">{format(m.startTime, 'MMM d, h:mm a')}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Contacts Results */}
+                      {contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.email.toLowerCase().includes(searchQuery.toLowerCase())).length > 0 && (
+                        <div>
+                          <p className="px-2 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">Contacts</p>
+                          <div className="space-y-1">
+                            {contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.email.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(c => (
+                              <button 
+                                key={c.id}
+                                onClick={() => { 
+                                  setSearchQuery(''); 
+                                  setShowSearchDropdown(false);
+                                  setActiveSidebarTab('contacts'); 
+                                }}
+                                className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-all text-left group"
+                              >
+                                <img src={c.avatar} className="w-10 h-10 rounded-lg object-cover shrink-0" alt="" referrerPolicy="no-referrer" />
+                                <div>
+                                  <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{c.name}</p>
+                                  <p className="text-[10px] text-gray-500">{c.role}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Notes Results */}
+                      {notes.filter(n => n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase())).length > 0 && (
+                        <div>
+                          <p className="px-2 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">Notes</p>
+                          <div className="space-y-1">
+                            {notes.filter(n => n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(n => (
+                              <button 
+                                key={n.id}
+                                onClick={() => { 
+                                  setSearchQuery(''); 
+                                  setShowSearchDropdown(false);
+                                  setActiveSidebarTab('notes'); 
+                                }}
+                                className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-all text-left group"
+                              >
+                                <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center shrink-0">
+                                  <FileText size={18} />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{n.title}</p>
+                                  <p className="text-[10px] text-gray-500 line-clamp-1">{n.content}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* No Results */}
+                      {meetings.filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 &&
+                       contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 &&
+                       notes.filter(n => n.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                        <div className="p-10 text-center space-y-3">
+                          <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
+                            <Search className="text-gray-300" size={32} />
+                          </div>
+                          <p className="text-sm font-bold text-gray-900">No results found</p>
+                          <p className="text-xs text-gray-400">Try searching for something else</p>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
@@ -479,54 +845,54 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-8 custom-scroll">
-          <div className="max-w-6xl mx-auto space-y-10">
+        <div className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scroll bg-gray-50/30">
+          <div className="max-w-6xl mx-auto space-y-6 lg:space-y-10">
             {activeSidebarTab === 'dashboard' && (
               <>
                 {/* Welcome Section */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                  <div>
-                    <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Welcome back, {user?.displayName?.split(' ')[0]}!</h2>
-                    <div className="flex items-center gap-4 mt-2">
-                      <p className="text-gray-500">You have {meetings.filter(m => isToday(m.startTime)).length} meetings scheduled for today.</p>
-                      <div className="h-4 w-px bg-gray-200" />
-                      <p className="text-gray-500">{format(new Date(), 'EEEE, MMMM do')}</p>
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="text-center lg:text-left">
+                    <h2 className="text-2xl lg:text-3xl font-bold text-gray-900 tracking-tight">Welcome back, {user?.displayName?.split(' ')[0]}!</h2>
+                    <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 lg:gap-4 mt-2">
+                      <p className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">You have {meetings.filter(m => isToday(m.startTime)).length} meetings today.</p>
+                      <div className="hidden sm:block h-4 w-px bg-gray-200" />
+                      <p className="text-xs sm:text-sm text-gray-500">{format(new Date(), 'EEEE, MMMM do')}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="grid grid-cols-2 sm:flex sm:items-center justify-center gap-2 lg:gap-3">
                     <button 
                       onClick={syncGoogleCalendar}
                       disabled={syncing}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-all disabled:opacity-50"
+                      className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-gray-100 text-gray-700 rounded-xl text-xs sm:text-sm font-bold hover:bg-gray-50 transition-all disabled:opacity-50"
                     >
-                      <img src="https://www.gstatic.com/images/branding/product/1x/calendar_2020q4_48dp.png" className="w-5 h-5" alt="Google" />
-                      Sync Google
+                      <img src="https://www.gstatic.com/images/branding/product/1x/calendar_2020q4_48dp.png" className="w-5 h-5 shrink-0" alt="Google" />
+                      <span>Google</span>
                     </button>
                     <button 
                       onClick={syncKomuCalendar}
                       disabled={syncing}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-all disabled:opacity-50"
+                      className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-gray-100 text-gray-700 rounded-xl text-xs sm:text-sm font-bold hover:bg-gray-50 transition-all disabled:opacity-50"
                     >
-                      <RefreshCw size={18} className={cn(syncing && "animate-spin")} />
-                      Sync Komu
+                      <RefreshCw size={16} className={cn("shrink-0", syncing && "animate-spin")} />
+                      <span>Komu</span>
                     </button>
                     <button 
                       onClick={() => setIsScheduling(true)}
-                      className="flex items-center gap-2 px-6 py-2.5 bg-accent-blue text-white rounded-xl font-bold shadow-lg shadow-accent-blue/20 hover:bg-blue-600 transition-all active:scale-95"
+                      className="col-span-2 sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-accent-blue/10 hover:bg-blue-600 transition-all active:scale-95"
                     >
-                      <Plus size={20} />
-                      Schedule Meeting
+                      <Plus size={18} className="shrink-0" />
+                      Schedule
                     </button>
                   </div>
                 </div>
 
                 {/* Quick Actions */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 lg:gap-6">
                   <div className="relative">
                     <QuickActionCard 
-                      icon={<Plus size={24} />} 
+                      icon={<Plus size={20} />} 
                       label="New Meeting" 
-                      sub="Start an instant meeting" 
+                      sub="Instant meeting" 
                       color="bg-accent-blue"
                       onClick={() => setIsNewMeetingMenuOpen(!isNewMeetingMenuOpen)}
                     />
@@ -581,58 +947,60 @@ export default function Dashboard() {
                     </AnimatePresence>
                   </div>
                   <QuickActionCard 
-                    icon={<Users size={24} />} 
+                    icon={<Users size={20} />} 
                     label="Join Meeting" 
-                    sub="Enter a meeting code" 
+                    sub="Using code" 
                     color="bg-success-green"
                     onClick={() => setIsJoinMeetingModalOpen(true)}
                   />
                   <QuickActionCard 
-                    icon={<Calendar size={24} />} 
+                    icon={<Calendar size={20} />} 
                     label="Schedule" 
-                    sub="Plan a future meeting" 
+                    sub="Plan ahead" 
                     color="bg-purple-500"
                     onClick={() => setIsScheduling(true)}
                   />
                   <QuickActionCard 
-                    icon={<Monitor size={24} />} 
+                    icon={<Monitor size={20} />} 
                     label="Share Screen" 
-                    sub="Present in a meeting" 
+                    sub="Present" 
                     color="bg-orange-500"
                     onClick={() => setIsSharing(true)}
                   />
                 </div>
 
                 {/* Personal Meeting Room */}
-                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-gray-50 rounded-2xl flex items-center justify-center text-accent-blue">
-                      <Video size={24} />
+                <div className="bg-white p-5 lg:p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-6 overflow-hidden">
+                  <div className="flex items-center gap-4 w-full lg:w-auto min-w-0">
+                    <div className="w-10 h-10 lg:w-12 lg:h-12 bg-gray-50 rounded-2xl flex items-center justify-center text-accent-blue shrink-0">
+                      <Video size={20} className="lg:size-6" />
                     </div>
-                    <div>
-                      <h3 className="font-bold text-gray-900">Personal Meeting Room</h3>
-                      <p className="text-sm text-gray-500">Your permanent meeting link for quick syncs.</p>
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-gray-900 text-sm lg:text-base truncate">Personal Meeting Room</h3>
+                      <p className="text-xs lg:text-sm text-gray-500 truncate">Your permanent meeting link for quick syncs.</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 w-full md:w-auto">
-                    <div className="flex-1 md:flex-none px-4 py-2 bg-gray-50 rounded-xl text-sm font-mono text-gray-600 border border-gray-100">
+                  <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto shrink-0 lg:ml-auto">
+                    <div className="w-full lg:w-auto px-4 py-2.5 bg-gray-50 rounded-xl text-[10px] sm:text-xs font-mono text-gray-600 border border-gray-100 truncate text-center sm:text-left lg:max-w-[240px]">
                       forum.app/m/{user?.uid?.substring(0, 8)}
                     </div>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(`https://forum.app/m/${user?.uid?.substring(0, 8)}`);
-                        alert("Link copied!");
-                      }}
-                      className="p-2.5 text-accent-blue hover:bg-accent-blue/5 rounded-xl transition-all"
-                    >
-                      <Copy size={20} />
-                    </button>
-                    <button 
-                      onClick={() => joinMeeting(user?.uid?.substring(0, 8) || '')}
-                      className="px-6 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-accent-blue/20"
-                    >
-                      Start
-                    </button>
+                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                      <button 
+                        onClick={() => {
+                          navigator.clipboard.writeText(`https://forum.app/m/${user?.uid?.substring(0, 8)}`);
+                          alert("Link copied!");
+                        }}
+                        className="p-2.5 text-accent-blue hover:bg-accent-blue/5 rounded-xl transition-all border border-blue-50 sm:border-transparent flex items-center justify-center shrink-0"
+                      >
+                        <Copy size={18} />
+                      </button>
+                      <button 
+                        onClick={() => joinMeeting(user?.uid?.substring(0, 8) || '')}
+                        className="px-6 lg:px-8 py-2.5 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-accent-blue/20 transition-all hover:bg-blue-600 active:scale-95 shrink-0"
+                      >
+                        Start
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -644,7 +1012,24 @@ export default function Dashboard() {
                         <Clock size={20} className="text-accent-blue" />
                         Upcoming Meetings
                       </h3>
-                      <button onClick={() => setActiveSidebarTab('meetings')} className="text-sm font-bold text-accent-blue hover:underline">View all</button>
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <div 
+                            onClick={() => setShowPastInUpcoming(!showPastInUpcoming)}
+                            className={cn(
+                              "w-8 h-4 rounded-full relative transition-all",
+                              showPastInUpcoming ? "bg-accent-blue" : "bg-gray-200"
+                            )}
+                          >
+                            <div className={cn(
+                              "absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all shadow-sm",
+                              showPastInUpcoming ? "left-4.5" : "left-0.5"
+                            )} />
+                          </div>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider group-hover:text-gray-600 transition-colors">Past</span>
+                        </label>
+                        <button onClick={() => setActiveSidebarTab('meetings')} className="text-sm font-bold text-accent-blue hover:underline">View all</button>
+                      </div>
                     </div>
 
                     <div className="space-y-4">
@@ -652,25 +1037,34 @@ export default function Dashboard() {
                         <div className="p-12 flex justify-center">
                           <RefreshCw className="animate-spin text-gray-300" size={32} />
                         </div>
-                      ) : meetings.filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 ? (
-                        <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center space-y-4">
-                          <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
-                            <Calendar className="text-gray-300" size={32} />
-                          </div>
-                          <p className="text-gray-500 font-medium">No meetings found.</p>
-                          <button onClick={() => setIsScheduling(true)} className="text-accent-blue font-bold hover:underline">Schedule one now</button>
-                        </div>
                       ) : (
-                        meetings
-                          .filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase()))
-                          .slice(0, 3)
-                          .map(meeting => (
+                        (() => {
+                          const items = meetings
+                            .filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase()))
+                            .filter(m => showPastInUpcoming || m.startTime.getTime() >= Date.now());
+                          
+                          if (items.length === 0) {
+                            return (
+                              <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center space-y-4">
+                                <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
+                                  <Calendar className="text-gray-300" size={32} />
+                                </div>
+                                <p className="text-gray-500 font-medium">No meetings found.</p>
+                                <button onClick={() => setIsScheduling(true)} className="text-accent-blue font-bold hover:underline">Schedule one now</button>
+                              </div>
+                            );
+                          }
+
+                          return items.slice(0, 3).map(meeting => (
                             <MeetingCard 
                               key={meeting.id} 
                               meeting={meeting} 
                               onJoin={() => joinMeeting(meeting.roomId)}
+                              onEdit={() => handleEditMeeting(meeting)}
+                              onDelete={() => handleDeleteMeeting(meeting.id)}
                             />
-                          ))
+                          ));
+                        })()
                       )}
                     </div>
                   </div>
@@ -727,43 +1121,68 @@ export default function Dashboard() {
 
             {activeSidebarTab === 'calendar' && (
               <div className="space-y-6 h-full flex flex-col">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                     <h2 className="text-2xl font-bold text-gray-900">Calendar</h2>
-                    <div className="flex bg-gray-100 p-1 rounded-xl">
-                      <button 
-                        onClick={() => setCalendarView('month')}
-                        className={cn("px-4 py-1.5 rounded-lg text-sm font-bold transition-all", calendarView === 'month' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500")}
-                      >
-                        Month
-                      </button>
-                      <button 
-                        onClick={() => setCalendarView('week')}
-                        className={cn("px-4 py-1.5 rounded-lg text-sm font-bold transition-all", calendarView === 'week' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500")}
-                      >
-                        Week
-                      </button>
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
+                      <div className="flex bg-gray-100 p-1 rounded-xl shrink-0">
+                        <button 
+                          onClick={() => setCalendarView('month')}
+                          className={cn("px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all", calendarView === 'month' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500")}
+                        >
+                          Month
+                        </button>
+                        <button 
+                          onClick={() => setCalendarView('week')}
+                          className={cn("px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all", calendarView === 'week' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500")}
+                        >
+                          Week
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl shrink-0">
+                        <button 
+                          onClick={() => setShowAllEvents(true)}
+                          className={cn(
+                            "px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all flex items-center gap-1.5",
+                            showAllEvents ? "bg-white text-accent-blue shadow-sm" : "text-gray-500"
+                          )}
+                        >
+                          <Grid size={12} />
+                          All
+                        </button>
+                        <button 
+                          onClick={() => setShowAllEvents(false)}
+                          className={cn(
+                            "px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all flex items-center gap-1.5",
+                            !showAllEvents ? "bg-white text-accent-blue shadow-sm" : "text-gray-500"
+                          )}
+                        >
+                          <Video size={12} />
+                          Meetings
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 bg-white border border-gray-100 rounded-xl px-2 py-1 shadow-sm">
+                  <div className="flex items-center justify-between sm:justify-end gap-3">
+                    <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl px-1.5 py-1 shadow-sm">
                       <button onClick={() => {
                         const d = new Date(selectedDate);
                         if (calendarView === 'month') d.setMonth(d.getMonth() - 1);
                         else d.setDate(d.getDate() - 7);
                         setSelectedDate(d);
-                      }} className="p-1.5 hover:bg-gray-50 rounded-lg"><ChevronLeft size={18} /></button>
-                      <span className="text-sm font-bold px-2 whitespace-nowrap">{format(selectedDate, calendarView === 'month' ? 'MMMM yyyy' : 'MMM d')}</span>
+                      }} className="p-1.5 hover:bg-gray-50 rounded-lg"><ChevronLeft size={16} /></button>
+                      <span className="text-xs sm:text-sm font-bold px-1 sm:px-2 whitespace-nowrap min-w-[100px] text-center">{format(selectedDate, calendarView === 'month' ? 'MMMM yyyy' : 'MMM d')}</span>
                       <button onClick={() => {
                         const d = new Date(selectedDate);
                         if (calendarView === 'month') d.setMonth(d.getMonth() + 1);
                         else d.setDate(d.getDate() + 7);
                         setSelectedDate(d);
-                      }} className="p-1.5 hover:bg-gray-50 rounded-lg"><ChevronRight size={18} /></button>
+                      }} className="p-1.5 hover:bg-gray-50 rounded-lg"><ChevronRight size={16} /></button>
                     </div>
                     <button 
                       onClick={() => setIsScheduling(true)}
-                      className="px-6 py-2.5 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-md"
+                      className="px-4 py-2.5 bg-accent-blue text-white rounded-xl font-bold text-xs sm:text-sm shadow-md transition-transform active:scale-95"
                     >
                       New Event
                     </button>
@@ -772,40 +1191,48 @@ export default function Dashboard() {
                 
                 <div className="flex-1 bg-white rounded-[40px] border border-gray-100 shadow-sm overflow-hidden flex flex-col">
                   {calendarView === 'month' ? (
-                    <CalendarMonthView selectedDate={selectedDate} meetings={meetings} />
+                    <CalendarMonthView 
+                      selectedDate={selectedDate} 
+                      meetings={meetings.filter(m => showAllEvents || m.isMeeting)} 
+                      onEditMeeting={handleEditMeeting} 
+                    />
                   ) : (
-                    <CalendarWeekView selectedDate={selectedDate} meetings={meetings} />
+                    <CalendarWeekView 
+                      selectedDate={selectedDate} 
+                      meetings={meetings.filter(m => showAllEvents || m.isMeeting)} 
+                      onEditMeeting={handleEditMeeting} 
+                    />
                   )}
                 </div>
               </div>
             )}
             {activeSidebarTab === 'meetings' && (
               <div className="space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h2 className="text-2xl font-bold text-gray-900">Meetings</h2>
-                  <div className="flex p-1 bg-gray-100 rounded-xl">
+                  <div className="flex p-1 bg-gray-100 rounded-xl self-start sm:self-auto overflow-x-auto no-scrollbar">
                     <button 
-                      onClick={() => setMeetingSubTab('upcoming')}
+                      onClick={() => { setMeetingSubTab('upcoming'); setMeetingsPage(1); }}
                       className={cn(
-                        "px-4 py-2 rounded-lg font-bold text-sm transition-all",
+                        "px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all shrink-0",
                         meetingSubTab === 'upcoming' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
                       Upcoming
                     </button>
                     <button 
-                      onClick={() => setMeetingSubTab('previous')}
+                      onClick={() => { setMeetingSubTab('previous'); setMeetingsPage(1); }}
                       className={cn(
-                        "px-4 py-2 rounded-lg font-bold text-sm transition-all",
+                        "px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all shrink-0",
                         meetingSubTab === 'previous' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
                       Previous
                     </button>
                     <button 
-                      onClick={() => setMeetingSubTab('recordings')}
+                      onClick={() => { setMeetingSubTab('recordings'); setMeetingsPage(1); }}
                       className={cn(
-                        "px-4 py-2 rounded-lg font-bold text-sm transition-all",
+                        "px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all shrink-0",
                         meetingSubTab === 'recordings' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
@@ -815,24 +1242,121 @@ export default function Dashboard() {
                 </div>
                 
                 {meetingSubTab === 'upcoming' && (
-                  <div className="space-y-4">
-                    {meetings.length === 0 ? (
-                      <div className="p-12 text-center text-gray-500">No upcoming meetings.</div>
-                    ) : (
-                      meetings.map(meeting => (
-                        <MeetingCard 
-                          key={meeting.id} 
-                          meeting={meeting} 
-                          onJoin={() => joinMeeting(meeting.roomId)}
-                        />
-                      ))
-                    )}
+                  <div className="space-y-4 pb-20">
+                    {(() => {
+                      const isSearching = searchQuery.trim().length > 0;
+                      const list = meetings
+                        .filter(m => m.startTime.getTime() >= Date.now())
+                        .filter(m => !isSearching || m.title.toLowerCase().includes(searchQuery.toLowerCase()) || m.description?.toLowerCase().includes(searchQuery.toLowerCase()));
+                      
+                      const paginatedList = isSearching ? list : list.slice((meetingsPage - 1) * meetingsPerPage, meetingsPage * meetingsPerPage);
+                      const totalPages = isSearching ? 1 : Math.ceil(list.length / meetingsPerPage);
+
+                      if (list.length === 0) return (
+                        <div className="p-12 text-center text-gray-500 bg-white rounded-3xl border border-gray-100">
+                          {isSearching ? `No results for "${searchQuery}"` : "No upcoming meetings."}
+                          {isSearching && <button onClick={() => setSearchQuery('')} className="block mx-auto mt-2 text-accent-blue font-bold text-xs uppercase tracking-wider">Clear Search</button>}
+                        </div>
+                      );
+
+                      return (
+                        <>
+                          <div className="space-y-4">
+                            {paginatedList.map(meeting => (
+                              <MeetingCard 
+                                key={meeting.id} 
+                                meeting={meeting} 
+                                onJoin={() => joinMeeting(meeting.roomId)}
+                                onEdit={() => handleEditMeeting(meeting)}
+                                onDelete={() => handleDeleteMeeting(meeting.id)}
+                              />
+                            ))}
+                          </div>
+                          
+                          {!isSearching && totalPages > 1 && (
+                            <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 mt-6 shadow-sm">
+                              <button 
+                                disabled={meetingsPage === 1}
+                                onClick={() => setMeetingsPage(p => p - 1)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-500 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
+                              >
+                                <ChevronLeft size={18} />
+                                Previous
+                              </button>
+                              <span className="text-xs font-bold text-gray-400">Page {meetingsPage} of {totalPages}</span>
+                              <button 
+                                disabled={meetingsPage === totalPages}
+                                onClick={() => setMeetingsPage(p => p + 1)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-accent-blue disabled:opacity-30 hover:bg-blue-50 rounded-xl transition-all"
+                              >
+                                Next Page
+                                <ChevronRight size={18} />
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
 
                 {meetingSubTab === 'previous' && (
-                  <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center text-gray-500">
-                    No previous meetings found in your history.
+                  <div className="space-y-4 pb-20">
+                    {(() => {
+                      const isSearching = searchQuery.trim().length > 0;
+                      const list = meetings
+                        .filter(m => m.startTime.getTime() < Date.now())
+                        .filter(m => !isSearching || m.title.toLowerCase().includes(searchQuery.toLowerCase()) || m.description?.toLowerCase().includes(searchQuery.toLowerCase()))
+                        .sort((a,b) => b.startTime.getTime() - a.startTime.getTime());
+                      
+                      const paginatedList = isSearching ? list : list.slice((meetingsPage - 1) * meetingsPerPage, meetingsPage * meetingsPerPage);
+                      const totalPages = isSearching ? 1 : Math.ceil(list.length / meetingsPerPage);
+
+                      if (list.length === 0) return (
+                        <div className="p-12 text-center text-gray-500 bg-white rounded-3xl border border-gray-100">
+                           {isSearching ? `No results for "${searchQuery}"` : "No previous meetings found in your history."}
+                           {isSearching && <button onClick={() => setSearchQuery('')} className="block mx-auto mt-2 text-accent-blue font-bold text-xs uppercase tracking-wider">Clear Search</button>}
+                        </div>
+                      );
+
+                      return (
+                        <>
+                          <div className="space-y-4">
+                            {paginatedList.map(meeting => (
+                              <MeetingCard 
+                                key={meeting.id} 
+                                meeting={meeting} 
+                                onJoin={() => joinMeeting(meeting.roomId)}
+                                onEdit={() => handleEditMeeting(meeting)}
+                                onDelete={() => handleDeleteMeeting(meeting.id)}
+                              />
+                            ))}
+                          </div>
+                          
+                          {!isSearching && totalPages > 1 && (
+                            <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 mt-6 shadow-sm">
+                              <button 
+                                disabled={meetingsPage === 1}
+                                onClick={() => setMeetingsPage(p => p - 1)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-500 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
+                              >
+                                <ChevronLeft size={18} />
+                                Previous
+                              </button>
+                              <span className="text-xs font-bold text-gray-400">Page {meetingsPage} of {totalPages}</span>
+                              <button 
+                                disabled={meetingsPage === totalPages}
+                                onClick={() => setMeetingsPage(p => p + 1)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-accent-blue disabled:opacity-30 hover:bg-blue-50 rounded-xl transition-all"
+                              >
+                                Next Page
+                                <ChevronRight size={18} />
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -869,15 +1393,28 @@ export default function Dashboard() {
 
             {activeSidebarTab === 'contacts' && (
               <div className="space-y-6">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h2 className="text-2xl font-bold text-gray-900">Contacts</h2>
+                  <div className="flex items-center gap-3">
+                    <div className="relative group">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-accent-blue transition-colors" size={18} />
+                      <input 
+                        type="text" 
+                        placeholder="Search contacts..." 
+                        value={contactSearchQuery}
+                        onChange={(e) => setContactSearchQuery(e.target.value)}
+                        className="pl-10 pr-4 py-2 bg-white border border-gray-100 rounded-xl focus:ring-2 focus:ring-accent-blue/10 outline-none w-full sm:w-64 transition-all"
+                      />
+                    </div>
                     <button 
                       onClick={() => setIsAddContactModalOpen(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm hover:bg-blue-600 transition-all"
+                      className="flex items-center gap-2 px-4 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm hover:bg-blue-600 transition-all shrink-0 shadow-lg shadow-accent-blue/10"
                     >
-                    <Plus size={18} />
-                    Add Contact
-                  </button>
+                      <Plus size={18} />
+                      <span className="hidden sm:inline">Add Contact</span>
+                      <span className="sm:hidden">Add</span>
+                    </button>
+                  </div>
                 </div>
                 {contacts.length === 0 ? (
                   <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center space-y-4">
@@ -888,21 +1425,53 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {contacts.map(contact => (
-                      <div key={contact.id} className="bg-white p-4 rounded-2xl border border-gray-100 flex items-center gap-4 hover:shadow-md transition-all cursor-pointer group">
-                        <img 
-                          src={contact.photoURL || `https://picsum.photos/seed/${contact.id}/40/40`} 
-                          className="w-12 h-12 rounded-xl object-cover" 
-                          alt="Contact" 
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="flex-1">
-                          <p className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors">{contact.displayName}</p>
-                          <p className="text-xs text-gray-500">{contact.email}</p>
+                    {contacts
+                      .filter(c => 
+                        c.displayName.toLowerCase().includes(contactSearchQuery.toLowerCase()) || 
+                        c.email.toLowerCase().includes(contactSearchQuery.toLowerCase())
+                      )
+                      .map(contact => (
+                      <div key={contact.id} className="bg-white p-4 rounded-2xl border border-gray-100 flex items-center gap-4 hover:shadow-md hover:border-accent-blue/20 transition-all cursor-pointer group">
+                        <div className={cn(
+                          "w-12 h-12 rounded-xl relative overflow-hidden bg-gray-50",
+                          !contact.photoURL && "flex items-center justify-center text-accent-blue font-bold text-lg"
+                        )}>
+                          {contact.photoURL ? (
+                            <img 
+                              src={contact.photoURL} 
+                              className="w-full h-full object-cover" 
+                              alt={contact.displayName} 
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            contact.displayName.charAt(0).toUpperCase()
+                          )}
                         </div>
-                        <button className="p-2 text-gray-400 hover:text-accent-blue transition-colors">
-                          <MessageSquare size={18} />
-                        </button>
+                        <div className="flex-1">
+                          <p className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{contact.displayName}</p>
+                          <p className="text-xs text-gray-500 line-clamp-1">{contact.email}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button className="p-2 text-gray-400 hover:text-accent-blue hover:bg-accent-blue/5 rounded-lg transition-all" title="Message">
+                            <MessageSquare size={18} />
+                          </button>
+                          <button 
+                            className="p-2 text-gray-400 hover:text-accent-red hover:bg-red-50 rounded-lg transition-all" 
+                            title="Remove"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if(confirm('Delete contact?')) {
+                                try {
+                                  await deleteDoc(doc(db, 'contacts', contact.id));
+                                } catch (err) {
+                                  console.error("Failed to delete contact:", err);
+                                }
+                              }
+                            }}
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -964,12 +1533,15 @@ export default function Dashboard() {
             )}
 
             {activeSidebarTab === 'settings' && (
-              <div className="max-w-2xl space-y-8">
-                <div className="flex items-center justify-between">
+              <div className="max-w-2xl space-y-8 h-full pb-20">
+                <div className="flex items-center justify-between sticky top-0 bg-gray-50/80 backdrop-blur-md z-10 py-2 -mx-2 px-2">
                   <h2 className="text-2xl font-bold text-gray-900">Settings</h2>
                   <button 
-                    onClick={() => saveSettings(settings)}
-                    className="px-6 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-md"
+                    onClick={() => {
+                      saveSettings(settings);
+                      alert('Settings saved!');
+                    }}
+                    className="px-5 sm:px-8 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-accent-blue/20 transition-all active:scale-95"
                   >
                     Save Changes
                   </button>
@@ -1139,6 +1711,80 @@ export default function Dashboard() {
                 >
                   Save Changes
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Meeting Modal */}
+      <AnimatePresence>
+        {editingMeeting && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-gray-900">Edit Meeting</h2>
+                  <button onClick={() => setEditingMeeting(null)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
+                    <X size={20} />
+                  </button>
+                </div>
+                <form onSubmit={handleUpdateMeeting} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Title</label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="Meeting Title"
+                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
+                      value={editMeetingForm.title}
+                      onChange={e => setEditMeetingForm(prev => ({ ...prev, title: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Date</label>
+                      <input 
+                        type="date" 
+                        required
+                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
+                        value={editMeetingForm.date}
+                        onChange={e => setEditMeetingForm(prev => ({ ...prev, date: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Time</label>
+                      <input 
+                        type="time" 
+                        required
+                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
+                        value={editMeetingForm.time}
+                        onChange={e => setEditMeetingForm(prev => ({ ...prev, time: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Description</label>
+                    <textarea 
+                      placeholder="Optional meeting details..."
+                      rows={3}
+                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none resize-none"
+                      value={editMeetingForm.description}
+                      onChange={e => setEditMeetingForm(prev => ({ ...prev, description: e.target.value }))}
+                    />
+                  </div>
+                  <button 
+                    type="submit"
+                    className="w-full py-4 bg-accent-blue text-white rounded-2xl font-bold shadow-lg shadow-accent-blue/20 hover:bg-blue-600 transition-all active:scale-95 mt-4"
+                  >
+                    Save Changes
+                  </button>
+                </form>
               </div>
             </motion.div>
           </div>
@@ -1316,7 +1962,7 @@ export default function Dashboard() {
   );
 }
 
-function SidebarItem({ icon, label, active = false, onClick }: { icon: import('react').ReactNode, label: string, active?: boolean, onClick?: () => void }) {
+function SidebarItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
   return (
     <button 
       onClick={onClick}
@@ -1331,7 +1977,7 @@ function SidebarItem({ icon, label, active = false, onClick }: { icon: import('r
   );
 }
 
-function QuickActionCard({ icon, label, sub, color, onClick }: { icon: import('react').ReactNode, label: string, sub: string, color: string, onClick?: () => void }) {
+function QuickActionCard({ icon, label, sub, color, onClick }: { icon: React.ReactNode, label: string, sub: string, color: string, onClick?: () => void }) {
   return (
     <button 
       onClick={onClick}
@@ -1346,61 +1992,125 @@ function QuickActionCard({ icon, label, sub, color, onClick }: { icon: import('r
   );
 }
 
-function MeetingCard({ meeting, onJoin }: { meeting: Meeting, onJoin: () => void, key?: string }) {
+function MeetingCard({ meeting, onJoin, onEdit, onDelete }: { meeting: Meeting, onJoin: () => void, onEdit: () => void, onDelete: () => void, key?: string }) {
   const isNow = Math.abs(meeting.startTime.getTime() - Date.now()) < 15 * 60 * 1000;
+  const isMeetingToday = isToday(meeting.startTime);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all group">
+    <div id={`meeting-${meeting.id}`} className="bg-white p-4 sm:p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all group relative scroll-mt-24">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-4">
+        <div className="flex items-center sm:items-start gap-3 sm:gap-4 truncate">
           <div className={cn(
-            "w-14 h-14 rounded-2xl flex flex-col items-center justify-center shrink-0",
+            "w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 relative",
             isNow ? "bg-accent-blue text-white" : "bg-gray-50 text-gray-400"
           )}>
-            <span className="text-[10px] font-bold uppercase">{format(meeting.startTime, 'MMM')}</span>
-            <span className="text-xl font-bold leading-none">{format(meeting.startTime, 'dd')}</span>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <h4 className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors">{meeting.title}</h4>
-              {meeting.isKomu && (
-                <span className="px-2 py-0.5 bg-purple-100 text-purple-600 text-[10px] font-bold rounded-full">KOMU</span>
-              )}
-            </div>
-            <p className="text-sm text-gray-500 flex items-center gap-2">
-              <Clock size={14} />
-              {format(meeting.startTime, 'hh:mm a')} • {meeting.hostName}
-            </p>
-            {meeting.notes && (
-              <div className="flex items-center gap-1.5 mt-2 text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-lg w-fit">
-                <FileText size={12} />
-                <span className="truncate max-w-[200px] italic">Note: {meeting.notes.substring(0, 30)}...</span>
+            <span className="text-[8px] sm:text-[10px] font-bold uppercase leading-none">{format(meeting.startTime, 'MMM')}</span>
+            <span className="text-lg sm:text-xl font-bold">{format(meeting.startTime, 'dd')}</span>
+            {isMeetingToday && (
+              <div className="absolute -top-1 -right-1 px-1 py-0.5 bg-accent-red text-[7px] text-white font-black rounded-md shadow-sm">
+                NOW
               </div>
             )}
           </div>
+          <div className="space-y-0.5 min-w-0">
+            <div className="flex items-center gap-2">
+              <h4 className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors text-sm sm:text-base truncate">{meeting.title}</h4>
+              {meeting.isKomu && (
+                <span className="px-2 py-0.5 bg-purple-50 text-purple-600 text-[8px] sm:text-[10px] font-bold rounded-full border border-purple-100 shrink-0">KOMU</span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 flex items-center gap-2">
+              <Clock size={12} className="shrink-0" />
+              <span className="truncate">{format(meeting.startTime, 'hh:mm a')} • {meeting.hostName}</span>
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between sm:justify-end gap-2">
           <button 
             onClick={onJoin}
             className={cn(
-              "px-6 py-2.5 rounded-xl font-bold transition-all active:scale-95",
+              "flex-1 sm:flex-none px-6 py-2.5 rounded-xl font-bold transition-all active:scale-95 text-xs sm:text-sm",
               isNow 
-                ? "bg-accent-blue text-white shadow-lg shadow-accent-blue/20 hover:bg-blue-600" 
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                ? "bg-accent-blue text-white shadow-lg shadow-accent-blue/10 hover:bg-blue-600" 
+                : "bg-gray-50 text-gray-600 hover:bg-gray-100"
             )}
           >
             {isNow ? 'Join Now' : 'Join'}
           </button>
-          <button className="p-2.5 text-gray-400 hover:bg-gray-100 rounded-xl transition-all">
-            <MoreVertical size={20} />
-          </button>
+          <div className="relative">
+            <button 
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className="p-2.5 text-gray-400 hover:bg-gray-100 rounded-xl transition-all"
+            >
+              <MoreVertical size={20} />
+            </button>
+            <AnimatePresence>
+              {isMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                    className="absolute right-0 bottom-full mb-2 w-40 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50"
+                  >
+                    {!meeting.isKomu && (
+                      <button 
+                        onClick={() => { onEdit(); setIsMenuOpen(false); }}
+                        className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Edit2 size={16} className="text-gray-400" />
+                        Edit
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => { onDelete(); setIsMenuOpen(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-accent-red hover:bg-red-50"
+                    >
+                      <Trash2 size={16} />
+                      Delete
+                    </button>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function CalendarMonthView({ selectedDate, meetings }: { selectedDate: Date, meetings: Meeting[] }) {
+function NoteItem({ title, date, onClick }: { title: string, date: string, onClick?: () => void }) {
+  return (
+    <div 
+      onClick={onClick}
+      className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl transition-all cursor-pointer group"
+    >
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-gray-100 rounded-lg text-gray-400 group-hover:bg-accent-blue/10 group-hover:text-accent-blue transition-all">
+          <FileText size={16} />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-gray-900">{title}</p>
+          <p className="text-[10px] text-gray-400">{date}</p>
+        </div>
+      </div>
+      <ChevronRight size={16} className="text-gray-300" />
+    </div>
+  );
+}
+
+function getEventColorClass(m: Meeting) {
+  if (m.type === 'task') return "bg-cyan-500 hover:bg-cyan-600";
+  if (m.type === 'focus') return "bg-indigo-600 hover:bg-indigo-700";
+  if (m.isMeeting || m.type === 'meeting') return "bg-accent-blue hover:bg-blue-600";
+  if (m.isKomu) return "bg-purple-500 hover:bg-purple-600";
+  return "bg-accent-blue hover:bg-blue-600";
+}
+
+function CalendarMonthView({ selectedDate, meetings, onEditMeeting }: { selectedDate: Date, meetings: Meeting[], onEditMeeting: (m: Meeting) => void }) {
   const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1).getDay();
   const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
   const totalCells = 42;
@@ -1419,7 +2129,7 @@ function CalendarMonthView({ selectedDate, meetings }: { selectedDate: Date, mee
           const date = i - firstDay + 1;
           const d = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), date);
           const isDiffMonth = d.getMonth() !== selectedDate.getMonth();
-          const isToday = d.toDateString() === new Date().toDateString();
+          const isTodayCell = d.toDateString() === new Date().toDateString();
           
           const dayMeetings = meetings.filter(m => 
             m.startTime.getDate() === d.getDate() && 
@@ -1434,12 +2144,22 @@ function CalendarMonthView({ selectedDate, meetings }: { selectedDate: Date, mee
             )}>
               <span className={cn(
                 "text-xs font-bold w-6 h-6 flex items-center justify-center rounded-md",
-                isToday ? "bg-accent-blue text-white" : isDiffMonth ? "text-gray-300" : "text-gray-900"
+                isTodayCell ? "bg-accent-blue text-white" : isDiffMonth ? "text-gray-300" : "text-gray-900"
               )}>{d.getDate()}</span>
-              <div className="space-y-1 mt-1">
+              <div className="space-y-1 mt-1 font-sans">
                 {dayMeetings.map(m => (
-                  <div key={m.id} className="text-[10px] p-1 bg-accent-blue/5 text-accent-blue rounded border border-accent-blue/10 truncate font-semibold">
-                    {format(m.startTime, 'h:mm a')} {m.title}
+                  <div 
+                    key={m.id} 
+                    onClick={() => onEditMeeting(m)}
+                    className={cn(
+                      "text-[9px] p-1 text-white rounded shadow-sm truncate font-bold cursor-pointer transition-colors flex items-center gap-1",
+                      getEventColorClass(m)
+                    )}
+                  >
+                    {m.type === 'task' && <Check size={8} />}
+                    {m.type === 'focus' && <Clock size={8} />}
+                    {m.isMeeting && <Video size={8} />}
+                    <span className="truncate">{format(m.startTime, 'h:mm')} {m.title}</span>
                   </div>
                 ))}
               </div>
@@ -1451,7 +2171,7 @@ function CalendarMonthView({ selectedDate, meetings }: { selectedDate: Date, mee
   );
 }
 
-function CalendarWeekView({ selectedDate, meetings }: { selectedDate: Date, meetings: Meeting[] }) {
+function CalendarWeekView({ selectedDate, meetings, onEditMeeting }: { selectedDate: Date, meetings: Meeting[], onEditMeeting: (m: Meeting) => void }) {
   const startDay = new Date(selectedDate);
   startDay.setDate(startDay.getDate() - startDay.getDay()); // Sunday
 
@@ -1478,32 +2198,84 @@ function CalendarWeekView({ selectedDate, meetings }: { selectedDate: Date, meet
       <div className="flex-1 overflow-y-auto grid grid-cols-[80px_1fr] custom-scroll relative">
         <div className="border-r border-gray-100">
           {hours.map(h => (
-            <div key={h} className="h-20 text-[10px] font-bold text-gray-400 p-2 text-right">
-              {h}:00 {h >= 12 ? 'PM' : 'AM'}
+            <div key={h} className="h-20 text-[10px] font-bold text-gray-400 p-2 text-right border-b border-gray-50">
+              {h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h-12} PM`}
             </div>
           ))}
         </div>
         <div className="grid grid-cols-7 relative">
-          {days.map((day, di) => (
-            <div key={day.toString()} className="border-l border-gray-100 relative">
-              {hours.map(h => <div key={h} className="h-20 border-b border-gray-50" />)}
-              {meetings
-                .filter(m => m.startTime.toDateString() === day.toDateString())
-                .map(m => {
-                  const top = (m.startTime.getHours() * 60 + m.startTime.getMinutes()) / (24 * 60) * 100;
-                  return (
-                    <div 
-                      key={m.id}
-                      className="absolute left-1 right-1 bg-accent-blue/10 border-l-4 border-accent-blue p-2 rounded shadow-sm z-10"
-                      style={{ top: `${top}%`, height: '80px' }}
-                    >
-                      <p className="text-[10px] font-bold text-accent-blue truncate">{m.title}</p>
-                      <p className="text-[8px] text-gray-500">{format(m.startTime, 'h:mm a')}</p>
-                    </div>
-                  );
-                })}
-            </div>
-          ))}
+          {days.map((day, di) => {
+            const dayMeetings = meetings.filter(m => m.startTime.toDateString() === day.toDateString());
+            // Sort meetings to handle stacking
+            const sorted = [...dayMeetings].sort((a,b) => a.startTime.getTime() - b.startTime.getTime());
+            
+            // Assign columns to handle overlapping
+            const columns: Meeting[][] = [];
+            sorted.forEach(m => {
+              let placed = false;
+              for(let i=0; i<columns.length; i++) {
+                const lastInCol = columns[i][columns[i].length - 1];
+                const colEnd = lastInCol.endTime?.getTime() || (lastInCol.startTime.getTime() + 60 * 60 * 1000);
+                if(m.startTime.getTime() >= colEnd) {
+                  columns[i].push(m);
+                  placed = true;
+                  break;
+                }
+              }
+              if(!placed) columns.push([m]);
+            });
+
+            return (
+              <div key={day.toString()} className="border-l border-gray-100 relative group/day">
+                {hours.map(h => <div key={h} className="h-20 border-b border-gray-50" />)}
+                {columns.map((col, colIndex) => (
+                  col.map(m => {
+                    const top = (m.startTime.getHours() * 60 + m.startTime.getMinutes()) / (24 * 60) * 100;
+                    const durationMs = (m.endTime?.getTime() || (m.startTime.getTime() + 3600000)) - m.startTime.getTime();
+                    const height = (durationMs / (24 * 60 * 60 * 1000)) * 100;
+                    const width = 100 / columns.length;
+                    const left = colIndex * width;
+                    
+                    return (
+                      <div 
+                        key={m.id}
+                        onClick={() => onEditMeeting(m)}
+                        className={cn(
+                          "absolute p-2 rounded-lg shadow-sm z-10 cursor-pointer transition-all border border-white/20 flex flex-col overflow-hidden hover:shadow-lg hover:z-20",
+                          getEventColorClass(m),
+                          "text-white"
+                        )}
+                        style={{ 
+                          top: `${top}%`, 
+                          height: `${Math.max(height, 2)}%`, // Minimum height for visibility
+                          left: `${left}%`, 
+                          width: `${width}%` 
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-1 overflow-hidden">
+                          <p className="text-[10px] font-black truncate tracking-tight uppercase flex items-center gap-1">
+                            {m.type === 'task' && <Check size={10} />}
+                            {m.type === 'focus' && <Clock size={10} />}
+                            {m.title}
+                          </p>
+                          {m.isMeeting && <Video size={10} className="shrink-0" />}
+                        </div>
+                        <p className="text-[8px] opacity-80 font-medium whitespace-nowrap">
+                          {format(m.startTime, 'h:mm')} - {m.endTime ? format(m.endTime, 'h:mm a') : '...'}
+                        </p>
+                        {height > 5 && m.description && (
+                          <p className="text-[7px] opacity-70 line-clamp-2 mt-1 italic">{m.description}</p>
+                        )}
+                        {m.isKomu && (
+                          <div className="mt-auto text-[6px] font-black uppercase tracking-tighter self-end bg-black/10 px-1 rounded backdrop-blur-sm">KOMU</div>
+                        )}
+                      </div>
+                    );
+                  })
+                ))}
+              </div>
+            );
+          })}
           {/* Current Time Indicator */}
           {days.some(d => d.toDateString() === new Date().toDateString()) && (
             <div 

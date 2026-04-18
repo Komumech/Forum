@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { useEffect, useState, useRef, useMemo, Component } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import Whiteboard from '../components/Whiteboard.tsx';
 import { 
   LiveKitRoom, 
   useConnectionState,
@@ -46,7 +47,8 @@ export default function MeetingPage() {
   const [name, setName] = useState(preferences?.displayName || user?.displayName || "");
   const [isReady, setIsReady] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting' | 'participants' | 'notes' | null>(null);
+  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting' | 'participants' | 'notes' | 'whiteboard' | null>(null);
   const [isKomuToolsOpen, setIsKomuToolsOpen] = useState(false);
   const [meetingDetails, setMeetingDetails] = useState<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -113,6 +115,12 @@ export default function MeetingPage() {
 
   const handleJoin = async () => {
     if (!name || !room) return;
+    
+    // Update presence to Busy
+    if (user) {
+      await setDoc(doc(db, 'userProfiles', user.uid), { status: 'busy' }, { merge: true });
+    }
+
     console.log(`[MeetingPage] Attempting to join room: ${room} as ${name}`);
     try {
       // Proactive host check for metadata
@@ -357,6 +365,18 @@ function MeetingRoomHeader({ room, isRecording, setIsRecording, activeTab, setAc
                   </div>
                   <span>Notes</span>
                 </button>
+                <button 
+                  onClick={() => { setActiveTab(activeTab === 'whiteboard' ? null : 'whiteboard'); setIsKomuToolsOpen(false); }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-sm transition-colors mt-1",
+                    activeTab === 'whiteboard' ? "text-blue-400 bg-blue-600/10" : "text-white"
+                  )}
+                >
+                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", activeTab === 'whiteboard' ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400")}>
+                    <Monitor size={18} />
+                  </div>
+                  <span>Whiteboard</span>
+                </button>
                 <div className="h-px bg-white/5 my-2" />
                 <div className="px-3 py-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">More tools coming soon</div>
               </motion.div>
@@ -365,6 +385,12 @@ function MeetingRoomHeader({ room, isRecording, setIsRecording, activeTab, setAc
         </div>
       </div>
       <div className="flex items-center gap-4 pointer-events-auto">
+        {isRecording && (
+          <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 text-red-500 rounded-full text-xs font-bold animate-pulse border border-red-500/20">
+            <div className="w-1.5 h-1.5 bg-red-500 rounded-full" />
+            REC
+          </div>
+        )}
         <div className="relative">
           <button 
             onClick={() => setIsAppsOpen(!isAppsOpen)}
@@ -1430,7 +1456,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         </div>
 
         {/* Live Captions Display */}
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-50 pointer-events-none">
+        <div className="fixed bottom-[100px] left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-50 pointer-events-none">
           <AnimatePresence>
             {isCaptionsEnabled && (transcriptions.length > 0 || localTranscript) && (
               <motion.div 
@@ -1477,6 +1503,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   {activeTab === 'chat' && <MessageSquare size={18} className="text-blue-600" />}
                   {activeTab === 'waiting' && <ShieldCheck size={18} className="text-blue-600" />}
                   {activeTab === 'notes' && <FileText size={18} className="text-blue-600" />}
+                  {activeTab === 'whiteboard' && <Monitor size={18} className="text-blue-600" />}
                   {activeTab}
                 </h2>
                 <button 
@@ -1617,6 +1644,11 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     setAutoSaveTranscript={setAutoSaveTranscript}
                     activeTranscriptNoteId={transcriptNoteId}
                   />
+                )}
+                {activeTab === 'whiteboard' && (
+                  <div className="flex-1 flex flex-col min-h-0 bg-white p-2">
+                    <Whiteboard meetingId={room} />
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -1923,31 +1955,35 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       </div>
 
       {/* Taskbar */}
-      <div className="absolute bottom-0 left-0 right-0 h-[80px] flex items-center justify-between px-8 bg-transparent backdrop-blur-sm z-[70]">
-        <div className="hidden md:flex items-center gap-4 w-1/3">
+      <div className="absolute bottom-0 left-0 right-0 h-[88px] flex items-center justify-between px-6 md:px-10 bg-slate-900/90 backdrop-blur-xl border-t border-white/5 z-[70]">
+        {/* Left: Meeting Info */}
+        <div className="hidden md:flex flex-1 items-center justify-start gap-4">
           {showClock && (
-            <div className="text-white drop-shadow-lg">
-              <p className="text-sm font-semibold">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 bg-accent-blue rounded-full animate-pulse" />
-                <p className="text-xs text-text-secondary truncate max-w-[150px] font-medium">{room}</p>
+            <div className="text-white">
+              <p className="text-base font-bold tracking-tight">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+              <div className="flex items-center gap-2 opacity-60">
+                <span className="w-1.5 h-1.5 bg-accent-blue rounded-full animate-pulse" />
+                <p className="text-xs font-semibold truncate max-w-[180px]">{room}</p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-3 md:gap-4 justify-center w-full md:w-1/3">
+        {/* Center: Main Controls */}
+        <div className="flex flex-none items-center gap-2 md:gap-3 justify-center">
           <div className="relative">
             <ControlButton 
               onClick={() => localParticipant.setMicrophoneEnabled(!localParticipant.isMicrophoneEnabled)}
-              icon={localParticipant.isMicrophoneEnabled ? <Mic size={22} /> : <MicOff size={22} />}
+              icon={localParticipant.isMicrophoneEnabled ? <Mic size={isMobile ? 18 : 22} /> : <MicOff size={isMobile ? 18 : 22} />}
               micVideo={true}
               enabled={localParticipant.isMicrophoneEnabled}
               onDropdownClick={() => setIsMicMenuOpen(!isMicMenuOpen)}
-              hasDropdown
+              hasDropdown={!isMobile}
+              size={isMobile ? "small" : "normal"}
+              title="Microphone (m)"
             />
             <AnimatePresence>
-              {isMicMenuOpen && (
+              {isMicMenuOpen && !isMobile && (
                 <motion.div
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1978,14 +2014,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           <div className="relative">
             <ControlButton 
               onClick={() => localParticipant.setCameraEnabled(!localParticipant.isCameraEnabled)}
-              icon={localParticipant.isCameraEnabled ? <VideoIcon size={22} /> : <VideoOff size={22} />}
+              icon={localParticipant.isCameraEnabled ? <VideoIcon size={isMobile ? 18 : 22} /> : <VideoOff size={isMobile ? 18 : 22} />}
               micVideo={true}
               enabled={localParticipant.isCameraEnabled}
               onDropdownClick={() => setIsCamMenuOpen(!isCamMenuOpen)}
-              hasDropdown
+              hasDropdown={!isMobile}
+              size={isMobile ? "small" : "normal"}
+              title="Camera (v)"
             />
             <AnimatePresence>
-              {isCamMenuOpen && (
+              {isCamMenuOpen && !isMobile && (
                 <motion.div
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -2012,44 +2050,49 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               )}
             </AnimatePresence>
           </div>
-          <div className="hidden sm:inline-flex">
-            <ControlButton 
-              active={isCaptionsEnabled} 
-              onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
-              icon={
-                <div className="relative">
-                  <Languages size={22} />
-                  {isCaptionsEnabled && (
-                    <motion.span 
-                      animate={{ opacity: [0.5, 1, 0.5], scale: [0.9, 1.1, 0.9] }}
-                      transition={{ repeat: Infinity, duration: 2 }}
-                      className="absolute -top-1.5 -right-1.5 px-1 bg-green-500 text-[8px] font-bold text-white rounded-md border border-slate-900 shadow-lg"
-                    >
-                      ON
-                    </motion.span>
-                  )}
-                </div>
-              }
-              highlight={isCaptionsEnabled}
-              title={isCaptionsEnabled ? "Turn off captions" : "Turn on captions"}
-            />
-          </div>
+
           <ControlButton 
-            active={isHandRaised} 
-            onClick={toggleHandRaise}
-            icon={<Hand size={22} />}
-            warning={isHandRaised}
+            active={isCaptionsEnabled} 
+            onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
+            size={isMobile ? "small" : "normal"}
+            icon={
+              <div className="relative">
+                <Languages size={isMobile ? 18 : 22} />
+                {isCaptionsEnabled && (
+                  <motion.span 
+                    animate={{ opacity: [0.5, 1, 0.5], scale: [0.9, 1.1, 0.9] }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                    className="absolute -top-1.5 -right-1.5 px-1 bg-green-500 text-[8px] font-bold text-white rounded-md border border-slate-900 shadow-lg"
+                  >
+                    ON
+                  </motion.span>
+                )}
+              </div>
+            }
+            highlight={isCaptionsEnabled}
+            title="Captions (c)"
           />
-          <ControlButton 
-            active={localParticipant.isScreenShareEnabled} 
-            onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
-            icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
-            highlight={localParticipant.isScreenShareEnabled}
-          />
-          <div className="relative flex items-center gap-2">
-            {/* Reactions Dropdown Button */}
-            <div className="relative">
-              <div className="hidden sm:inline-flex">
+
+          {!isMobile && (
+            <>
+              <ControlButton 
+                active={isHandRaised} 
+                onClick={toggleHandRaise}
+                icon={<Hand size={22} />}
+                warning={isHandRaised}
+              />
+              <ControlButton 
+                active={localParticipant.isScreenShareEnabled} 
+                onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
+                icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
+                highlight={localParticipant.isScreenShareEnabled}
+              />
+            </>
+          )}
+
+          <div className="relative flex items-center gap-1 md:gap-2">
+            {!isMobile && (
+              <div className="relative">
                 <ControlButton 
                   onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
                   icon={<Smile size={22} />}
@@ -2057,41 +2100,14 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   title="Reactions"
                 />
               </div>
-              
-              {/* Reactions Dropdown Menu */}
-              <AnimatePresence>
-                {isReactionsMenuOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700 p-4 z-[70]"
-                  >
-                    <div className="flex items-center gap-2">
-                      {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
-                        <button 
-                          key={emoji}
-                          onClick={() => {
-                            sendReaction(emoji);
-                            setIsReactionsMenuOpen(false);
-                          }}
-                          className="w-12 h-12 flex items-center justify-center text-2xl hover:bg-white/10 rounded-lg transition-all active:scale-90"
-                          title={`Send ${emoji}`}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <div className="relative px-1">
+            )}
+            
+            <div className="relative px-0.5">
               <ControlButton 
                 onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-                icon={<MoreVertical size={22} />}
+                icon={<MoreVertical size={20} />}
                 active={isMoreMenuOpen}
+                size={isMobile ? "small" : "normal"}
               />
 
               <AnimatePresence>
@@ -2100,10 +2116,61 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-56 bg-surface/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[70]"
+                    className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-surface/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[70]"
                   >
+                  {isMobile && (
+                    <>
+                      <div className="p-3 grid grid-cols-4 gap-2 mb-2 border-b border-white/5 pb-4">
+                        {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
+                          <button 
+                            key={emoji}
+                            onClick={() => { sendReaction(emoji); setIsMoreMenuOpen(false); }}
+                            className="w-full aspect-square flex items-center justify-center text-xl hover:bg-white/10 rounded-xl transition-all active:scale-90"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                      <button 
+                        onClick={() => { toggleHandRaise(); setIsMoreMenuOpen(false); }}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm transition-colors",
+                          isHandRaised ? "text-yellow-400 bg-yellow-400/5" : "text-text-primary"
+                        )}
+                      >
+                        <Hand size={18} className={isHandRaised ? "text-yellow-400" : "text-text-secondary"} />
+                        {isHandRaised ? "Lower hand" : "Raise hand"}
+                      </button>
+                      <button 
+                        onClick={() => { localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled); setIsMoreMenuOpen(false); }}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm transition-colors",
+                          localParticipant.isScreenShareEnabled ? "text-green-400 bg-green-400/5" : "text-text-primary"
+                        )}
+                      >
+                        <MonitorUp size={18} className={localParticipant.isScreenShareEnabled ? "text-green-400" : "text-text-secondary"} />
+                        Present screen
+                      </button>
+                      <div className="h-px bg-white/5 my-2" />
+                      <button 
+                        onClick={() => { setActiveTab('chat'); setIsMoreMenuOpen(false); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors"
+                      >
+                        <MessageSquare size={18} className="text-text-secondary" />
+                        Chat
+                      </button>
+                      <button 
+                        onClick={() => { setActiveTab('participants'); setIsMoreMenuOpen(false); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors"
+                      >
+                        <Users size={18} className="text-text-secondary" />
+                        Participants
+                      </button>
+                      <div className="h-px bg-white/5 my-2" />
+                    </>
+                  )}
                   <button 
-                    onClick={() => { setLayoutMode('tiled'); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
+                    onClick={() => { setLayoutMode('tiled'); setIsMoreMenuOpen(false); }}
                     className={cn(
                       "w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm transition-colors",
                       layoutMode === 'tiled' ? "text-accent-blue bg-accent-blue/5" : "text-text-primary"
@@ -2113,7 +2180,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     Tiled layout
                   </button>
                   <button 
-                    onClick={() => { setLayoutMode('sidebar'); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
+                    onClick={() => { setLayoutMode('sidebar'); setIsMoreMenuOpen(false); }}
                     className={cn(
                       "w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm transition-colors",
                       layoutMode === 'sidebar' ? "text-accent-blue bg-accent-blue/5" : "text-text-primary"
@@ -2123,7 +2190,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     Sidebar layout
                   </button>
                   <button 
-                    onClick={() => { setLayoutMode('imo'); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
+                    onClick={() => { setLayoutMode('imo'); setIsMoreMenuOpen(false); }}
                     className={cn(
                       "w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm transition-colors",
                       layoutMode === 'imo' ? "text-accent-blue bg-accent-blue/5" : "text-text-primary"
@@ -2133,22 +2200,22 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     IMO View (Filmstrip)
                   </button>
                   <button 
-                    onClick={() => { setHideNonVideo(!hideNonVideo); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
+                    onClick={() => { setHideNonVideo(!hideNonVideo); setIsMoreMenuOpen(false); }}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors"
                   >
                     <UserX size={18} className="text-text-secondary" />
-                    {hideNonVideo ? "Show non-video participants" : "Hide non-video participants"}
+                    {hideNonVideo ? "Show non-video" : "Hide non-video"}
                   </button>
                   <button 
-                    onClick={() => { window.open('https://whiteboard.google.com', '_blank'); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
+                    onClick={() => { setActiveTab('whiteboard'); setIsMoreMenuOpen(false); }}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors"
                   >
-                    <ArrowLeftRight size={18} className="text-text-secondary" />
-                    Whiteboard (Open Jamboard)
+                    <Monitor size={18} className="text-text-secondary" />
+                    Whiteboard
                   </button>
                   <div className="h-px bg-white/5 my-2" />
                   <button 
-                    onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); setIsReactionsMenuOpen(false); }}
+                    onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); }}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 rounded-xl text-sm text-text-primary transition-colors"
                   >
                     <Settings size={18} className="text-text-secondary" />
@@ -2156,29 +2223,34 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   </button>
                 </motion.div>
               )}
-            </AnimatePresence>
+              </AnimatePresence>
+            </div>
           </div>
         </div>
-        <button 
-          onClick={() => navigate('/')}
-            className="w-[56px] h-[56px] bg-red-600 hover:bg-red-700 text-white rounded-[18px] flex items-center justify-center transition-all shadow-xl shadow-red-500/20 active:scale-95"
-          >
-            <PhoneOff size={24} />
-          </button>
-        </div>
 
-        <div className="hidden lg:flex items-center gap-2 justify-end w-1/3">
-          <TabButton active={activeTab === 'info'} onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')} icon={<Info size={22} />} />
-          <TabButton active={activeTab === 'users'} onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')} icon={<Users size={22} />} badge={remoteParticipants.length + 1} />
-          <TabButton active={activeTab === 'chat'} onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')} icon={<MessageSquare size={22} />} badge={chatMessages.length > 0 ? chatMessages.length : undefined} />
-          {isHost && (
-            <TabButton 
-              active={activeTab === 'waiting'} 
-              onClick={() => setActiveTab(activeTab === 'waiting' ? null : 'waiting')} 
-              icon={<ShieldCheck size={22} />} 
-              badge={pendingParticipants.length > 0 ? pendingParticipants.length : undefined}
-            />
-          )}
+        {/* Right: End Call & Tabs */}
+        <div className="flex flex-1 items-center justify-end gap-3">
+          <div className="hidden lg:flex items-center gap-2 mr-4">
+            <TabButton active={activeTab === 'info'} onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')} icon={<Info size={22} />} />
+            <TabButton active={activeTab === 'users'} onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')} icon={<Users size={22} />} badge={remoteParticipants.length + 1} />
+            <TabButton active={activeTab === 'chat'} onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')} icon={<MessageSquare size={22} />} badge={chatMessages.length > 0 ? chatMessages.length : undefined} />
+            <TabButton active={activeTab === 'whiteboard'} onClick={() => setActiveTab(activeTab === 'whiteboard' ? null : 'whiteboard')} icon={<Monitor size={22} />} />
+            {isHost && (
+              <TabButton 
+                active={activeTab === 'waiting'} 
+                onClick={() => setActiveTab(activeTab === 'waiting' ? null : 'waiting')} 
+                icon={<ShieldCheck size={22} />} 
+                badge={pendingParticipants.length > 0 ? pendingParticipants.length : undefined}
+              />
+            )}
+          </div>
+          <button 
+            onClick={() => navigate('/')}
+            className="w-[54px] h-[54px] md:w-[68px] md:h-[68px] bg-red-600 hover:bg-red-700 text-white rounded-[20px] md:rounded-[24px] flex items-center justify-center transition-all shadow-xl shadow-red-500/20 active:scale-95 group"
+            title="Leave Call"
+          >
+            <PhoneOff size={isMobile ? 22 : 28} className="group-hover:rotate-12 transition-transform" />
+          </button>
         </div>
       </div>
 
@@ -2361,23 +2433,26 @@ function ParticipantItem(props: any) {
   );
 }
 
-function ControlButton({ active, onClick, icon, danger, warning, highlight, micVideo, enabled, title, hasDropdown, onDropdownClick }: any) {
+function ControlButton({ active, onClick, icon, danger, warning, highlight, micVideo, enabled, title, hasDropdown, onDropdownClick, size }: any) {
+  const isSmall = size === "small";
   return (
-    <div className="flex items-center group/btn">
+    <div className="flex items-center group/btn relative">
       <button 
         onClick={onClick}
         title={title}
         className={cn(
-          "w-[56px] h-[56px] transition-all duration-200 ease-out flex items-center justify-center flex-shrink-0 shadow-sm shadow-black/10",
-          hasDropdown ? "rounded-l-[18px] border-r border-white/5" : "rounded-[18px]",
+          "transition-all duration-300 ease-out flex items-center justify-center flex-shrink-0 shadow-sm",
+          isSmall ? "w-[48px] h-[48px] rounded-[16px]" : "w-[60px] h-[60px] rounded-[22px]",
+          hasDropdown ? "rounded-r-none border-r border-white/5" : "",
           micVideo ? (
-            "bg-[#1a2639] text-white hover:bg-slate-700"
+            enabled ? "bg-slate-800 text-white hover:bg-slate-700" : "bg-red-600 text-white hover:bg-red-700"
           ) : (
             danger && !active ? "bg-red-600 text-white hover:bg-red-700" : 
-            warning && active ? "bg-yellow-300 text-slate-900 hover:bg-yellow-400" :
-            highlight && active ? "bg-[#1a2639] text-white hover:bg-slate-700" :
-            active ? "bg-[#1a2639] text-white hover:bg-slate-700" : "bg-[#1a2639] text-white hover:bg-slate-700"
-          )
+            warning && active ? "bg-yellow-400 text-slate-900 hover:bg-white" :
+            highlight && active ? "bg-accent-blue text-white" :
+            active ? "bg-accent-blue text-white" : "bg-slate-800 text-white hover:bg-slate-700"
+          ),
+          "active:scale-95"
         )}
       >
         {icon}
@@ -2385,9 +2460,9 @@ function ControlButton({ active, onClick, icon, danger, warning, highlight, micV
       {hasDropdown && (
         <button
           onClick={onDropdownClick}
-          className="w-[24px] h-[56px] bg-[#1a2639] text-white/70 hover:text-white rounded-r-[18px] hover:bg-slate-700 transition-all flex items-center justify-center border-l border-white/5"
+          className="w-[28px] h-[60px] bg-slate-800 text-white/70 hover:text-white rounded-r-[22px] hover:bg-slate-700 transition-all flex items-center justify-center border-l border-white/10"
         >
-          <ChevronUp size={14} className="group-hover/btn:translate-y-[-1px] transition-transform" />
+          <ChevronUp size={16} className="group-hover/btn:translate-y-[-1px] transition-transform" />
         </button>
       )}
     </div>
