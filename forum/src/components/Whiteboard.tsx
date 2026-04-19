@@ -35,24 +35,22 @@ export default function Whiteboard({ meetingId }: { meetingId?: string }) {
       const canvas = canvasRef.current;
       const container = containerRef.current;
       const { width, height } = container.getBoundingClientRect();
-      
       if (width === 0 || height === 0) return;
 
-      canvas.width = width;
-      canvas.height = height;
-      
-      redraw();
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        redraw();
+      }
     };
 
-    const observer = new ResizeObserver(handleResize);
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
-    
+    const observer = new ResizeObserver(() => requestAnimationFrame(handleResize));
+    if (containerRef.current) observer.observe(containerRef.current);
     handleResize();
     return () => observer.disconnect();
-  }, []);
+  }, [shapes]); // Only re-run when actual committed shapes change
 
+  // Separate effect for redrawing current active drawing
   useEffect(() => {
     redraw();
   }, [shapes, currentShape]);
@@ -63,36 +61,48 @@ export default function Whiteboard({ meetingId }: { meetingId?: string }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set white background for the whole canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    [...shapes, ...(currentShape ? [currentShape] : [])].forEach(shape => {
+    const allShapes = [...shapes, ...(currentShape ? [currentShape] : [])];
+    
+    allShapes.forEach(shape => {
       ctx.beginPath();
       ctx.strokeStyle = shape.color;
       ctx.lineWidth = shape.width;
 
-      if (shape.type === 'pencil' || shape.type === 'line') {
-        shape.points.forEach((p, i) => {
-          if (i === 0) ctx.moveTo(p.x, p.y);
-          else ctx.lineTo(p.x, p.y);
-        });
+      if (shape.type === 'pencil') {
+        if (shape.points.length < 2) return;
+        ctx.moveTo(shape.points[0].x, shape.points[0].y);
+        for (let i = 1; i < shape.points.length; i++) {
+          ctx.lineTo(shape.points[i].x, shape.points[i].y);
+        }
+        ctx.stroke();
+      } else if (shape.type === 'line') {
+        if (shape.points.length < 2) return;
+        const start = shape.points[0];
+        const end = shape.points[shape.points.length - 1];
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
         ctx.stroke();
       } else if (shape.type === 'rect') {
+        if (shape.points.length < 2) return;
         const start = shape.points[0];
         const end = shape.points[shape.points.length - 1];
         ctx.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y);
       } else if (shape.type === 'circle') {
+        if (shape.points.length < 2) return;
         const start = shape.points[0];
         const end = shape.points[shape.points.length - 1];
         const radius = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
         ctx.arc(start.x, start.y, radius, 0, 2 * Math.PI);
         ctx.stroke();
       } else if (shape.type === 'text' && shape.text) {
-        ctx.font = `${shape.width * 5}px Inter, sans-serif`;
+        ctx.font = `bold ${shape.width * 5}px Inter, sans-serif`;
         ctx.fillStyle = shape.color;
         ctx.fillText(shape.text, shape.points[0].x, shape.points[0].y);
       }

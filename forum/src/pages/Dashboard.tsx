@@ -23,6 +23,7 @@ interface Meeting {
   description?: string;
   startTime: Date;
   endTime?: Date;
+  recurrence?: 'none' | 'daily' | 'weekly' | 'monthly';
   roomId: string;
   hostId: string;
   hostName: string;
@@ -77,7 +78,15 @@ export default function Dashboard() {
   const [isScheduling, setIsScheduling] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareCode, setShareCode] = useState('');
-  const [newMeeting, setNewMeeting] = useState({ title: '', description: '', date: format(new Date(), 'yyyy-MM-dd'), time: format(new Date(), 'HH:mm') });
+  const [newMeeting, setNewMeeting] = useState({ 
+    title: '', 
+    description: '', 
+    date: format(new Date(), 'yyyy-MM-dd'), 
+    time: format(new Date(), 'HH:mm'), 
+    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'monthly' 
+  });
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -85,6 +94,25 @@ export default function Dashboard() {
   const [meetingsPage, setMeetingsPage] = useState(1);
   const meetingsPerPage = 6;
   const [joinCode, setJoinCode] = useState('');
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'notifications'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+      setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+  }, [user]);
+
+  const markNotificationRead = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'notifications', id), { read: true });
+    } catch (err) {
+      console.error("Failed to mark notification as read:", err);
+    }
+  };
   const [isNewMeetingMenuOpen, setIsNewMeetingMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
@@ -336,6 +364,11 @@ export default function Dashboard() {
     setSettings(newSettings);
     if (user) {
       localStorage.setItem(`settings_${user.uid}`, JSON.stringify(newSettings));
+      // Persist to Cloud for cross-device sync
+      setDoc(doc(db, 'userProfiles', user.uid), {
+        settings: newSettings,
+        updatedAt: Timestamp.now()
+      }, { merge: true }).catch(err => console.error("Cloud settings sync failed:", err));
     }
   };
 
@@ -456,6 +489,7 @@ export default function Dashboard() {
         description: newMeeting.description,
         notes: newMeeting.description,
         startTime: Timestamp.fromDate(startTime),
+        recurrence: newMeeting.recurrence,
         roomId,
         hostId: user.uid,
         hostName: user.displayName || 'Anonymous',
@@ -464,30 +498,14 @@ export default function Dashboard() {
         createdAt: Timestamp.now()
       });
       setIsScheduling(false);
-      setNewMeeting({ title: '', description: '', date: format(new Date(), 'yyyy-MM-dd'), time: format(new Date(), 'HH:mm') });
+      setNewMeeting({ title: '', description: '', date: format(new Date(), 'yyyy-MM-dd'), time: format(new Date(), 'HH:mm'), recurrence: 'none' });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'meetings');
     }
   };
 
   const joinMeeting = async (roomId: string, isInstant = false) => {
-    if (isInstant && user) {
-      try {
-        // Create a meeting record so host is defined
-        await addDoc(collection(db, 'meetings'), {
-          title: 'Instant Meeting',
-          startTime: Timestamp.now(),
-          roomId,
-          hostId: user.uid,
-          hostName: user.displayName || 'Anonymous',
-          participants: [user.uid],
-          isMeeting: true,
-          createdAt: Timestamp.now()
-        });
-      } catch (err) {
-        console.error("Failed to create instant meeting record:", err);
-      }
-    }
+    // Instant meetings are strictly temporary and don't pollute the calendar
     navigate(`/meeting/${roomId}`);
   };
 
@@ -496,7 +514,7 @@ export default function Dashboard() {
       {/* Sidebar - Desktop */}
       <aside className="w-64 bg-white border-r border-gray-200 flex flex-col hidden md:flex sticky top-0 h-screen shrink-0">
         <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg border border-gray-100 p-1.5 overflow-hidden">
+          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-gray-100 p-1.5 overflow-hidden">
             <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
           </div>
           <span className="text-2xl font-bold text-gray-900 tracking-tight">Forum</span>
@@ -578,7 +596,7 @@ export default function Dashboard() {
             >
               <div className="p-6 flex items-center justify-between border-b border-gray-100">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-md border border-gray-100 p-1.5 overflow-hidden">
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-gray-100 p-1.5 overflow-hidden">
                     <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
                   </div>
                   <span className="text-2xl font-bold text-gray-900 tracking-tight">Forum</span>
@@ -750,7 +768,12 @@ export default function Dashboard() {
                                 }}
                                 className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-all text-left group"
                               >
-                                <img src={c.avatar} className="w-10 h-10 rounded-lg object-cover shrink-0" alt="" referrerPolicy="no-referrer" />
+                                <img 
+                                  src={c.avatar || `https://www.gravatar.com/avatar/${btoa(c.email).substring(0, 10)}?d=identicon`} 
+                                  className="w-10 h-10 rounded-lg object-cover shrink-0" 
+                                  alt="" 
+                                  referrerPolicy="no-referrer" 
+                                />
                                 <div>
                                   <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{c.name}</p>
                                   <p className="text-[10px] text-gray-500">{c.role}</p>
@@ -809,12 +832,116 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-6">
-            <button className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-all">
-              <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-accent-red rounded-full border-2 border-white" />
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-all"
+              >
+                <Bell size={20} />
+                {notifications.filter(n => !n.read).length > 0 && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-accent-red rounded-full border-2 border-white" />
+                )}
+              </button>
+              
+              <AnimatePresence>
+                {isNotificationsOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsNotificationsOpen(false)} />
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-2 w-80 bg-white rounded-3xl shadow-2xl border border-gray-100 py-4 z-50 overflow-hidden"
+                    >
+                      <div className="px-6 pb-3 border-b border-gray-50 flex items-center justify-between">
+                        <p className="font-bold text-gray-900">Notifications</p>
+                        <span className="text-[10px] font-black uppercase text-accent-blue bg-blue-50 px-2 py-0.5 rounded-full">
+                          {notifications.filter(n => !n.read).length} New
+                        </span>
+                      </div>
+                      <div className="max-h-[400px] overflow-y-auto custom-scroll">
+                        {notifications.length === 0 ? (
+                          <div className="p-10 text-center space-y-3">
+                            <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mx-auto text-gray-300">
+                              <Bell size={20} />
+                            </div>
+                            <p className="text-xs text-gray-500 font-medium">You're all caught up!</p>
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-gray-50">
+                            {notifications.map(n => (
+                              <button 
+                                key={n.id} 
+                                onClick={() => markNotificationRead(n.id)}
+                                className={cn(
+                                  "w-full px-6 py-4 text-left transition-all hover:bg-gray-50 flex gap-3",
+                                  !n.read && "bg-blue-50/30"
+                                )}
+                              >
+                                <div className={cn(
+                                  "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                                  n.type === 'meeting' ? "bg-blue-50 text-accent-blue" : "bg-gray-100 text-gray-500"
+                                )}>
+                                  {n.type === 'meeting' ? <Video size={16} /> : <Bell size={16} />}
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-sm font-bold text-gray-900 line-clamp-1">{n.title}</p>
+                                  <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{n.message}</p>
+                                  <p className="text-[10px] text-gray-400">{n.createdAt?.toDate ? format(n.createdAt.toDate(), 'h:mm a') : 'Now'}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* App Menu (More) */}
+            <div className="relative">
+              <button 
+                onClick={() => setIsAppMenuOpen(!isAppMenuOpen)}
+                className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-all"
+              >
+                <MoreVertical size={20} />
+              </button>
+              <AnimatePresence>
+                {isAppMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsAppMenuOpen(false)} />
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50"
+                    >
+                      <button onClick={() => { setActiveSidebarTab('whiteboard'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
+                        <Monitor size={18} className="text-accent-blue" />
+                        <span className="text-sm font-bold">Whiteboard</span>
+                      </button>
+                      <button onClick={() => { setActiveSidebarTab('calendar'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
+                        <CalendarIcon size={18} className="text-purple-500" />
+                        <span className="text-sm font-bold">Calendar</span>
+                      </button>
+                      <button onClick={() => { setActiveSidebarTab('notes'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
+                        <FileText size={18} className="text-amber-500" />
+                        <span className="text-sm font-bold">Meeting Notes</span>
+                      </button>
+                      <div className="h-px bg-gray-50 my-1 mx-2" />
+                      <button onClick={() => { setActiveSidebarTab('settings'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
+                        <Settings size={18} className="text-gray-400" />
+                        <span className="text-sm font-bold">Settings</span>
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
             <div className="flex items-center gap-3 pl-6 border-l border-gray-100">
-              <div className="text-right hidden sm:block">
+              <div className="text-right hidden md:block ml-2">
                 <div className="flex items-center justify-end gap-2">
                   <div className={cn(
                     "w-2 h-2 rounded-full",
@@ -886,87 +1013,128 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Quick Actions */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 lg:gap-6">
-                  <div className="relative">
+                {/* Quick Actions & Recurring Card Layout */}
+                <div className="flex flex-col lg:flex-row gap-6 items-start">
+                  {/* Left Gallery: Quick Actions */}
+                  <div className="grid grid-cols-2 md:grid-cols-2 gap-3 lg:gap-6 flex-1 h-full items-start">
+                    <div className="relative">
+                      <QuickActionCard 
+                        icon={<Plus size={20} />} 
+                        label="New Meeting" 
+                        sub="Instant meeting" 
+                        color="bg-accent-blue"
+                        onClick={() => setIsNewMeetingMenuOpen(!isNewMeetingMenuOpen)}
+                      />
+                      <AnimatePresence>
+                        {isNewMeetingMenuOpen && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 overflow-hidden"
+                          >
+                            <button 
+                              onClick={() => {
+                                const id = Math.random().toString(36).substring(2, 12);
+                                joinMeeting(id, true);
+                                setIsNewMeetingMenuOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
+                            >
+                              <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-accent-blue">
+                                <Video size={18} />
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold">Start instantly</p>
+                                <p className="text-[10px] text-gray-400">Create a room right now</p>
+                              </div>
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setIsScheduling(true);
+                                setIsNewMeetingMenuOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
+                            >
+                              <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center text-purple-500">
+                                <CalendarIcon size={18} />
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold">Schedule for later</p>
+                                <p className="text-[10px] text-gray-400">Pick a date and time</p>
+                              </div>
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                     <QuickActionCard 
-                      icon={<Plus size={20} />} 
-                      label="New Meeting" 
-                      sub="Instant meeting" 
-                      color="bg-accent-blue"
-                      onClick={() => setIsNewMeetingMenuOpen(!isNewMeetingMenuOpen)}
+                      icon={<Users size={20} />} 
+                      label="Join Meeting" 
+                      sub="Using code" 
+                      color="bg-success-green"
+                      onClick={() => setIsJoinMeetingModalOpen(true)}
                     />
-                    <AnimatePresence>
-                      {isNewMeetingMenuOpen && (
-                        <motion.div 
-                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50"
-                        >
-                          <button 
-                            onClick={() => {
-                              const id = Math.random().toString(36).substring(2, 12);
-                              joinMeeting(id, true);
-                              setIsNewMeetingMenuOpen(false);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
-                          >
-                            <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-accent-blue">
-                              <Video size={18} />
-                            </div>
-                            <div>
-                              <p className="text-sm font-bold">Start instantly</p>
-                              <p className="text-[10px] text-gray-400">Create a room right now</p>
-                            </div>
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setIsScheduling(true);
-                              setIsNewMeetingMenuOpen(false);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
-                          >
-                            <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center text-purple-500">
-                              <Calendar size={18} />
-                            </div>
-                            <div>
-                              <p className="text-sm font-bold">Schedule for later</p>
-                              <p className="text-[10px] text-gray-400">Pick a date and time</p>
-                            </div>
-                          </button>
-                          <div className="h-px bg-gray-100 my-1 mx-4" />
-                          <div className="px-4 py-2">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input type="checkbox" className="rounded border-gray-300 text-accent-blue focus:ring-accent-blue" defaultChecked />
-                              <span className="text-[10px] text-gray-500 font-medium">Use Personal Meeting ID</span>
-                            </label>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
                   </div>
-                  <QuickActionCard 
-                    icon={<Users size={20} />} 
-                    label="Join Meeting" 
-                    sub="Using code" 
-                    color="bg-success-green"
-                    onClick={() => setIsJoinMeetingModalOpen(true)}
-                  />
-                  <QuickActionCard 
-                    icon={<Calendar size={20} />} 
-                    label="Schedule" 
-                    sub="Plan ahead" 
-                    color="bg-purple-500"
-                    onClick={() => setIsScheduling(true)}
-                  />
-                  <QuickActionCard 
-                    icon={<Monitor size={20} />} 
-                    label="Share Screen" 
-                    sub="Present" 
-                    color="bg-orange-500"
-                    onClick={() => setIsSharing(true)}
-                  />
+
+                  <div className="lg:w-1/3">
+                    {meetings.find(m => m.recurrence && m.recurrence !== 'none') ? (
+                      <div className="h-full bg-white border border-gray-100 p-6 rounded-[32px] shadow-sm hover:shadow-xl transition-all flex flex-col justify-between group overflow-hidden relative min-h-[220px]">
+                        <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-125 transition-transform duration-700">
+                          <RefreshCw size={120} className="text-indigo-600" />
+                        </div>
+                        <div className="relative z-10">
+                          <div className="flex items-center gap-2 px-3 py-1 bg-indigo-50 rounded-full w-fit mb-4">
+                            <RefreshCw size={12} className="animate-spin-slow text-indigo-600" />
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Recurring</span>
+                          </div>
+                          <h4 className="text-2xl font-black leading-tight line-clamp-2 text-gray-900">
+                            {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.title}
+                          </h4>
+                          <p className="text-sm text-gray-400 mt-1 uppercase text-[10px] font-black tracking-widest">
+                            {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.recurrence}
+                          </p>
+                        </div>
+                        <div className="mt-8 relative z-10">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex -space-x-2">
+                              {[1, 2, 3].map(i => (
+                                <img key={i} src={`https://picsum.photos/seed/${i}/32/32`} className="w-8 h-8 rounded-full border-2 border-white shadow-sm" alt="" referrerPolicy="no-referrer" />
+                              ))}
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Next session</p>
+                              <p className="text-lg font-black tracking-tighter text-gray-900">
+                                {format(meetings.find(m => m.recurrence && m.recurrence !== 'none')!.startTime, 'h:mm a')}
+                              </p>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => joinMeeting(meetings.find(m => m.recurrence && m.recurrence !== 'none')?.roomId || '')}
+                            className="w-full py-4 bg-accent-blue text-white rounded-2xl font-black text-sm hover:bg-blue-600 transition-all active:scale-95 shadow-lg shadow-accent-blue/10"
+                          >
+                            Join Now
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-full bg-white border border-gray-100 border-dashed p-6 rounded-[32px] flex flex-col items-center justify-center text-center space-y-4 group">
+                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 group-hover:scale-110 group-hover:text-accent-blue transition-all duration-500">
+                          <RefreshCw size={32} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-gray-900">No recurring meetings</p>
+                          <p className="text-xs text-gray-400 mt-1">Plan your weekly syncs and never miss a beat.</p>
+                        </div>
+                        <button 
+                          onClick={() => setIsScheduling(true)}
+                          className="px-6 py-2 bg-gray-50 text-gray-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue hover:text-white transition-all"
+                        >
+                          Schedule First
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Personal Meeting Room */}
@@ -1195,6 +1363,10 @@ export default function Dashboard() {
                       selectedDate={selectedDate} 
                       meetings={meetings.filter(m => showAllEvents || m.isMeeting)} 
                       onEditMeeting={handleEditMeeting} 
+                      onAddMeeting={(d) => {
+                        setNewMeeting({ ...newMeeting, date: format(d, 'yyyy-MM-dd') });
+                        setIsScheduling(true);
+                      }}
                     />
                   ) : (
                     <CalendarWeekView 
@@ -1432,20 +1604,13 @@ export default function Dashboard() {
                       )
                       .map(contact => (
                       <div key={contact.id} className="bg-white p-4 rounded-2xl border border-gray-100 flex items-center gap-4 hover:shadow-md hover:border-accent-blue/20 transition-all cursor-pointer group">
-                        <div className={cn(
-                          "w-12 h-12 rounded-xl relative overflow-hidden bg-gray-50",
-                          !contact.photoURL && "flex items-center justify-center text-accent-blue font-bold text-lg"
-                        )}>
-                          {contact.photoURL ? (
-                            <img 
-                              src={contact.photoURL} 
-                              className="w-full h-full object-cover" 
-                              alt={contact.displayName} 
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            contact.displayName.charAt(0).toUpperCase()
-                          )}
+                        <div className="w-12 h-12 rounded-xl relative overflow-hidden bg-gray-50 border border-gray-100">
+                          <img 
+                            src={contact.photoURL || `https://www.gravatar.com/avatar/${btoa(contact.email).substring(0, 10)}?d=identicon`} 
+                            className="w-full h-full object-cover" 
+                            alt={contact.displayName} 
+                            referrerPolicy="no-referrer"
+                          />
                         </div>
                         <div className="flex-1">
                           <p className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{contact.displayName}</p>
@@ -1915,25 +2080,112 @@ export default function Dashboard() {
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 relative">
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Date</label>
-                      <input 
-                        type="date" 
-                        required
-                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                        value={newMeeting.date}
-                        onChange={e => setNewMeeting(prev => ({ ...prev, date: e.target.value }))}
-                      />
+                      <div 
+                        onClick={() => setShowDatePicker(!showDatePicker)}
+                        className="w-full px-4 py-3 bg-gray-50 rounded-xl cursor-pointer flex items-center justify-between group hover:bg-gray-100 transition-all"
+                      >
+                        <span className="text-sm text-gray-900 font-medium">
+                          {format(parseISO(newMeeting.date), 'MMMM d, yyyy')}
+                        </span>
+                        <CalendarIcon size={16} className="text-gray-400 group-hover:text-accent-blue transition-colors" />
+                      </div>
+                      <AnimatePresence>
+                        {showDatePicker && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute top-full left-0 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[300] w-72"
+                          >
+                            <input 
+                              type="date"
+                              className="w-full border-none focus:ring-0 p-0 text-sm font-bold text-accent-blue"
+                              value={newMeeting.date}
+                              onChange={(e) => {
+                                setNewMeeting(prev => ({ ...prev, date: e.target.value }));
+                                setShowDatePicker(false);
+                              }}
+                            />
+                            <div className="mt-4 grid grid-cols-7 gap-1 text-center">
+                              {/* Simple fallback custom view if native is still preferred inside bubble, but user wants nice */}
+                              <div className="text-[10px] font-bold text-gray-400 py-1">S</div>
+                              <div className="text-[10px] font-bold text-gray-400 py-1">M</div>
+                              <div className="text-[10px] font-bold text-gray-400 py-1">T</div>
+                              <div className="text-[10px] font-bold text-gray-400 py-1">W</div>
+                              <div className="text-[10px] font-bold text-gray-400 py-1">T</div>
+                              <div className="text-[10px] font-bold text-gray-400 py-1">F</div>
+                              <div className="text-[10px] font-bold text-gray-400 py-1">S</div>
+                              {/* We'll use the native picker for the actual selection logic to ensure range safety, but wrap it in a beautiful UI */}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 relative">
                       <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Time</label>
-                      <input 
-                        type="time" 
-                        required
-                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                        value={newMeeting.time}
-                        onChange={e => setNewMeeting(prev => ({ ...prev, time: e.target.value }))}
-                      />
+                      <div 
+                        onClick={() => setShowTimePicker(!showTimePicker)}
+                        className="w-full px-4 py-3 bg-gray-50 rounded-xl cursor-pointer flex items-center justify-between group hover:bg-gray-100 transition-all"
+                      >
+                        <span className="text-sm text-gray-900 font-medium">{newMeeting.time}</span>
+                        <Clock size={16} className="text-gray-400 group-hover:text-accent-blue transition-colors" />
+                      </div>
+                      <AnimatePresence>
+                        {showTimePicker && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute top-full left-0 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 p-2 z-[300] w-48 max-h-60 overflow-y-auto custom-scroll"
+                          >
+                            {Array.from({ length: 24 }).map((_, h) => (
+                              Array.from({ length: 4 }).map((_, m) => {
+                                const timeStr = `${h.toString().padStart(2, '0')}:${(m * 15).toString().padStart(2, '0')}`;
+                                return (
+                                  <button 
+                                    key={timeStr}
+                                    onClick={() => {
+                                      setNewMeeting(prev => ({ ...prev, time: timeStr }));
+                                      setShowTimePicker(false);
+                                    }}
+                                    className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700"
+                                  >
+                                    {timeStr}
+                                  </button>
+                                );
+                              })
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Recurrence</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 'none', label: 'Once', icon: <Plus size={14} /> },
+                        { id: 'daily', label: 'Daily', icon: <RefreshCw size={14} /> },
+                        { id: 'weekly', label: 'Weekly', icon: <Calendar size={14} /> },
+                        { id: 'monthly', label: 'Monthly', icon: <Clock size={14} /> },
+                      ].map(option => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setNewMeeting(prev => ({ ...prev, recurrence: option.id as any }))}
+                          className={cn(
+                            "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border-2",
+                            newMeeting.recurrence === option.id 
+                              ? "bg-accent-blue/10 border-accent-blue text-accent-blue" 
+                              : "bg-gray-50 border-transparent text-gray-500 hover:bg-gray-100"
+                          )}
+                        >
+                          {option.icon}
+                          {option.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -1981,13 +2233,15 @@ function QuickActionCard({ icon, label, sub, color, onClick }: { icon: React.Rea
   return (
     <button 
       onClick={onClick}
-      className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all text-left group active:scale-[0.98]"
+      className="w-full bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left group active:scale-[0.98] flex flex-col justify-between min-h-[170px]"
     >
-      <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-white mb-4 group-hover:scale-110 transition-transform", color)}>
+      <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg mb-6 group-hover:scale-110 transition-transform", color)}>
         {icon}
       </div>
-      <h4 className="font-bold text-gray-900">{label}</h4>
-      <p className="text-xs text-gray-500 mt-1">{sub}</p>
+      <div>
+        <h4 className="text-lg font-black text-gray-900 group-hover:text-accent-blue transition-colors leading-tight">{label}</h4>
+        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-1">{sub}</p>
+      </div>
     </button>
   );
 }
@@ -2110,7 +2364,7 @@ function getEventColorClass(m: Meeting) {
   return "bg-accent-blue hover:bg-blue-600";
 }
 
-function CalendarMonthView({ selectedDate, meetings, onEditMeeting }: { selectedDate: Date, meetings: Meeting[], onEditMeeting: (m: Meeting) => void }) {
+function CalendarMonthView({ selectedDate, meetings, onEditMeeting, onAddMeeting }: { selectedDate: Date, meetings: Meeting[], onEditMeeting: (m: Meeting) => void, onAddMeeting: (d: Date) => void }) {
   const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1).getDay();
   const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
   const totalCells = 42;
@@ -2119,9 +2373,9 @@ function CalendarMonthView({ selectedDate, meetings, onEditMeeting }: { selected
 
   return (
     <div className="flex-1 flex flex-col h-full bg-white">
-      <div className="grid grid-cols-7 border-b border-gray-100">
+      <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50/50">
         {daysHeader.map(day => (
-          <div key={day} className="py-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">{day}</div>
+          <div key={day} className="py-4 text-center text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">{day}</div>
         ))}
       </div>
       <div className="flex-1 grid grid-cols-7 border-collapse overflow-y-auto">
@@ -2138,30 +2392,46 @@ function CalendarMonthView({ selectedDate, meetings, onEditMeeting }: { selected
           );
 
           return (
-            <div key={i} className={cn(
-              "border-r border-b border-gray-50 min-h-[100px] p-2 hover:bg-gray-50/50 transition-all",
-              isDiffMonth && "bg-gray-50/20 text-gray-300"
-            )}>
-              <span className={cn(
-                "text-xs font-bold w-6 h-6 flex items-center justify-center rounded-md",
-                isTodayCell ? "bg-accent-blue text-white" : isDiffMonth ? "text-gray-300" : "text-gray-900"
-              )}>{d.getDate()}</span>
-              <div className="space-y-1 mt-1 font-sans">
-                {dayMeetings.map(m => (
+            <div 
+              key={i} 
+              onClick={() => onAddMeeting(d)}
+              className={cn(
+                "border-r border-b border-gray-50 min-h-[120px] p-2 hover:bg-blue-50/30 transition-all group relative cursor-pointer",
+                isDiffMonth && "bg-gray-50/20 text-gray-300"
+              )}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className={cn(
+                  "text-xs font-black w-7 h-7 flex items-center justify-center rounded-xl transition-all",
+                  isTodayCell ? "bg-accent-blue text-white shadow-lg shadow-accent-blue/30 scale-110" : 
+                  isDiffMonth ? "text-gray-200" : "text-gray-900 group-hover:text-accent-blue"
+                )}>{d.getDate()}</span>
+                {dayMeetings.length > 0 && (
+                  <span className="w-1.5 h-1.5 bg-accent-blue rounded-full animate-pulse" />
+                )}
+              </div>
+              <div className="space-y-1 font-sans">
+                {dayMeetings.slice(0, 3).map(m => (
                   <div 
                     key={m.id} 
-                    onClick={() => onEditMeeting(m)}
+                    onClick={(e) => { e.stopPropagation(); onEditMeeting(m); }}
                     className={cn(
-                      "text-[9px] p-1 text-white rounded shadow-sm truncate font-bold cursor-pointer transition-colors flex items-center gap-1",
+                      "text-[10px] p-1.5 text-white rounded-lg shadow-sm truncate font-black cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center gap-1.5",
                       getEventColorClass(m)
                     )}
                   >
-                    {m.type === 'task' && <Check size={8} />}
-                    {m.type === 'focus' && <Clock size={8} />}
-                    {m.isMeeting && <Video size={8} />}
-                    <span className="truncate">{format(m.startTime, 'h:mm')} {m.title}</span>
+                    {m.type === 'task' && <Check size={10} />}
+                    <span className="truncate">{m.title}</span>
                   </div>
                 ))}
+                {dayMeetings.length > 3 && (
+                  <p className="text-[9px] text-gray-400 font-bold pl-1">+{dayMeetings.length - 3} more</p>
+                )}
+              </div>
+              <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="p-1 bg-accent-blue/10 text-accent-blue rounded-lg">
+                  <Plus size={12} />
+                </div>
               </div>
             </div>
           );
