@@ -5,7 +5,7 @@ import Whiteboard from '../components/Whiteboard.tsx';
 import { 
   Video, Calendar, Plus, Search, Settings, Clock, 
   MessageSquare, Users, ChevronRight, LogOut, 
-  LayoutDashboard, FileText, Bell, RefreshCw, X, MoreVertical,
+  LayoutDashboard, FileText, Bell, RefreshCw, X, MoreVertical, Globe,
   Copy, Check, Monitor, ChevronLeft, Calendar as CalendarIcon,
   Filter, Grid, List as ListIcon, Trash2, Edit2, Menu
 } from 'lucide-react';
@@ -97,6 +97,25 @@ export default function Dashboard() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const lastScrollTop = React.useRef(0);
+
+  useEffect(() => {
+    setIsHeaderVisible(true);
+  }, [activeSidebarTab]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const scrollTop = e.currentTarget.scrollTop;
+    if (Math.abs(scrollTop - lastScrollTop.current) < 10) return;
+    
+    if (scrollTop > lastScrollTop.current && scrollTop > 60) {
+      setIsHeaderVisible(false);
+    } else {
+      setIsHeaderVisible(true);
+    }
+    lastScrollTop.current = scrollTop;
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -512,12 +531,26 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-[#f8f9fa] flex">
       {/* Sidebar - Desktop */}
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col hidden md:flex sticky top-0 h-screen shrink-0">
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-gray-100 p-1.5 overflow-hidden">
-            <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
+      <aside className={cn(
+        "bg-white border-r border-gray-200 flex flex-col hidden md:flex sticky top-0 h-screen shrink-0 transition-all duration-300",
+        isSidebarCollapsed ? "w-20" : "w-64"
+      )}>
+        <div className="p-6 flex items-center justify-between gap-3 overflow-hidden">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-gray-100 p-1.5 overflow-hidden shrink-0">
+              <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
+            </div>
+            {!isSidebarCollapsed && (
+              <span className="text-2xl font-bold text-gray-900 tracking-tight truncate">Forum</span>
+            )}
           </div>
-          <span className="text-2xl font-bold text-gray-900 tracking-tight">Forum</span>
+          <button 
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-all shrink-0"
+            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isSidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scroll">
@@ -526,52 +559,63 @@ export default function Dashboard() {
             label="Dashboard" 
             active={activeSidebarTab === 'dashboard'} 
             onClick={() => setActiveSidebarTab('dashboard')}
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={<Video size={20} />} 
             label="Meetings" 
             active={activeSidebarTab === 'meetings'} 
             onClick={() => setActiveSidebarTab('meetings')}
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={<Calendar size={20} />} 
             label="Calendar" 
             active={activeSidebarTab === 'calendar'} 
             onClick={() => setActiveSidebarTab('calendar')}
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={<Users size={20} />} 
             label="Contacts" 
             active={activeSidebarTab === 'contacts'} 
             onClick={() => setActiveSidebarTab('contacts')}
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={<FileText size={20} />} 
             label="Notes" 
             active={activeSidebarTab === 'notes'} 
             onClick={() => setActiveSidebarTab('notes')}
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={<Monitor size={20} />} 
             label="Whiteboard" 
             active={activeSidebarTab === 'whiteboard'} 
             onClick={() => setActiveSidebarTab('whiteboard')}
+            collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
             icon={<Settings size={20} />} 
             label="Settings" 
             active={activeSidebarTab === 'settings'} 
             onClick={() => setActiveSidebarTab('settings')}
+            collapsed={isSidebarCollapsed}
           />
         </nav>
 
         <div className="p-4 border-t border-gray-100">
           <button 
             onClick={logout}
-            className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-accent-red hover:bg-red-50 rounded-xl transition-all"
+            className={cn(
+              "w-full flex items-center text-gray-500 hover:text-accent-red hover:bg-red-50 rounded-xl transition-all",
+              isSidebarCollapsed ? "justify-center p-3 gap-0" : "px-4 py-3 gap-3"
+            )}
+            title={isSidebarCollapsed ? "Sign out" : undefined}
           >
-            <LogOut size={20} />
-            <span className="font-medium">Sign out</span>
+            <LogOut size={20} className="shrink-0" />
+            {!isSidebarCollapsed && <span className="font-medium">Sign out</span>}
           </button>
         </div>
       </aside>
@@ -668,7 +712,10 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Top Header */}
-        <header className="h-16 lg:h-20 bg-white border-b border-gray-100 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-[60] shrink-0">
+        <header className={cn(
+          "bg-white flex items-center justify-between px-4 lg:px-8 sticky top-0 z-[60] shrink-0 transition-all duration-300 ease-in-out border-b border-gray-100 overflow-hidden",
+          isHeaderVisible ? "h-16 lg:h-20 opacity-100" : "h-0 opacity-0 border-b-transparent pointer-events-none"
+        )}>
           <div className="flex items-center gap-4 flex-1 max-w-xl">
             <button 
               onClick={() => setIsMobileMenuOpen(true)}
@@ -900,46 +947,6 @@ export default function Dashboard() {
               </AnimatePresence>
             </div>
 
-            {/* App Menu (More) */}
-            <div className="relative">
-              <button 
-                onClick={() => setIsAppMenuOpen(!isAppMenuOpen)}
-                className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-all"
-              >
-                <MoreVertical size={20} />
-              </button>
-              <AnimatePresence>
-                {isAppMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsAppMenuOpen(false)} />
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50"
-                    >
-                      <button onClick={() => { setActiveSidebarTab('whiteboard'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
-                        <Monitor size={18} className="text-accent-blue" />
-                        <span className="text-sm font-bold">Whiteboard</span>
-                      </button>
-                      <button onClick={() => { setActiveSidebarTab('calendar'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
-                        <CalendarIcon size={18} className="text-purple-500" />
-                        <span className="text-sm font-bold">Calendar</span>
-                      </button>
-                      <button onClick={() => { setActiveSidebarTab('notes'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
-                        <FileText size={18} className="text-amber-500" />
-                        <span className="text-sm font-bold">Meeting Notes</span>
-                      </button>
-                      <div className="h-px bg-gray-50 my-1 mx-2" />
-                      <button onClick={() => { setActiveSidebarTab('settings'); setIsAppMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left">
-                        <Settings size={18} className="text-gray-400" />
-                        <span className="text-sm font-bold">Settings</span>
-                      </button>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
             <div className="flex items-center gap-3 pl-6 border-l border-gray-100">
               <div className="text-right hidden md:block ml-2">
                 <div className="flex items-center justify-end gap-2">
@@ -972,7 +979,7 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scroll bg-gray-50/30">
+        <div onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scroll bg-gray-50/30">
           <div className="max-w-6xl mx-auto space-y-6 lg:space-y-10">
             {activeSidebarTab === 'dashboard' && (
               <>
@@ -986,26 +993,30 @@ export default function Dashboard() {
                       <p className="text-xs sm:text-sm text-gray-500">{format(new Date(), 'EEEE, MMMM do')}</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:flex sm:items-center justify-center gap-2 lg:gap-3">
-                    <button 
-                      onClick={syncGoogleCalendar}
-                      disabled={syncing}
-                      className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-gray-100 text-gray-700 rounded-xl text-xs sm:text-sm font-bold hover:bg-gray-50 transition-all disabled:opacity-50"
-                    >
-                      <img src="https://www.gstatic.com/images/branding/product/1x/calendar_2020q4_48dp.png" className="w-5 h-5 shrink-0" alt="Google" />
-                      <span>Google</span>
-                    </button>
-                    <button 
-                      onClick={syncKomuCalendar}
-                      disabled={syncing}
-                      className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-gray-100 text-gray-700 rounded-xl text-xs sm:text-sm font-bold hover:bg-gray-50 transition-all disabled:opacity-50"
-                    >
-                      <RefreshCw size={16} className={cn("shrink-0", syncing && "animate-spin")} />
-                      <span>Komu</span>
-                    </button>
+                  <div className="flex flex-wrap items-center gap-2 lg:gap-3">
+                    {/* Compact Sync Controller */}
+                    <div className="flex items-center gap-1.5 bg-white border border-gray-150 py-1.5 px-3 rounded-2xl shadow-sm">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mr-1">Cal Sync:</span>
+                      <button 
+                        onClick={syncGoogleCalendar}
+                        disabled={syncing}
+                        title="Sync Google Calendar"
+                        className="p-1 hover:bg-slate-50 rounded-lg transition-all disabled:opacity-50"
+                      >
+                        <img src="https://www.gstatic.com/images/branding/product/1x/calendar_2020q4_48dp.png" className="w-[18px] h-[18px] shrink-0" alt="Google" />
+                      </button>
+                      <button 
+                        onClick={syncKomuCalendar}
+                        disabled={syncing}
+                        title="Sync Komu Calendar"
+                        className="p-1 hover:bg-slate-50 text-accent-blue rounded-lg transition-all disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={cn("shrink-0", syncing && "animate-spin")} />
+                      </button>
+                    </div>
                     <button 
                       onClick={() => setIsScheduling(true)}
-                      className="col-span-2 sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-accent-blue/10 hover:bg-blue-600 transition-all active:scale-95"
+                      className="flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-blue text-white rounded-2xl font-bold text-sm shadow-md shadow-accent-blue/10 hover:bg-blue-600 transition-all active:scale-95"
                     >
                       <Plus size={18} className="shrink-0" />
                       Schedule
@@ -1045,8 +1056,8 @@ export default function Dashboard() {
                                 <Video size={18} />
                               </div>
                               <div>
-                                <p className="text-sm font-bold">Start instantly</p>
-                                <p className="text-[10px] text-gray-400">Create a room right now</p>
+                                <p className="text-sm font-extrabold text-gray-900">Start instantly</p>
+                                <p className="text-[10px] text-gray-400">Create a dynamic meeting room</p>
                               </div>
                             </button>
                             <button 
@@ -1060,8 +1071,46 @@ export default function Dashboard() {
                                 <CalendarIcon size={18} />
                               </div>
                               <div>
-                                <p className="text-sm font-bold">Schedule for later</p>
-                                <p className="text-[10px] text-gray-400">Pick a date and time</p>
+                                <p className="text-sm font-extrabold text-gray-900">Schedule for later</p>
+                                <p className="text-[10px] text-gray-400">Pick a future date & time</p>
+                              </div>
+                            </button>
+
+                            {/* Integrated Personal Meeting Room Actions */}
+                            <div className="border-t border-gray-50 my-1" />
+                            
+                            <button 
+                              onClick={() => {
+                                const id = user?.uid?.substring(0, 8) || 'room';
+                                joinMeeting(id);
+                                setIsNewMeetingMenuOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
+                            >
+                              <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center text-success-green">
+                                <Globe size={18} />
+                              </div>
+                              <div>
+                                <p className="text-sm font-extrabold text-gray-900">Personal Boardroom</p>
+                                <p className="text-[10px] text-gray-400">Start your permanent room</p>
+                              </div>
+                            </button>
+
+                            <button 
+                              onClick={() => {
+                                const link = `${window.location.origin}/meeting/${user?.uid?.substring(0, 8)}`;
+                                navigator.clipboard.writeText(link);
+                                alert("Personal room shareable link copied successfully!");
+                                setIsNewMeetingMenuOpen(false);
+                              }}
+                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
+                            >
+                              <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-500">
+                                <Copy size={18} />
+                              </div>
+                              <div>
+                                <p className="text-sm font-extrabold text-gray-900">Copy personal link</p>
+                                <p className="text-[10px] text-gray-400">forum.app/m/{user?.uid?.substring(0, 8)}</p>
                               </div>
                             </button>
                           </motion.div>
@@ -1137,42 +1186,7 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Personal Meeting Room */}
-                <div className="bg-white p-5 lg:p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-6 overflow-hidden">
-                  <div className="flex items-center gap-4 w-full lg:w-auto min-w-0">
-                    <div className="w-10 h-10 lg:w-12 lg:h-12 bg-gray-50 rounded-2xl flex items-center justify-center text-accent-blue shrink-0">
-                      <Video size={20} className="lg:size-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="font-bold text-gray-900 text-sm lg:text-base truncate">Personal Meeting Room</h3>
-                      <p className="text-xs lg:text-sm text-gray-500 truncate">Your permanent meeting link for quick syncs.</p>
-                    </div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto shrink-0 lg:ml-auto">
-                    <div className="w-full lg:w-auto px-4 py-2.5 bg-gray-50 rounded-xl text-[10px] sm:text-xs font-mono text-gray-600 border border-gray-100 truncate text-center sm:text-left lg:max-w-[240px]">
-                      forum.app/m/{user?.uid?.substring(0, 8)}
-                    </div>
-                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
-                      <button 
-                        onClick={() => {
-                          navigator.clipboard.writeText(`https://forum.app/m/${user?.uid?.substring(0, 8)}`);
-                          alert("Link copied!");
-                        }}
-                        className="p-2.5 text-accent-blue hover:bg-accent-blue/5 rounded-xl transition-all border border-blue-50 sm:border-transparent flex items-center justify-center shrink-0"
-                      >
-                        <Copy size={18} />
-                      </button>
-                      <button 
-                        onClick={() => joinMeeting(user?.uid?.substring(0, 8) || '')}
-                        className="px-6 lg:px-8 py-2.5 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-accent-blue/20 transition-all hover:bg-blue-600 active:scale-95 shrink-0"
-                      >
-                        Start
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Meetings List */}
+                {/* Meetings List & Recent Recordings Sidebars */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-6">
                     <div className="flex items-center justify-between">
@@ -1237,17 +1251,8 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* Side Panel: Calendar Mini & Notes */}
-                  <div className="space-y-8">
-                    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
-                      <h3 className="text-lg font-bold text-gray-900 mb-4">Calendar</h3>
-                      <div className="aspect-square bg-gray-50 rounded-2xl flex flex-col items-center justify-center text-gray-400 p-4">
-                        <span className="text-accent-red font-bold text-sm uppercase mb-1">{format(new Date(), 'MMMM')}</span>
-                        <span className="text-5xl font-bold text-gray-900 mb-2">{format(new Date(), 'd')}</span>
-                        <span className="text-gray-500 font-medium">{format(new Date(), 'EEEE')}</span>
-                      </div>
-                    </div>
-
+                  {/* Side Panel: Dynamic Recent Recordings Only */}
+                  <div className="space-y-0">
                     <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                       <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Recordings</h3>
                       <div className="space-y-4">
@@ -1264,7 +1269,7 @@ export default function Dashboard() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-bold text-gray-900 truncate">{rec.title || 'Meeting Recording'}</p>
-                                <p className="text-[10px] text-gray-500">
+                                <p className="text-[10px] text-gray-400">
                                   {rec.createdAt?.toDate ? format(rec.createdAt.toDate(), 'MMM d, yyyy') : 'Recently'}
                                 </p>
                               </div>
@@ -2214,17 +2219,25 @@ export default function Dashboard() {
   );
 }
 
-function SidebarItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) {
+function SidebarItem({ icon, label, active = false, onClick, collapsed = false }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void, collapsed?: boolean }) {
+  const resizedIcon = React.isValidElement(icon)
+    ? React.cloneElement(icon as React.ReactElement<any>, { size: collapsed ? 24 : 20 })
+    : icon;
+
   return (
     <button 
       onClick={onClick}
+      title={collapsed ? label : undefined}
       className={cn(
-        "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium",
-        active ? "bg-accent-blue/10 text-accent-blue" : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+        "w-full flex items-center transition-all rounded-xl",
+        collapsed ? "justify-center p-3.5 hover:scale-105" : "px-4 py-3 gap-3",
+        active ? "bg-accent-blue/10 text-accent-blue font-bold" : "text-gray-500 hover:bg-gray-50 hover:text-gray-900 font-medium"
       )}
     >
-      {icon}
-      <span>{label}</span>
+      <div className="flex items-center justify-center transition-transform duration-200">
+        {resizedIcon}
+      </div>
+      {!collapsed && <span className="truncate text-sm">{label}</span>}
     </button>
   );
 }
@@ -2375,7 +2388,7 @@ function CalendarMonthView({ selectedDate, meetings, onEditMeeting, onAddMeeting
     <div className="flex-1 flex flex-col h-full bg-white">
       <div className="grid grid-cols-7 border-b border-gray-100 bg-gray-50/50">
         {daysHeader.map(day => (
-          <div key={day} className="py-4 text-center text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">{day}</div>
+          <div key={day} className="py-4 text-center text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">{day}</div>
         ))}
       </div>
       <div className="flex-1 grid grid-cols-7 border-collapse overflow-y-auto">
@@ -2396,39 +2409,45 @@ function CalendarMonthView({ selectedDate, meetings, onEditMeeting, onAddMeeting
               key={i} 
               onClick={() => onAddMeeting(d)}
               className={cn(
-                "border-r border-b border-gray-50 min-h-[120px] p-2 hover:bg-blue-50/30 transition-all group relative cursor-pointer",
+                "border-r border-b border-gray-100 min-h-[145px] p-3 hover:bg-blue-50/10 transition-all group relative cursor-pointer flex flex-col justify-between",
                 isDiffMonth && "bg-gray-50/20 text-gray-300"
               )}
             >
-              <div className="flex items-center justify-between mb-2">
-                <span className={cn(
-                  "text-xs font-black w-7 h-7 flex items-center justify-center rounded-xl transition-all",
-                  isTodayCell ? "bg-accent-blue text-white shadow-lg shadow-accent-blue/30 scale-110" : 
-                  isDiffMonth ? "text-gray-200" : "text-gray-900 group-hover:text-accent-blue"
-                )}>{d.getDate()}</span>
-                {dayMeetings.length > 0 && (
-                  <span className="w-1.5 h-1.5 bg-accent-blue rounded-full animate-pulse" />
-                )}
+              <div className="w-full">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className={cn(
+                    "text-xs font-semibold w-7 h-7 flex items-center justify-center rounded-xl transition-all",
+                    isTodayCell ? "bg-accent-blue text-white shadow-lg shadow-accent-blue/30 scale-110" : 
+                    isDiffMonth ? "text-gray-200 font-normal" : "text-gray-700 group-hover:text-accent-blue"
+                  )}>{d.getDate()}</span>
+                  {dayMeetings.length > 0 && !isDiffMonth && (
+                    <span className="w-1.5 h-1.5 bg-accent-blue rounded-full" />
+                  )}
+                </div>
+                <div className="space-y-1.5 font-sans">
+                  {dayMeetings.slice(0, 3).map(m => (
+                    <div 
+                      key={m.id} 
+                      onClick={(e) => { e.stopPropagation(); onEditMeeting(m); }}
+                      className={cn(
+                        "text-[10px] p-1.5 text-white rounded-lg shadow-sm truncate font-medium cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center gap-1.5",
+                        getEventColorClass(m)
+                      )}
+                    >
+                      {m.type === 'task' && <Check size={10} />}
+                      <span className="truncate font-medium">{m.title}</span>
+                    </div>
+                  ))}
+                  {dayMeetings.length > 3 && (
+                    <div className="mt-1">
+                      <span className="text-[9px] text-gray-500 font-semibold bg-gray-100 px-2 py-0.5 rounded-full inline-block">
+                        +{dayMeetings.length - 3} more
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="space-y-1 font-sans">
-                {dayMeetings.slice(0, 3).map(m => (
-                  <div 
-                    key={m.id} 
-                    onClick={(e) => { e.stopPropagation(); onEditMeeting(m); }}
-                    className={cn(
-                      "text-[10px] p-1.5 text-white rounded-lg shadow-sm truncate font-black cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] flex items-center gap-1.5",
-                      getEventColorClass(m)
-                    )}
-                  >
-                    {m.type === 'task' && <Check size={10} />}
-                    <span className="truncate">{m.title}</span>
-                  </div>
-                ))}
-                {dayMeetings.length > 3 && (
-                  <p className="text-[9px] text-gray-400 font-bold pl-1">+{dayMeetings.length - 3} more</p>
-                )}
-              </div>
-              <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                 <div className="p-1 bg-accent-blue/10 text-accent-blue rounded-lg">
                   <Plus size={12} />
                 </div>
@@ -2523,21 +2542,21 @@ function CalendarWeekView({ selectedDate, meetings, onEditMeeting }: { selectedD
                         }}
                       >
                         <div className="flex items-center justify-between gap-1 overflow-hidden">
-                          <p className="text-[10px] font-black truncate tracking-tight uppercase flex items-center gap-1">
+                          <p className="text-[10px] font-semibold truncate tracking-tight uppercase flex items-center gap-1.5">
                             {m.type === 'task' && <Check size={10} />}
                             {m.type === 'focus' && <Clock size={10} />}
                             {m.title}
                           </p>
                           {m.isMeeting && <Video size={10} className="shrink-0" />}
                         </div>
-                        <p className="text-[8px] opacity-80 font-medium whitespace-nowrap">
-                          {format(m.startTime, 'h:mm')} - {m.endTime ? format(m.endTime, 'h:mm a') : '...'}
+                        <p className="text-[8px] opacity-90 font-semibold whitespace-nowrap">
+                          {format(m.startTime, 'h:mm a')} - {m.endTime ? format(m.endTime, 'h:mm a') : '...'}
                         </p>
                         {height > 5 && m.description && (
-                          <p className="text-[7px] opacity-70 line-clamp-2 mt-1 italic">{m.description}</p>
+                          <p className="text-[8px] opacity-85 line-clamp-2 mt-1 italic leading-tight">{m.description}</p>
                         )}
                         {m.isKomu && (
-                          <div className="mt-auto text-[6px] font-black uppercase tracking-tighter self-end bg-black/10 px-1 rounded backdrop-blur-sm">KOMU</div>
+                          <div className="mt-auto text-[6px] font-bold uppercase tracking-wider self-end bg-black/15 px-1.5 py-0.5 rounded backdrop-blur-sm">KOMU</div>
                         )}
                       </div>
                     );

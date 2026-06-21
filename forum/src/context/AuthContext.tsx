@@ -37,6 +37,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (u) {
         try {
+          // Sync user profile for contact lookups
+          await setDoc(doc(db, 'userProfiles', u.uid), {
+            displayName: u.displayName,
+            email: u.email,
+            photoURL: u.photoURL,
+            lastSeen: new Date().toISOString()
+          }, { merge: true });
+
           // Fetch preferences from Firestore
           const docRef = doc(db, 'users', u.uid);
           const docSnap = await getDoc(docRef);
@@ -77,9 +85,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const credential = GoogleAuthProvider.credentialFromResult(result);
       
       if (credential) {
-        // Sign in to secondary app as well using the same credential
-        await signInWithCredential(komuAuth, credential);
-        console.log("Successfully signed in to both apps");
+        try {
+          // Sign in to secondary app as well using the same credential
+          await signInWithCredential(komuAuth, credential);
+          console.log("Successfully signed in to both apps");
+        } catch (komuError) {
+          console.warn("Could not sync with secondary app, continuing with main login:", komuError);
+        }
       }
     } catch (error) {
       console.error("Login failed:", error);

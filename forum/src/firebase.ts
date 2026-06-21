@@ -18,12 +18,8 @@ const komuConfig = {
   appId: "1:530718193944:web:079b5fad58c9c43308466d"
 };
 
-// ... existing imports ...
-
 const komuApp = initializeApp(komuConfig, "komu");
 export const komuDb = getFirestore(komuApp);
-
-// ADD THIS LINE:
-export const komuAuth = getAuth(komuApp); 
+export const komuAuth = getAuth(komuApp);
 
 export { signInWithPopup, signOut, signInWithCredential };

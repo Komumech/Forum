@@ -386,7 +386,7 @@ function MeetingRoomHeader({ room, isRecording, setIsRecording, activeTab, setAc
       </div>
       <div className="flex items-center gap-4 pointer-events-auto">
         {isRecording && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 text-red-500 rounded-full text-xs font-bold animate-pulse border border-red-500/20">
+          <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 text-red-500 rounded-full text-xs font-bold border border-red-500/20">
             <div className="w-1.5 h-1.5 bg-red-500 rounded-full" />
             REC
           </div>
@@ -1211,7 +1211,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           className="max-w-md w-full bg-surface p-10 rounded-[32px] border border-white/10 text-center space-y-6 shadow-2xl"
         >
           <div className="w-20 h-20 bg-accent-blue/10 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Clock className="text-accent-blue animate-pulse" size={40} />
+            <Clock className="text-accent-blue" size={40} />
           </div>
           <h2 className="text-2xl font-bold text-text-primary">Waiting to be admitted...</h2>
           <p className="text-text-secondary">The meeting host will let you in soon. Please stay on this screen.</p>
@@ -1962,7 +1962,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             <div className="text-white">
               <p className="text-base font-bold tracking-tight">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
               <div className="flex items-center gap-2 opacity-60">
-                <span className="w-1.5 h-1.5 bg-accent-blue rounded-full animate-pulse" />
+                <span className="w-1.5 h-1.5 bg-accent-blue rounded-full" />
                 <p className="text-xs font-semibold truncate max-w-[180px]">{room}</p>
               </div>
             </div>

@@ -16,7 +16,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#202124]">
+    <div className="min-h-screen bg-white">
       <Routes>
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Home />} />
         <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/" replace />} />
