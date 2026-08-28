@@ -7,7 +7,9 @@ import {
   MessageSquare, Users, ChevronRight, LogOut, 
   LayoutDashboard, FileText, Bell, RefreshCw, X, MoreVertical, Globe,
   Copy, Check, Monitor, ChevronLeft, Calendar as CalendarIcon,
-  Filter, Grid, List as ListIcon, Trash2, Edit2, Menu
+  Filter, Grid, List as ListIcon, Trash2, Edit2, Menu,
+  Paperclip, FolderUp, ArrowUpRight, Download, Send, Share2, Sparkles, Layers,
+  FileCheck, HardDrive, ShieldCheck, ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -70,7 +72,14 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'dashboard' | 'meetings' | 'contacts' | 'notes' | 'settings' | 'whiteboard' | 'calendar'>('dashboard');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'dashboard' | 'meetings' | 'contacts' | 'notes' | 'settings' | 'whiteboard' | 'calendar' | 'files'>('dashboard');
+  const [dashboardFiles, setDashboardFiles] = useState<Array<{ id: string; name: string; size: number; type: string; timestamp: number; url?: string }>>([
+    { id: 'f-1', name: 'Project_Architecture_Overview.pdf', size: 2450000, type: 'application/pdf', timestamp: Date.now() - 3600000 },
+    { id: 'f-2', name: 'Q3_Sprint_Deliverables.xlsx', size: 840000, type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', timestamp: Date.now() - 86400000 },
+    { id: 'f-3', name: 'Design_System_Tokens.json', size: 124000, type: 'application/json', timestamp: Date.now() - 172800000 }
+  ]);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [fileTransferCopied, setFileTransferCopied] = useState(false);
   const [meetingSubTab, setMeetingSubTab] = useState<'upcoming' | 'previous' | 'recordings'>('upcoming');
   const [userStatus, setUserStatus] = useState<'available' | 'away' | 'busy' | 'offline'>('available');
   const [searchQuery, setSearchQuery] = useState('');
@@ -569,6 +578,20 @@ export default function Dashboard() {
             collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
+            icon={<Monitor size={20} />} 
+            label="Joint Workspace" 
+            active={activeSidebarTab === 'whiteboard'} 
+            onClick={() => setActiveSidebarTab('whiteboard')}
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
+            icon={<Paperclip size={20} />} 
+            label="Shared Files" 
+            active={activeSidebarTab === 'files'} 
+            onClick={() => setActiveSidebarTab('files')}
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
             icon={<Calendar size={20} />} 
             label="Calendar" 
             active={activeSidebarTab === 'calendar'} 
@@ -587,13 +610,6 @@ export default function Dashboard() {
             label="Notes" 
             active={activeSidebarTab === 'notes'} 
             onClick={() => setActiveSidebarTab('notes')}
-            collapsed={isSidebarCollapsed}
-          />
-          <SidebarItem 
-            icon={<Monitor size={20} />} 
-            label="Whiteboard" 
-            active={activeSidebarTab === 'whiteboard'} 
-            onClick={() => setActiveSidebarTab('whiteboard')}
             collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
@@ -664,6 +680,18 @@ export default function Dashboard() {
                   onClick={() => { setActiveSidebarTab('meetings'); setIsMobileMenuOpen(false); }}
                 />
                 <SidebarItem 
+                  icon={<Monitor size={20} />} 
+                  label="Joint Workspace" 
+                  active={activeSidebarTab === 'whiteboard'} 
+                  onClick={() => { setActiveSidebarTab('whiteboard'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Paperclip size={20} />} 
+                  label="Shared Files" 
+                  active={activeSidebarTab === 'files'} 
+                  onClick={() => { setActiveSidebarTab('files'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
                   icon={<Calendar size={20} />} 
                   label="Calendar" 
                   active={activeSidebarTab === 'calendar'} 
@@ -680,12 +708,6 @@ export default function Dashboard() {
                   label="Notes" 
                   active={activeSidebarTab === 'notes'} 
                   onClick={() => { setActiveSidebarTab('notes'); setIsMobileMenuOpen(false); }}
-                />
-                <SidebarItem 
-                  icon={<Monitor size={20} />} 
-                  label="Whiteboard" 
-                  active={activeSidebarTab === 'whiteboard'} 
-                  onClick={() => { setActiveSidebarTab('whiteboard'); setIsMobileMenuOpen(false); }}
                 />
                 <SidebarItem 
                   icon={<Settings size={20} />} 
@@ -902,7 +924,7 @@ export default function Dashboard() {
                     >
                       <div className="px-6 pb-3 border-b border-gray-50 flex items-center justify-between">
                         <p className="font-bold text-gray-900">Notifications</p>
-                        <span className="text-[10px] font-black uppercase text-accent-blue bg-blue-50 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-black uppercase text-accent-blue tracking-wider">
                           {notifications.filter(n => !n.read).length} New
                         </span>
                       </div>
@@ -1025,12 +1047,12 @@ export default function Dashboard() {
                 </div>
 
                 {/* Quick Actions & Recurring Card Layout */}
-                <div className="flex flex-col lg:flex-row gap-6 items-start">
-                  {/* Left Gallery: Quick Actions */}
-                  <div className="grid grid-cols-2 md:grid-cols-2 gap-3 lg:gap-6 flex-1 h-full items-start">
-                    <div className="relative">
+                <div className="space-y-6">
+                  {/* Primary 4-Card Quick Actions Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-5 w-full items-stretch">
+                    <div className="relative h-full">
                       <QuickActionCard 
-                        icon={<Plus size={20} />} 
+                        icon={<Plus size={22} />} 
                         label="New Meeting" 
                         sub="Instant meeting" 
                         color="bg-accent-blue"
@@ -1117,72 +1139,175 @@ export default function Dashboard() {
                         )}
                       </AnimatePresence>
                     </div>
+
                     <QuickActionCard 
-                      icon={<Users size={20} />} 
+                      icon={<Users size={22} />} 
                       label="Join Meeting" 
-                      sub="Using code" 
-                      color="bg-success-green"
+                      sub="Using code or link" 
+                      color="bg-emerald-600"
                       onClick={() => setIsJoinMeetingModalOpen(true)}
+                    />
+
+                    <QuickActionCard 
+                      icon={<Monitor size={22} />} 
+                      label="Joint Workspace" 
+                      sub="Live canvas & whiteboard" 
+                      badge="Workspace"
+                      color="bg-indigo-600"
+                      onClick={() => setActiveSidebarTab('whiteboard')}
+                    />
+
+                    <QuickActionCard 
+                      icon={<Paperclip size={22} />} 
+                      label="Share Files" 
+                      sub="Instant peer transfer" 
+                      badge="Transfer"
+                      color="bg-amber-500"
+                      onClick={() => setActiveSidebarTab('files')}
                     />
                   </div>
 
-                  <div className="lg:w-1/3">
-                    {meetings.find(m => m.recurrence && m.recurrence !== 'none') ? (
-                      <div className="h-full bg-white border border-gray-100 p-6 rounded-[32px] shadow-sm hover:shadow-xl transition-all flex flex-col justify-between group overflow-hidden relative min-h-[220px]">
-                        <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-125 transition-transform duration-700">
-                          <RefreshCw size={120} className="text-indigo-600" />
-                        </div>
-                        <div className="relative z-10">
-                          <div className="flex items-center gap-2 px-3 py-1 bg-indigo-50 rounded-full w-fit mb-4">
-                            <RefreshCw size={12} className="animate-spin-slow text-indigo-600" />
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-600">Recurring</span>
+                  {/* Collaboration Hub & Recurring Meeting Section */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {/* Joint Workspace Card */}
+                    <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                            <Layers size={20} />
                           </div>
-                          <h4 className="text-2xl font-black leading-tight line-clamp-2 text-gray-900">
-                            {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.title}
-                          </h4>
-                          <p className="text-sm text-gray-400 mt-1 uppercase text-[10px] font-black tracking-widest">
-                            {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.recurrence}
-                          </p>
-                        </div>
-                        <div className="mt-8 relative z-10">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex -space-x-2">
-                              {[1, 2, 3].map(i => (
-                                <img key={i} src={`https://picsum.photos/seed/${i}/32/32`} className="w-8 h-8 rounded-full border-2 border-white shadow-sm" alt="" referrerPolicy="no-referrer" />
-                              ))}
-                            </div>
-                            <div className="text-right">
-                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Next session</p>
-                              <p className="text-lg font-black tracking-tighter text-gray-900">
-                                {format(meetings.find(m => m.recurrence && m.recurrence !== 'none')!.startTime, 'h:mm a')}
-                              </p>
-                            </div>
-                          </div>
-                          <button 
-                            onClick={() => joinMeeting(meetings.find(m => m.recurrence && m.recurrence !== 'none')?.roomId || '')}
-                            className="w-full py-4 bg-accent-blue text-white rounded-2xl font-black text-sm hover:bg-blue-600 transition-all active:scale-95 shadow-lg shadow-accent-blue/10"
-                          >
-                            Join Now
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="h-full bg-white border border-gray-100 border-dashed p-6 rounded-[32px] flex flex-col items-center justify-center text-center space-y-4 group">
-                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 group-hover:scale-110 group-hover:text-accent-blue transition-all duration-500">
-                          <RefreshCw size={32} />
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            Multi-User Sync
+                          </span>
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-gray-900">No recurring meetings</p>
-                          <p className="text-xs text-gray-400 mt-1">Plan your weekly syncs and never miss a beat.</p>
+                          <h4 className="text-lg font-black text-gray-900">Joint Workspace & Whiteboard</h4>
+                          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                            Draw, diagram, brainstorm with sticky notes, and collaborate in real-time with zero lag.
+                          </p>
                         </div>
+                      </div>
+                      <div className="flex items-center gap-3 pt-5 mt-4 border-t border-gray-100">
                         <button 
-                          onClick={() => setIsScheduling(true)}
-                          className="px-6 py-2 bg-gray-50 text-gray-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue hover:text-white transition-all"
+                          onClick={() => setActiveSidebarTab('whiteboard')}
+                          className="flex-1 py-2.5 px-4 bg-accent-blue hover:bg-blue-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2"
                         >
-                          Schedule First
+                          <Monitor size={14} />
+                          <span>Open Workspace</span>
+                        </button>
+                        <button 
+                          onClick={() => {
+                            const id = Math.random().toString(36).substring(2, 10);
+                            navigate(`/meeting/${id}?board=true`);
+                          }}
+                          className="py-2.5 px-3.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                          title="Start a live room with whiteboard open"
+                        >
+                          <span>Launch in Room</span>
+                          <ArrowRight size={13} />
                         </button>
                       </div>
-                    )}
+                    </div>
+
+                    {/* Share Files Hub Card */}
+                    <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="w-10 h-10 rounded-2xl bg-[#f1f3f4] text-gray-700 flex items-center justify-center">
+                            <FolderUp size={20} />
+                          </div>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            P2P Encrypted
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-black text-gray-900">Direct File Transfer & Hub</h4>
+                          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                            Share documents, decks, images, and archives directly in calls or via instant peer transfer rooms.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 pt-5 mt-4 border-t border-gray-100">
+                        <button 
+                          onClick={() => setActiveSidebarTab('files')}
+                          className="flex-1 py-2.5 px-4 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-full text-xs font-semibold transition-all shadow-sm flex items-center justify-center gap-2"
+                        >
+                          <Paperclip size={14} />
+                          <span>Open Shared Files</span>
+                        </button>
+                        <button 
+                          onClick={() => {
+                            const id = Math.random().toString(36).substring(2, 10);
+                            navigate(`/meeting/${id}`);
+                          }}
+                          className="py-2.5 px-3.5 bg-[#f1f3f4] hover:bg-[#e3e3e3] text-gray-800 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5"
+                          title="Start meeting room to share files"
+                        >
+                          <span>Share in Call</span>
+                          <ArrowRight size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Recurring Meeting / Next Session Card */}
+                    <div className="h-full">
+                      {meetings.find(m => m.recurrence && m.recurrence !== 'none') ? (
+                        <div className="h-full bg-white border border-gray-100 p-6 rounded-[32px] shadow-sm hover:shadow-xl transition-all flex flex-col justify-between group overflow-hidden relative min-h-[220px]">
+                          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-125 transition-transform duration-700">
+                            <RefreshCw size={120} className="text-indigo-600" />
+                          </div>
+                          <div className="relative z-10">
+                            <div className="flex items-center gap-2 text-indigo-600 mb-4 font-bold text-[10px] uppercase tracking-widest">
+                              <RefreshCw size={12} className="animate-spin-slow" />
+                              <span>Recurring</span>
+                            </div>
+                            <h4 className="text-xl font-black leading-tight line-clamp-2 text-gray-900">
+                              {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.title}
+                            </h4>
+                            <p className="text-sm text-gray-400 mt-1 uppercase text-[10px] font-black tracking-widest">
+                              {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.recurrence}
+                            </p>
+                          </div>
+                          <div className="mt-6 relative z-10">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex -space-x-2">
+                                {[1, 2, 3].map(i => (
+                                  <img key={i} src={`https://picsum.photos/seed/${i}/32/32`} className="w-7 h-7 rounded-full border-2 border-white shadow-sm" alt="" referrerPolicy="no-referrer" />
+                                ))}
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Next session</p>
+                                <p className="text-base font-black tracking-tight text-gray-900">
+                                  {format(meetings.find(m => m.recurrence && m.recurrence !== 'none')!.startTime, 'h:mm a')}
+                                </p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => joinMeeting(meetings.find(m => m.recurrence && m.recurrence !== 'none')?.roomId || '')}
+                              className="w-full py-3 bg-accent-blue text-white rounded-2xl font-black text-xs hover:bg-blue-600 transition-all active:scale-95 shadow-md shadow-accent-blue/10"
+                            >
+                              Join Now
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-full bg-white border border-gray-100 border-dashed p-6 rounded-[32px] flex flex-col items-center justify-center text-center space-y-3 group min-h-[220px]">
+                          <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 group-hover:scale-110 group-hover:text-accent-blue transition-all duration-500">
+                            <RefreshCw size={24} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-gray-900">No recurring meetings</p>
+                            <p className="text-xs text-gray-400 mt-0.5">Plan your weekly syncs.</p>
+                          </div>
+                          <button 
+                            onClick={() => setIsScheduling(true)}
+                            className="px-5 py-2 bg-gray-50 text-gray-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue hover:text-white transition-all"
+                          >
+                            Schedule First
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1692,12 +1817,206 @@ export default function Dashboard() {
             )}
 
             {activeSidebarTab === 'whiteboard' && (
-              <div className="h-full flex flex-col space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">Whiteboard</h2>
+              <div className="h-full flex flex-col space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                      <Monitor className="text-[#0b57d0]" size={24} />
+                      <span>Joint Workspace & File Editor</span>
+                    </h2>
+                    <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
+                      Collaborative file explorer, live multi-cursor code editor, and interactive team whiteboard.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        const id = Math.random().toString(36).substring(2, 10);
+                        navigate(`/meeting/${id}?board=true`);
+                      }}
+                      className="px-5 py-2 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-full text-xs font-medium transition-colors flex items-center gap-2 shadow-xs"
+                    >
+                      <Plus size={16} />
+                      <span>Launch In Call</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1 min-h-[600px]">
-                  <Whiteboard />
+                <div className="flex-1 min-h-[640px] h-[calc(100vh-230px)] bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
+                  <Whiteboard user={user} />
+                </div>
+              </div>
+            )}
+
+            {activeSidebarTab === 'files' && (
+              <div className="space-y-6 pb-12">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                      <Paperclip className="text-[#0b57d0]" size={24} />
+                      <span>Shared Files & Transfer Hub</span>
+                    </h2>
+                    <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
+                      Peer-to-peer in-room file sharing and document exchange with end-to-end WebRTC security.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        const id = Math.random().toString(36).substring(2, 10);
+                        navigate(`/meeting/${id}`);
+                      }}
+                      className="px-5 py-2 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-full text-xs font-medium transition-colors flex items-center gap-2"
+                    >
+                      <Plus size={16} />
+                      <span>Start Transfer Call</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Drag and drop upload zone */}
+                <div 
+                  onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
+                  onDragLeave={() => setIsDraggingFile(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingFile(false);
+                    const files = Array.from(e.dataTransfer.files);
+                    if (files.length > 0) {
+                      const newItems = files.map(f => ({
+                        id: `f-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                        name: f.name,
+                        size: f.size,
+                        type: f.type || 'application/octet-stream',
+                        timestamp: Date.now()
+                      }));
+                      setDashboardFiles(prev => [...newItems, ...prev]);
+                    }
+                  }}
+                  className={cn(
+                    "p-8 border border-dashed rounded-3xl text-center transition-all bg-[#f8f9fa] flex flex-col items-center justify-center space-y-3 cursor-pointer",
+                    isDraggingFile 
+                      ? "border-[#0b57d0] bg-[#f1f3f4] scale-[1.01]" 
+                      : "border-gray-300 hover:border-[#0b57d0] hover:bg-white"
+                  )}
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.multiple = true;
+                    input.onchange = (e: any) => {
+                      const files = Array.from(e.target.files || []) as File[];
+                      if (files.length > 0) {
+                        const newItems = files.map(f => ({
+                          id: `f-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                          name: f.name,
+                          size: f.size,
+                          type: f.type || 'application/octet-stream',
+                          timestamp: Date.now()
+                        }));
+                        setDashboardFiles(prev => [...newItems, ...prev]);
+                      }
+                    };
+                    input.click();
+                  }}
+                >
+                  <div className="w-12 h-12 bg-[#f1f3f4] text-gray-700 rounded-full flex items-center justify-center">
+                    <FolderUp size={22} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">
+                      Drop files here to share, or <span className="text-[#0b57d0] underline font-medium">browse</span>
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      PDF, documents, images, archives, code & videos
+                    </p>
+                  </div>
+                </div>
+
+                {/* Transfer Hub Stats / Security info */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center gap-3">
+                    <div className="p-2.5 bg-[#f1f3f4] text-gray-700 rounded-xl">
+                      <ShieldCheck size={18} />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wider">Security</p>
+                      <p className="text-xs font-semibold text-gray-900">Direct WebRTC E2EE</p>
+                    </div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center gap-3">
+                    <div className="p-2.5 bg-[#f1f3f4] text-gray-700 rounded-xl">
+                      <HardDrive size={18} />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wider">Shared Items</p>
+                      <p className="text-xs font-semibold text-gray-900">{dashboardFiles.length} files available</p>
+                    </div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center gap-3">
+                    <div className="p-2.5 bg-[#f1f3f4] text-gray-700 rounded-xl">
+                      <Share2 size={18} />
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wider">Speed</p>
+                      <p className="text-xs font-semibold text-gray-900">Peer-to-Peer Direct</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent Shared Files Table */}
+                <div className="bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
+                  <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                    <h3 className="font-semibold text-gray-900 text-sm">Recent Shared Files</h3>
+                    <button 
+                      onClick={() => {
+                        const link = `${window.location.origin}/dashboard`;
+                        navigator.clipboard.writeText(link);
+                        setFileTransferCopied(true);
+                        setTimeout(() => setFileTransferCopied(false), 2000);
+                      }}
+                      className="px-3 py-1.5 bg-[#f1f3f4] hover:bg-[#e3e3e3] text-[#1f1f1f] rounded-full text-xs font-medium transition-colors flex items-center gap-1.5"
+                    >
+                      {fileTransferCopied ? <Check size={13} className="text-[#0b57d0]" /> : <Copy size={13} />}
+                      <span>{fileTransferCopied ? 'Link copied' : 'Copy link'}</span>
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-gray-100">
+                    {dashboardFiles.map(file => (
+                      <div key={file.id} className="p-3.5 hover:bg-[#f8f9fa] transition-colors flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 bg-[#f1f3f4] text-gray-700 rounded-xl flex items-center justify-center shrink-0">
+                            <FileCheck size={18} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-gray-900 truncate">{file.name}</p>
+                            <p className="text-[11px] text-gray-500">
+                              {(file.size / (1024 * 1024)).toFixed(2)} MB • {format(new Date(file.timestamp), 'MMM d, yyyy h:mm a')}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button 
+                            onClick={() => {
+                              alert(`Ready to download ${file.name}`);
+                            }}
+                            className="p-2 hover:bg-[#f1f3f4] text-gray-600 hover:text-gray-900 rounded-full transition-colors"
+                            title="Download File"
+                          >
+                            <Download size={16} />
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setDashboardFiles(prev => prev.filter(f => f.id !== file.id));
+                            }}
+                            className="p-2 hover:bg-[#f1f3f4] text-gray-500 hover:text-gray-900 rounded-full transition-colors"
+                            title="Remove File"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -2242,17 +2561,38 @@ function SidebarItem({ icon, label, active = false, onClick, collapsed = false }
   );
 }
 
-function QuickActionCard({ icon, label, sub, color, onClick }: { icon: React.ReactNode, label: string, sub: string, color: string, onClick?: () => void }) {
+function QuickActionCard({ 
+  icon, 
+  label, 
+  sub, 
+  color, 
+  badge,
+  onClick 
+}: { 
+  icon: React.ReactNode, 
+  label: string, 
+  sub: string, 
+  color: string, 
+  badge?: string,
+  onClick?: () => void 
+}) {
   return (
     <button 
       onClick={onClick}
-      className="w-full bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left group active:scale-[0.98] flex flex-col justify-between min-h-[170px]"
+      className="w-full bg-white p-5 sm:p-6 rounded-[28px] sm:rounded-[32px] border border-gray-100/80 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left group active:scale-[0.98] flex flex-col justify-between min-h-[160px] sm:min-h-[175px] relative overflow-hidden"
     >
-      <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg mb-6 group-hover:scale-110 transition-transform", color)}>
-        {icon}
+      <div className="flex items-start justify-between w-full mb-4">
+        <div className={cn("w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform", color)}>
+          {icon}
+        </div>
+        {badge && (
+          <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-gray-400">
+            {badge}
+          </span>
+        )}
       </div>
       <div>
-        <h4 className="text-lg font-black text-gray-900 group-hover:text-accent-blue transition-colors leading-tight">{label}</h4>
+        <h4 className="text-base sm:text-lg font-black text-gray-900 group-hover:text-accent-blue transition-colors leading-tight">{label}</h4>
         <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-1">{sub}</p>
       </div>
     </button>
@@ -2284,7 +2624,7 @@ function MeetingCard({ meeting, onJoin, onEdit, onDelete }: { meeting: Meeting, 
             <div className="flex items-center gap-2">
               <h4 className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors text-sm sm:text-base truncate">{meeting.title}</h4>
               {meeting.isKomu && (
-                <span className="px-2 py-0.5 bg-purple-50 text-purple-600 text-[8px] sm:text-[10px] font-bold rounded-full border border-purple-100 shrink-0">KOMU</span>
+                <span className="text-[9px] sm:text-[10px] font-black text-purple-600 uppercase tracking-wider shrink-0">KOMU</span>
               )}
             </div>
             <p className="text-xs text-gray-500 flex items-center gap-2">
@@ -2440,7 +2780,7 @@ function CalendarMonthView({ selectedDate, meetings, onEditMeeting, onAddMeeting
                   ))}
                   {dayMeetings.length > 3 && (
                     <div className="mt-1">
-                      <span className="text-[9px] text-gray-500 font-semibold bg-gray-100 px-2 py-0.5 rounded-full inline-block">
+                      <span className="text-[9px] text-gray-400 font-bold inline-block">
                         +{dayMeetings.length - 3} more
                       </span>
                     </div>

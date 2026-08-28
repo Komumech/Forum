@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import MeetingPage from './pages/MeetingPage';
+import IsolatedFeed from './pages/IsolatedFeed';
 import { useAuth } from './context/AuthContext';
 
 export default function App() {
@@ -21,6 +22,8 @@ export default function App() {
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Home />} />
         <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/" replace />} />
         <Route path="/meeting/:id" element={<MeetingPage />} />
+        <Route path="/isolated-feed/:room/:identity" element={<IsolatedFeed />} />
+        <Route path="/feed/:room/:identity" element={<IsolatedFeed />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

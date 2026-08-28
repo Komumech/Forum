@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Video, Keyboard, Plus, Info, Sparkles, Shield, 
   Workflow, PenTool, FileText, Check, ChevronDown, 
-  ChevronUp, Globe, Users, Clock, Lock, Monitor 
+  ChevronUp, Globe, Users, Clock, Lock, Monitor,
+  X, User, ArrowRight, UserCheck, LogIn, Radio
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
+import { cn } from '../lib/utils';
 
 function GoogleIconSVG() {
   return (
@@ -25,6 +27,15 @@ export default function Home() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const navigate = useNavigate();
   const { user, login, logout, loading, preferences } = useAuth();
+
+  // Guest Join / Create Modal State
+  const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
+  const [guestModalMode, setGuestModalMode] = useState<'create' | 'join'>('create');
+  const [guestUsername, setGuestUsername] = useState(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('forum_guest_username') || '' : '';
+  });
+  const [guestRoomCode, setGuestRoomCode] = useState('');
+  const [usernameError, setUsernameError] = useState('');
 
   const [isVisible, setIsVisible] = useState(true);
   const lastScrollY = useRef(0);
@@ -46,16 +57,65 @@ export default function Home() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const openGuestModal = (mode: 'create' | 'join', initialCode = '') => {
+    setGuestModalMode(mode);
+    setGuestRoomCode(initialCode || roomCode);
+    setUsernameError('');
+    setIsGuestModalOpen(true);
+  };
+
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (roomCode.trim()) {
-      navigate(`/meeting/${roomCode.trim()}`);
+    const cleanCode = roomCode.trim().replace(/^https?:\/\/[^/]+\/meeting\//i, '');
+    if (!cleanCode) return;
+
+    if (user) {
+      navigate(`/meeting/${cleanCode}`);
+    } else {
+      // If not signed in, prompt for username
+      openGuestModal('join', cleanCode);
     }
   };
 
   const handleNewMeeting = () => {
     const randomCode = Math.random().toString(36).substring(2, 10);
-    navigate(`/meeting/${randomCode}`);
+    try {
+      localStorage.setItem(`forum_room_host_${randomCode}`, 'true');
+    } catch (e) {}
+
+    if (user) {
+      navigate(`/meeting/${randomCode}`);
+    } else {
+      openGuestModal('create', randomCode);
+    }
+  };
+
+  const handleGuestSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedUser = guestUsername.trim();
+    if (!trimmedUser) {
+      setUsernameError('Please enter a username or display name');
+      return;
+    }
+
+    // Save to localStorage for future meetings
+    localStorage.setItem('forum_guest_username', trimmedUser);
+
+    if (guestModalMode === 'create') {
+      const randomCode = guestRoomCode || Math.random().toString(36).substring(2, 10);
+      try {
+        localStorage.setItem(`forum_room_host_${randomCode}`, 'true');
+      } catch (e) {}
+      navigate(`/meeting/${randomCode}?name=${encodeURIComponent(trimmedUser)}`);
+    } else {
+      const cleanCode = (guestRoomCode || roomCode).trim().replace(/^https?:\/\/[^/]+\/meeting\//i, '');
+      if (!cleanCode) {
+        setUsernameError('Please enter a valid room code or link');
+        return;
+      }
+      navigate(`/meeting/${cleanCode}?name=${encodeURIComponent(trimmedUser)}`);
+    }
+    setIsGuestModalOpen(false);
   };
 
   const toggleFaq = (index: number) => {
@@ -134,7 +194,7 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-4">
-          <span className="text-gray-400 text-xs hidden sm:block font-bold bg-white px-3 py-1.5 rounded-lg border border-gray-100/50">
+          <span className="text-gray-400 text-xs hidden sm:block font-bold">
             {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </span>
           {user ? (
@@ -150,13 +210,22 @@ export default function Home() {
               </div>
             </div>
           ) : (
-            <button 
-              onClick={login}
-              className="bg-white hover:bg-gray-50 text-gray-800 border border-gray-200/30 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 shrink-0" alt="Google" />
-              <span>Sign in</span>
-            </button>
+            <div className="flex items-center gap-2.5">
+              <button 
+                onClick={() => openGuestModal('create')}
+                className="bg-accent-blue/10 hover:bg-accent-blue/20 text-accent-blue border border-accent-blue/20 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+              >
+                <Plus size={15} />
+                <span>Instant Meeting</span>
+              </button>
+              <button 
+                onClick={login}
+                className="bg-white hover:bg-gray-50 text-gray-800 border border-gray-200/30 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0" alt="Google" />
+                <span>Sign in</span>
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -164,7 +233,7 @@ export default function Home() {
       {/* Hero Section */}
       <section className="relative overflow-hidden py-16 lg:py-24 px-6 lg:px-16 max-w-7xl mx-auto w-full flex flex-col lg:flex-row items-center gap-16">
         <div className="flex-1 space-y-8 max-w-xl text-center lg:text-left">
-          <div className="inline-flex items-center gap-2 bg-white border border-gray-200/20 px-4 py-1.5 rounded-full text-xs font-bold text-gray-500 shadow-sm">
+          <div className="flex items-center gap-2 text-xs font-bold text-gray-500 justify-center lg:justify-start">
             <Shield size={14} className="text-accent-blue" />
             <span>Secure Enterprise Video Rooms & Interactive Tools</span>
           </div>
@@ -207,32 +276,47 @@ export default function Home() {
               </form>
             </div>
           ) : (
-            <div className="flex flex-col sm:flex-row items-center gap-4 justify-center lg:justify-start w-full">
-              <button 
-                onClick={login}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white hover:bg-gray-50 text-gray-800 border border-gray-200/40 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition-all hover:scale-[1.01] active:scale-[0.99]"
-              >
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 shrink-0" alt="Google Logo" />
-                <span>Continue with Google</span>
-              </button>
-
-              <form onSubmit={handleJoin} className="w-full sm:w-auto flex items-center gap-3 border border-gray-200/30 bg-white rounded-xl px-4 py-1.5 shadow-sm focus-within:border-accent-blue focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-                <Keyboard className="text-gray-400" size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Enter a code or link" 
-                  value={roomCode}
-                  onChange={(e) => setRoomCode(e.target.value)}
-                  className="w-full sm:w-44 py-1.5 outline-none text-sm font-medium text-gray-800 bg-transparent"
-                />
+            <div className="space-y-4 w-full">
+              <div className="flex flex-col sm:flex-row items-center gap-3 justify-center lg:justify-start w-full">
                 <button 
-                  type="submit"
-                  disabled={!roomCode.trim()}
-                  className="text-accent-blue font-bold text-sm disabled:text-gray-300 transition-colors"
+                  onClick={() => openGuestModal('create')}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-accent-blue hover:bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-accent-blue/25 hover:-translate-y-0.5 active:translate-y-0"
                 >
-                  Join
+                  <Plus size={18} />
+                  <span>Start Instant Meeting</span>
                 </button>
-              </form>
+
+                <form onSubmit={handleJoin} className="w-full sm:w-auto flex items-center gap-2.5 border border-gray-200/50 bg-white rounded-xl px-3.5 py-1.5 shadow-sm focus-within:border-accent-blue focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+                  <Keyboard className="text-gray-400 shrink-0" size={16} />
+                  <input 
+                    type="text" 
+                    placeholder="Enter a code or link" 
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value)}
+                    className="w-full sm:w-40 py-1.5 outline-none text-sm font-medium text-gray-800 bg-transparent placeholder:text-gray-400"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={!roomCode.trim()}
+                    className="text-accent-blue font-bold text-sm disabled:text-gray-300 transition-colors px-1"
+                  >
+                    Join
+                  </button>
+                </form>
+              </div>
+
+              <div className="flex items-center gap-3 justify-center lg:justify-start pt-1">
+                <span className="text-xs text-gray-400 font-medium">No account required.</span>
+                <span className="text-gray-300">•</span>
+                <button 
+                  onClick={login}
+                  className="text-xs text-gray-600 hover:text-accent-blue font-semibold flex items-center gap-1.5 transition-colors group"
+                >
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0" alt="Google" />
+                  <span>Sign in with Google for Calendar & Notes sync</span>
+                  <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -272,6 +356,138 @@ export default function Home() {
           </motion.div>
         </div>
       </section>
+
+      {/* Guest Meeting Setup Modal (No sign-in required) */}
+      <AnimatePresence>
+        {isGuestModalOpen && (
+          <>
+            <div 
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[100] transition-opacity"
+              onClick={() => setIsGuestModalOpen(false)} 
+            />
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white rounded-3xl shadow-2xl border border-gray-100 max-w-md w-full p-6 sm:p-8 relative overflow-hidden"
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-blue-50 text-accent-blue flex items-center justify-center font-bold">
+                      <User size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">
+                        {guestModalMode === 'create' ? 'Start Instant Meeting' : 'Join Meeting as Guest'}
+                      </h3>
+                      <p className="text-xs text-gray-500 font-medium">No account or password required</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setIsGuestModalOpen(false)}
+                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 flex items-center justify-center transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {/* Mode Selector Tabs */}
+                <div className="flex bg-gray-100 p-1 rounded-xl mb-5 text-xs font-semibold text-gray-600">
+                  <button
+                    type="button"
+                    onClick={() => { setGuestModalMode('create'); setUsernameError(''); }}
+                    className={cn(
+                      "flex-1 py-2 rounded-lg text-center transition-all",
+                      guestModalMode === 'create' ? "bg-white text-gray-900 shadow-sm font-bold" : "hover:text-gray-900"
+                    )}
+                  >
+                    Create New Room
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setGuestModalMode('join'); setUsernameError(''); }}
+                    className={cn(
+                      "flex-1 py-2 rounded-lg text-center transition-all",
+                      guestModalMode === 'join' ? "bg-white text-gray-900 shadow-sm font-bold" : "hover:text-gray-900"
+                    )}
+                  >
+                    Join with Code
+                  </button>
+                </div>
+
+                <form onSubmit={handleGuestSubmit} className="space-y-4">
+                  {guestModalMode === 'join' && (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                        Meeting Code or Link
+                      </label>
+                      <div className="relative flex items-center">
+                        <Keyboard className="absolute left-3.5 text-gray-400" size={16} />
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. abc-def-ghi"
+                          value={guestRoomCode}
+                          onChange={(e) => setGuestRoomCode(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium text-gray-900 outline-none focus:bg-white focus:border-accent-blue focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-gray-400"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                      Your Username / Display Name <span className="text-accent-red">*</span>
+                    </label>
+                    <div className="relative flex items-center">
+                      <User className="absolute left-3.5 text-gray-400" size={16} />
+                      <input
+                        type="text"
+                        autoFocus
+                        required
+                        placeholder="e.g. Sarah Jenkins"
+                        value={guestUsername}
+                        onChange={(e) => { setGuestUsername(e.target.value); setUsernameError(''); }}
+                        className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium text-gray-900 outline-none focus:bg-white focus:border-accent-blue focus:ring-2 focus:ring-blue-100 transition-all placeholder:text-gray-400"
+                      />
+                    </div>
+                    {usernameError && (
+                      <p className="text-xs text-red-500 mt-1 font-semibold">{usernameError}</p>
+                    )}
+                  </div>
+
+                  <div className="pt-2 space-y-3">
+                    <button
+                      type="submit"
+                      disabled={!guestUsername.trim() || (guestModalMode === 'join' && !guestRoomCode.trim())}
+                      className="w-full py-3.5 bg-accent-blue hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl shadow-lg shadow-accent-blue/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      <span>{guestModalMode === 'create' ? 'Start Meeting' : 'Join Room'}</span>
+                      <ArrowRight size={16} />
+                    </button>
+
+                    <div className="relative flex items-center justify-center py-2">
+                      <div className="border-t border-gray-200 w-full" />
+                      <span className="bg-white px-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider absolute">or</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => { setIsGuestModalOpen(false); login(); }}
+                      className="w-full py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-700 font-semibold text-xs rounded-xl border border-gray-200 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 shrink-0" alt="Google" />
+                      <span>Sign in with Google account</span>
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Feature matrix / Bento grid */}
       <section id="features" className="bg-[#f5f6f7] py-20 px-6 lg:px-16 border-y border-gray-205/50">
