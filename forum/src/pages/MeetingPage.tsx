@@ -1677,12 +1677,28 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   // Apply Device Changes & Settings
   useEffect(() => {
-    if (selectedVideoId && localParticipant?.isCameraEnabled) {
-      localParticipant.setCameraEnabled(true, { deviceId: selectedVideoId }).catch(err => {
-        console.warn("Could not switch video device:", err?.message || err);
-      });
+    if (!localParticipant?.isCameraEnabled || !selectedVideoId) return;
+    
+    // Verify device exists in available devices before switching
+    const deviceExists = videoDevices.some(d => d.deviceId === selectedVideoId);
+    if (!deviceExists) {
+      console.warn("Selected video device not found:", selectedVideoId);
+      return;
     }
-  }, [selectedVideoId, localParticipant]);
+
+    localParticipant.setCameraEnabled(true, { deviceId: selectedVideoId }).catch(err => {
+      const errorMsg = err?.message || String(err);
+      if (errorMsg.includes("Could not start") || errorMsg.includes("NotFoundError")) {
+        console.warn("Video device unavailable or already in use:", selectedVideoId);
+        // Reset to first available device
+        if (videoDevices.length > 0) {
+          setSelectedVideoId(videoDevices[0].deviceId);
+        }
+      } else {
+        console.warn("Could not switch video device:", errorMsg);
+      }
+    });
+  }, [selectedVideoId, localParticipant, videoDevices]);
 
   useEffect(() => {
     if (localParticipant) {
@@ -3057,12 +3073,59 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               <div className="relative">
                 <ControlButton 
                   onClick={async () => {
+                    if (!localParticipant) return;
                     try {
                       const targetState = !localParticipant.isCameraEnabled;
-                      setIsCamEnabled(targetState);
-                      await localParticipant.setCameraEnabled(targetState);
+                      const previousState = localParticipant.isCameraEnabled;
+                      
+                      // If enabling camera, ensure device is available first
+                      if (targetState && videoDevices.length === 0) {
+                        console.warn("No camera devices available.");
+                        setToastMessage("No camera devices available. Please check your hardware.");
+                        setTimeout(() => setToastMessage(null), 4000);
+                        return;
+                      }
+                      
+                      try {
+                        // Use current device or first available device
+                        const deviceId = selectedVideoId && videoDevices.some(d => d.deviceId === selectedVideoId) 
+                          ? selectedVideoId 
+                          : videoDevices[0]?.deviceId;
+                        
+                        if (targetState && !deviceId) {
+                          console.warn("Cannot enable camera: no valid device selected.");
+                          return;
+                        }
+                        
+                        const options = targetState && deviceId ? { deviceId } : undefined;
+                        await localParticipant.setCameraEnabled(targetState, options);
+                        
+                        // Update device selection if enabling with specific device
+                        if (targetState && deviceId && deviceId !== selectedVideoId) {
+                          setSelectedVideoId(deviceId);
+                        }
+                        
+                        setIsCamEnabled(targetState);
+                        setToastMessage(targetState ? "Camera enabled" : "Camera disabled");
+                        setTimeout(() => setToastMessage(null), 2000);
+                      } catch (innerErr: any) {
+                        setIsCamEnabled(previousState);
+                        const errorMsg = innerErr?.message || String(innerErr);
+                        
+                        if (errorMsg.includes("NotAllowedError") || errorMsg.includes("Permission denied")) {
+                          setToastMessage("Camera permission denied. Check browser settings.");
+                          console.warn("Camera permission denied.");
+                        } else if (errorMsg.includes("NotFoundError") || errorMsg.includes("Could not start")) {
+                          setToastMessage("Camera unavailable or already in use by another app.");
+                          console.warn("Camera device unavailable.");
+                        } else {
+                          setToastMessage("Failed to toggle camera. Try again.");
+                          console.warn("Camera toggle failed:", errorMsg);
+                        }
+                        setTimeout(() => setToastMessage(null), 4000);
+                      }
                     } catch (err: any) {
-                      console.warn("Camera toggle failed:", err?.message || err);
+                      console.error("Outer camera toggle error:", err?.message || err);
                     }
                   }}
                   icon={localParticipant.isCameraEnabled ? <VideoIcon size={isMobile ? 18 : 22} /> : <VideoOff size={isMobile ? 18 : 22} />}
