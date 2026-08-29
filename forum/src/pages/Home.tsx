@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Video, Keyboard, Plus, Info, Sparkles, Shield, 
+  Video, Keyboard, Plus, Info, Shield, 
   Workflow, PenTool, FileText, Check, ChevronDown, 
   ChevronUp, Globe, Users, Clock, Lock, Monitor,
-  X, User, ArrowRight, UserCheck, LogIn, Radio
+  X, User, ArrowRight, UserCheck, LogIn
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -169,12 +169,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#f4f5f6] flex flex-col font-sans selection:bg-blue-100 selection:text-accent-blue text-gray-800">
-      {/* Top Banner for announcement */}
-      <div className="bg-gray-900 text-gray-100 text-center py-2.5 px-4 text-xs font-semibold tracking-wide flex items-center justify-center gap-2">
-        <Sparkles size={14} className="text-[#4285f4]" />
-        <span>Introducing Forum 2.5: Zero-latency interactive whiteboarding is now public!</span>
-      </div>
-
       {/* Header Navigation */}
       <header className={`sticky top-0 z-50 backdrop-blur-md bg-[#f4f5f6]/80 px-6 lg:px-16 py-4 flex items-center justify-between border-b border-gray-200/10 transition-transform duration-300 ${isVisible ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className="flex items-center gap-10">
@@ -233,17 +227,12 @@ export default function Home() {
       {/* Hero Section */}
       <section className="relative overflow-hidden py-16 lg:py-24 px-6 lg:px-16 max-w-7xl mx-auto w-full flex flex-col lg:flex-row items-center gap-16">
         <div className="flex-1 space-y-8 max-w-xl text-center lg:text-left">
-          <div className="flex items-center gap-2 text-xs font-bold text-gray-500 justify-center lg:justify-start">
-            <Shield size={14} className="text-accent-blue" />
-            <span>Secure Enterprise Video Rooms & Interactive Tools</span>
-          </div>
-
           <div className="space-y-4">
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-gray-900 leading-tight tracking-tight">
               Video calls and meetings for <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent-blue to-indigo-600">everyone</span>
             </h1>
             <p className="text-lg text-gray-500 leading-relaxed font-medium">
-              Create, connect, whiteboard, and record real-time team meetings from anywhere. Discover a seamless video workspace built with robust security, fluid screen sharing, and automated calendar synchronization.
+              Create, connect, whiteboard, and take shared notes from anywhere. Discover a simple, secure video workspace designed for effortless collaboration.
             </p>
           </div>
 
@@ -319,21 +308,6 @@ export default function Home() {
               </div>
             </div>
           )}
-
-          <div className="grid grid-cols-3 gap-6 pt-6 border-t border-gray-200/50 text-center lg:text-left">
-            <div>
-              <p className="text-2xl font-black text-gray-900">99.99%</p>
-              <p className="text-xs font-bold text-gray-400 mt-1 uppercase tracking-wider">Stream Uptime</p>
-            </div>
-            <div>
-              <p className="text-2xl font-black text-gray-900">E2EE</p>
-              <p className="text-xs font-bold text-gray-400 mt-1 uppercase tracking-wider">E-2-E Encryption</p>
-            </div>
-            <div>
-              <p className="text-2xl font-black text-gray-900">1-Click</p>
-              <p className="text-xs font-bold text-gray-400 mt-1 uppercase tracking-wider">Guest Join Limit</p>
-            </div>
-          </div>
         </div>
 
         {/* Hero Illustration Block */}

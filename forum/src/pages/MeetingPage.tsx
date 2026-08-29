@@ -20,7 +20,7 @@ import {
   useMediaDevices,
 } from '@livekit/components-react';
 import { isMobileBrowser } from '@livekit/components-core';
-import { Track, ConnectionState, Participant, VideoPresets, ScreenSharePresets, LocalVideoTrack } from 'livekit-client';
+import { Track, ConnectionState, Participant, VideoPresets, AudioPresets, ScreenSharePresets, LocalVideoTrack } from 'livekit-client';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Hand, 
   MonitorUp, MonitorOff, MoreVertical, Info, Users, MessageSquare,
@@ -28,11 +28,14 @@ import {
   Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight, ArrowLeft,
   Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
   ChevronUp, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard,
-  Radio, Maximize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download
+  Radio, Maximize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download,
+  SwitchCamera, Wand2, SlidersHorizontal
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { SharedFileItem, SendFileDialog, SharedFileCard, FilesPanel } from '../components/FileTransfer';
 import SettingsModal from '../components/SettingsModal';
+import { useDeviceManager } from '../hooks/useDeviceManager';
+import { AIVideoEnhanceOptions, DEFAULT_AI_VIDEO_ENHANCE, getAIVideoFilterStyle } from '../utils/mediaEnhancer';
 import { useAuth } from '../context/AuthContext';
 import { db, auth, komuDb, komuAuth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -62,10 +65,14 @@ export default function MeetingPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Device Detection for Pre-join
-  const videoDevices = useMediaDevices({ kind: 'videoinput' });
-  const audioDevices = useMediaDevices({ kind: 'audioinput' });
-  const speakerDevices = useMediaDevices({ kind: 'audiooutput' });
+  // Enhanced Device Detection with Front/Back Camera Support
+  const { 
+    videoDevices, 
+    audioDevices, 
+    speakerDevices, 
+    facingMode: currentFacingMode,
+    refreshDevices 
+  } = useDeviceManager();
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -468,18 +475,41 @@ export default function MeetingPage() {
       token={token}
       serverUrl={serverUrl}
       connect={true}
+      options={{
+        adaptiveStream: false,
+        dynacast: false,
+        videoCaptureDefaults: {
+          resolution: VideoPresets.h1080.resolution,
+        },
+        publishDefaults: {
+          videoSimulcastLayers: [
+            VideoPresets.h1080,
+            VideoPresets.h720,
+            VideoPresets.h360
+          ],
+          videoEncoding: {
+            maxBitrate: 3_500_000,
+            maxFramerate: 30,
+          },
+          audioPreset: AudioPresets.musicHighQualityStereo,
+          dtx: false,
+          red: true,
+          stopMicTrackOnMute: false,
+        },
+        audioCaptureDefaults: {
+          autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+          channelCount: 2,
+          sampleRate: 48000,
+        }
+      }}
       onDisconnected={() => navigate('/')}
       className="h-full w-full"
     >
       <div className="flex flex-col h-full relative">
         <MeetingRoomHeader 
-          room={room || ""} 
           isRecording={isRecording} 
-          setIsRecording={setIsRecording} 
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          isKomuToolsOpen={isKomuToolsOpen}
-          setIsKomuToolsOpen={setIsKomuToolsOpen}
         />
         <MeetingRoomContent 
           room={room || ""} 
@@ -491,8 +521,6 @@ export default function MeetingPage() {
           initialCam={preJoinCam}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          isKomuToolsOpen={isKomuToolsOpen}
-          setIsKomuToolsOpen={setIsKomuToolsOpen}
           meetingDetails={meetingDetails}
         />
       </div>
@@ -501,115 +529,13 @@ export default function MeetingPage() {
   );
 }
 
-function MeetingRoomHeader({ room, isRecording, setIsRecording, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen }: { room: string, isRecording: boolean, setIsRecording: (v: boolean) => void, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void }) {
-  const [isAppsOpen, setIsAppsOpen] = useState(false);
-
-  const apps = [
-    { name: 'Search', url: 'https://komu-search.streamlit.app/', icon: <Search size={24} />, color: 'bg-blue-500' },
-    { name: 'Dashboard', url: 'https://komuthemedashboard.vercel.app/', icon: <LayoutDashboard size={24} />, color: 'bg-indigo-500' },
-    { name: 'Calendar', url: 'https://komucalendar.vercel.app/', icon: <img src="https://komuhost.vercel.app/calendarlogo.png" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />, color: 'bg-red-500' },
-    { name: 'Notes', url: 'https://komunotes.vercel.app/', icon: <FileText size={24} />, color: 'bg-yellow-500' },
-    { name: 'Forum', url: 'https://forum-bykomu.vercel.app/', icon: <img src="https://komuhost.vercel.app/favicon.ico" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />, color: 'bg-green-500' },
-  ];
-
+function MeetingRoomHeader({ isRecording }: { isRecording: boolean }) {
+  if (!isRecording) return null;
   return (
-    <header className="fixed top-3.5 left-4 right-4 sm:left-6 sm:right-6 flex items-center justify-between z-30 pointer-events-none">
-      <div className="flex items-center gap-3 pointer-events-auto">
-        <div className="relative">
-          <button 
-            onClick={() => setIsKomuToolsOpen(!isKomuToolsOpen)} 
-            className="inline-flex items-center gap-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 px-3.5 py-2 text-sm font-semibold text-white border border-white/15 shadow-xl backdrop-blur-md transition-all duration-200 ease-out cursor-pointer"
-          >
-            <Settings size={18} className="text-slate-300" />
-            <span>Tools</span>
-            <ChevronDown size={16} className={cn("transition-transform duration-200 text-slate-400", isKomuToolsOpen && "rotate-180")} />
-          </button>
-          <AnimatePresence>
-            {isKomuToolsOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                className="absolute top-[48px] left-0 z-[95] w-56 rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-slate-700 shadow-2xl p-2"
-              >
-                <button 
-                  onClick={() => { setActiveTab(activeTab === 'notes' ? null : 'notes'); setIsKomuToolsOpen(false); }}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-sm transition-colors cursor-pointer",
-                    activeTab === 'notes' ? "text-blue-400 bg-blue-600/10" : "text-white"
-                  )}
-                >
-                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", activeTab === 'notes' ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400")}>
-                    <FileText size={18} />
-                  </div>
-                  <span>Notes</span>
-                </button>
-                <button 
-                  onClick={() => { setActiveTab(activeTab === 'whiteboard' ? null : 'whiteboard'); setIsKomuToolsOpen(false); }}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-sm transition-colors mt-1 cursor-pointer",
-                    activeTab === 'whiteboard' ? "text-blue-400 bg-blue-600/10" : "text-white"
-                  )}
-                >
-                  <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", activeTab === 'whiteboard' ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400")}>
-                    <Monitor size={18} />
-                  </div>
-                  <span>Whiteboard & Workspace</span>
-                </button>
-                <div className="h-px bg-white/10 my-2" />
-                <div className="px-3 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Komu Workspace Tools</div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-      <div className="flex items-center gap-3 pointer-events-auto">
-        {isRecording && (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 text-red-400 rounded-full text-xs font-bold border border-red-500/30 backdrop-blur-md shadow-md">
-            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            <span>REC</span>
-          </div>
-        )}
-        <div className="relative">
-          <button 
-            onClick={() => setIsAppsOpen(!isAppsOpen)}
-            className="w-10 h-10 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-white/15 shadow-xl backdrop-blur-md flex items-center justify-center transition-all cursor-pointer"
-            title="Komu Apps"
-          >
-            <LayoutGrid size={20} />
-          </button>
-          
-          <AnimatePresence>
-            {isAppsOpen && (
-              <>
-                <div className="fixed inset-0 z-[90]" onClick={() => setIsAppsOpen(false)} />
-                <motion.div
-                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  className="absolute top-12 right-0 z-[100] w-[320px] bg-white rounded-3xl shadow-2xl border border-gray-100 p-6"
-                >
-                  <div className="grid grid-cols-3 gap-2">
-                    {apps.map((app) => (
-                      <a 
-                        key={app.name}
-                        href={app.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex flex-col items-center justify-center p-3 rounded-2xl hover:bg-gray-50 transition-all group"
-                      >
-                        <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-2 shadow-sm group-hover:shadow-md transition-shadow bg-gray-50 text-gray-600")}>
-                          {app.icon}
-                        </div>
-                        <span className="text-[11px] font-bold text-gray-600 group-hover:text-gray-900">{app.name}</span>
-                      </a>
-                    ))}
-                  </div>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
+    <header className="fixed top-3.5 left-4 z-30 pointer-events-none">
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 text-red-400 rounded-full text-xs font-bold border border-red-500/30 backdrop-blur-md shadow-md">
+        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+        <span>REC</span>
       </div>
     </header>
   );
@@ -666,7 +592,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam, activeTab, setActiveTab, isKomuToolsOpen, setIsKomuToolsOpen, meetingDetails }: { room: string, videoDevices: MediaDeviceInfo[], audioDevices: MediaDeviceInfo[], speakerDevices: MediaDeviceInfo[], initialBg: 'none' | 'blur' | 'image', initialMic: boolean, initialCam: boolean, activeTab: any, setActiveTab: (t: any) => void, isKomuToolsOpen: boolean, setIsKomuToolsOpen: (v: boolean) => void, meetingDetails: any }) {
+function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam, activeTab, setActiveTab, meetingDetails }: { room: string, videoDevices: any[], audioDevices: any[], speakerDevices: any[], initialBg: 'none' | 'blur' | 'image', initialMic: boolean, initialCam: boolean, activeTab: any, setActiveTab: (t: any) => void, meetingDetails: any }) {
   const navigate = useNavigate();
   const { user, loading, komuUser } = useAuth();
   const { localParticipant } = useLocalParticipant();
@@ -1074,11 +1000,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const lastFlushTimeRef = useRef<number>(0);
   const flushIntervalRef = useRef<any>(null);
 
-  // Settings
+  // Settings & Media Enhancements
   const [settingsCategory, setSettingsCategory] = useState<'video' | 'audio' | 'streaming' | 'general' | 'effects' | 'captions' | 'reactions'>('video');
   const [videoMirroring, setVideoMirroring] = useState(true);
   const [noiseCancellation, setNoiseCancellation] = useState(true);
   const [echoCancellation, setEchoCancellation] = useState(true);
+  const [aiDenoise, setAiDenoise] = useState(true);
+  const [hvacFilter, setHvacFilter] = useState(true);
+  const [vocalCompressor, setVocalCompressor] = useState(true);
+  const [aiVideoOptions, setAiVideoOptions] = useState<AIVideoEnhanceOptions>(DEFAULT_AI_VIDEO_ENHANCE);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showParticipantNames, setShowParticipantNames] = useState(true);
   const [autoGainControl, setAutoGainControl] = useState(true);
   const [showClock, setShowClock] = useState(true);
@@ -1089,6 +1020,23 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [reactions, setReactions] = useState<{ id: number, emoji: string, x: number }[]>([]);
   const [isReactionsMenuOpen, setIsReactionsMenuOpen] = useState(false);
+
+  const handleFlipCamera = async () => {
+    const nextFacing = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextFacing);
+    if (localParticipant?.isCameraEnabled) {
+      try {
+        await localParticipant.setCameraEnabled(true, {
+          facingMode: nextFacing,
+          resolution: VideoPresets.h1080.resolution,
+        });
+        setToastMessage(`Switched to ${nextFacing === 'user' ? 'Front' : 'Back'} Camera`);
+        setTimeout(() => setToastMessage(null), 2500);
+      } catch (err: any) {
+        console.warn("Failed to switch camera:", err);
+      }
+    }
+  };
 
   // Isolated Feed & Stream Monitor State
   interface FeedExportItem {
@@ -1114,6 +1062,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [streamProfile, setStreamProfile] = useState<'standard' | 'high'>('standard');
   const [copiedExportId, setCopiedExportId] = useState<string | null>(null);
+
+  const localAIVideoFilter = useMemo(() => {
+    return getAIVideoFilterStyle(aiVideoOptions);
+  }, [aiVideoOptions]);
   const [liveFps, setLiveFps] = useState<number>(30);
   const [liveResolution, setLiveResolution] = useState<string>("1280 × 720");
   const [liveBitrate, setLiveBitrate] = useState<string>("1.8 Mbps");
@@ -1677,28 +1629,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   // Apply Device Changes & Settings
   useEffect(() => {
-    if (!localParticipant?.isCameraEnabled || !selectedVideoId) return;
-    
-    // Verify device exists in available devices before switching
-    const deviceExists = videoDevices.some(d => d.deviceId === selectedVideoId);
-    if (!deviceExists) {
-      console.warn("Selected video device not found:", selectedVideoId);
-      return;
+    if (selectedVideoId && localParticipant?.isCameraEnabled) {
+      localParticipant.setCameraEnabled(true, { deviceId: selectedVideoId }).catch(err => {
+        console.warn("Could not switch video device:", err?.message || err);
+      });
     }
-
-    localParticipant.setCameraEnabled(true, { deviceId: selectedVideoId }).catch(err => {
-      const errorMsg = err?.message || String(err);
-      if (errorMsg.includes("Could not start") || errorMsg.includes("NotFoundError")) {
-        console.warn("Video device unavailable or already in use:", selectedVideoId);
-        // Reset to first available device
-        if (videoDevices.length > 0) {
-          setSelectedVideoId(videoDevices[0].deviceId);
-        }
-      } else {
-        console.warn("Could not switch video device:", errorMsg);
-      }
-    });
-  }, [selectedVideoId, localParticipant, videoDevices]);
+  }, [selectedVideoId, localParticipant]);
 
   useEffect(() => {
     if (localParticipant) {
@@ -2015,7 +1951,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         isToolbarCollapsed ? "pb-3 sm:pb-4" : "pb-[96px]"
       )}>
         {/* Click Outside Backdrop for Dropdowns */}
-        {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen || isKomuToolsOpen) && (
+        {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen) && (
           <div 
             className="fixed inset-0 z-[65]" 
             onClick={() => {
@@ -2023,7 +1959,6 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               setIsCamMenuOpen(false);
               setIsReactionsMenuOpen(false);
               setIsMoreMenuOpen(false);
-              setIsKomuToolsOpen(false);
             }} 
           />
         )}
@@ -2045,6 +1980,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       onTogglePin={() => togglePin(t.participant.identity)}
                       isPinned={pinnedIdentities.has(t.participant.identity)}
                       mirror={t.participant.isLocal && videoMirroring}
+                      aiVideoFilter={t.participant.isLocal ? localAIVideoFilter : undefined}
                       showName={showParticipantNames}
                       onContextMenu={(e: any) => handleTileContextMenu(e, t)}
                       onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
@@ -2066,6 +2002,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onTogglePin={() => togglePin(focusTrack.participant.identity)}
                     isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
                     mirror={focusTrack.participant.isLocal && videoMirroring}
+                    aiVideoFilter={focusTrack.participant.isLocal ? localAIVideoFilter : undefined}
                     showName={showParticipantNames}
                     isFocal
                     onContextMenu={(e: any) => handleTileContextMenu(e, focusTrack)}
@@ -2087,6 +2024,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   raisedHands={raisedHands} 
                   isPinned={pinnedIdentities.has(focusTrack.participant.identity)}
                   onTogglePin={() => togglePin(focusTrack.participant.identity)}
+                  mirror={focusTrack.participant.isLocal && videoMirroring}
+                  aiVideoFilter={focusTrack.participant.isLocal ? localAIVideoFilter : undefined}
                   showName={showParticipantNames}
                   isFocal
                   onContextMenu={(e: any) => handleTileContextMenu(e, focusTrack)}
@@ -2103,6 +2042,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       raisedHands={raisedHands}
                       onTogglePin={() => togglePin(t.participant.identity)}
                       isPinned={pinnedIdentities.has(t.participant.identity)}
+                      mirror={t.participant.isLocal && videoMirroring}
+                      aiVideoFilter={t.participant.isLocal ? localAIVideoFilter : undefined}
                       showName={showParticipantNames}
                       onContextMenu={(e: any) => handleTileContextMenu(e, t)}
                       onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
@@ -2125,6 +2066,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onTogglePin={() => togglePin(mobilePrimaryTrack.participant.identity)}
                     isPinned={pinnedIdentities.has(mobilePrimaryTrack.participant.identity)}
                     mirror={mobilePrimaryTrack.participant.isLocal && videoMirroring}
+                    aiVideoFilter={mobilePrimaryTrack.participant.isLocal ? localAIVideoFilter : undefined}
                     showName={showParticipantNames}
                     isFocal
                     onContextMenu={(e: any) => handleTileContextMenu(e, mobilePrimaryTrack)}
@@ -2148,6 +2090,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       onTogglePin={() => togglePin(mobileSecondaryTrack.participant.identity)}
                       isPinned={pinnedIdentities.has(mobileSecondaryTrack.participant.identity)}
                       mirror={mobileSecondaryTrack.participant.isLocal && videoMirroring}
+                      aiVideoFilter={mobileSecondaryTrack.participant.isLocal ? localAIVideoFilter : undefined}
                       showName={showParticipantNames}
                       onContextMenu={(e: any) => handleTileContextMenu(e, mobileSecondaryTrack)}
                       onCopyIsolatedFeed={() => copyIsolatedFeedLink(mobileSecondaryTrack.participant)}
@@ -2175,6 +2118,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onTogglePin={() => togglePin(visibleTracks[0].participant.identity)}
                     isPinned={pinnedIdentities.has(visibleTracks[0].participant.identity)}
                     mirror={visibleTracks[0].participant.isLocal && videoMirroring}
+                    aiVideoFilter={visibleTracks[0].participant.isLocal ? localAIVideoFilter : undefined}
                     showName={showParticipantNames}
                     onContextMenu={(e: any) => handleTileContextMenu(e, visibleTracks[0])}
                     onCopyIsolatedFeed={() => copyIsolatedFeedLink(visibleTracks[0].participant)}
@@ -2202,6 +2146,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onTogglePin={() => togglePin(t.participant.identity)}
                     isPinned={pinnedIdentities.has(t.participant.identity)}
                     mirror={t.participant.isLocal && videoMirroring}
+                    aiVideoFilter={t.participant.isLocal ? localAIVideoFilter : undefined}
                     showName={showParticipantNames}
                     onContextMenu={(e: any) => handleTileContextMenu(e, t)}
                     onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
@@ -2517,484 +2462,64 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           )}
         </AnimatePresence>
 
-        {/* Settings Central Modal (Google Meet Style) */}
-        <AnimatePresence mode="wait">
-          {activeTab === 'settings' && (
-            <motion.div
-              key="settings-modal"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            >
-              <div className="absolute inset-0" onClick={() => setActiveTab(null)} />
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="relative w-full max-w-3xl h-[600px] overflow-hidden rounded-[8px] bg-white shadow-2xl flex flex-col"
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 px-6 border-b border-gray-200">
-                  <h2 className="text-xl font-normal text-gray-800">Settings</h2>
-                  <button 
-                    onClick={() => setActiveTab(null)}
-                    className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
-                  >
-                    <X size={24} strokeWidth={1.5} />
-                  </button>
-                </div>
-
-                <div className="flex flex-1 min-h-0 bg-white">
-                  {/* Left Sidebar */}
-                  <nav className="w-[240px] py-4 bg-white border-r border-gray-100">
-                    {[
-                      { id: 'audio', label: 'Audio', icon: Mic },
-                      { id: 'video', label: 'Video', icon: VideoIcon },
-                      { id: 'streaming', label: 'Streaming Feed', icon: Radio },
-                      { id: 'general', label: 'General', icon: Settings },
-                      { id: 'captions', label: 'Captions', icon: MessageSquare },
-                      { id: 'reactions', label: 'Reactions', icon: Smile },
-                      { id: 'effects', label: 'Effects', icon: Sparkles }
-                    ].map(cat => (
-                      <button
-                        key={cat.id}
-                        onClick={() => setSettingsCategory(cat.id as any)}
-                        className={cn(
-                          "w-full flex items-center gap-4 px-6 py-3.5 text-[14px] font-medium transition-all relative text-left",
-                          settingsCategory === cat.id 
-                            ? "text-[#1a73e8] bg-[#e8f0fe] rounded-r-full" 
-                            : "text-[#5f6368] hover:bg-gray-50"
-                        )}
-                      >
-                        <cat.icon size={19} strokeWidth={settingsCategory === cat.id ? 2.5 : 1.5} className="shrink-0" />
-                        <span className="truncate">{cat.label}</span>
-                        {settingsCategory === cat.id && (
-                          <div className="absolute left-0 top-0 bottom-0 w-[4px] bg-[#1a73e8]" />
-                        )}
-                      </button>
-                    ))}
-                  </nav>
-
-                  {/* Main Content */}
-                  <div className="flex-1 overflow-y-auto p-8 custom-scroll">
-                    {/* Streaming Feed Settings */}
-                    {settingsCategory === 'streaming' && (
-                      <div className="max-w-xl space-y-6">
-                        {/* Status Header */}
-                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200/80">
-                          <div className="space-y-0.5">
-                            <h4 className="text-sm font-semibold text-gray-900">Streaming Feed Status</h4>
-                            <p className="text-xs text-gray-500">
-                              {activeFeedCount > 0 
-                                ? `${activeFeedCount} active isolated OBS feed source${activeFeedCount > 1 ? 's' : ''}` 
-                                : 'No active isolated feeds currently exported'}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-200 text-xs font-medium shrink-0">
-                            <span className={cn("w-2 h-2 rounded-full", activeFeedCount > 0 ? "bg-emerald-500" : "bg-gray-400")} />
-                            <span className={cn(activeFeedCount > 0 ? "text-emerald-700 font-semibold" : "text-gray-600")}>
-                              {activeFeedCount > 0 ? 'Status: Streaming Feed Active' : 'Status: Inactive'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Outbound Feed Preview & Telemetry Panel */}
-                        <section className="space-y-3.5">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-900">My Outbound Feed</h4>
-                              <p className="text-xs text-gray-500">Live camera stream monitoring and encoder statistics</p>
-                            </div>
-                            <span className="text-[11px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">WebRTC Encoded</span>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 items-stretch">
-                            {/* Miniature Preview Box */}
-                            <div className="relative aspect-video bg-slate-950 rounded-xl overflow-hidden border border-gray-200 flex items-center justify-center">
-                              {localParticipant.isCameraEnabled ? (
-                                <VideoTrack
-                                  trackRef={{
-                                    participant: localParticipant,
-                                    source: Track.Source.Camera,
-                                    publication: localParticipant.getTrackPublication(Track.Source.Camera),
-                                  } as any}
-                                  className={cn("w-full h-full object-cover", videoMirroring ? "scale-x-[-1]" : "")}
-                                />
-                              ) : (
-                                <div className="flex flex-col items-center justify-center text-slate-500 gap-1.5 p-4 text-center">
-                                  <VideoOff size={22} />
-                                  <span className="text-xs">Camera is disabled</span>
-                                </div>
-                              )}
-                              <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/75 rounded text-[10px] font-mono text-white flex items-center gap-1.5 border border-white/10">
-                                <span className={cn("w-1.5 h-1.5 rounded-full", localParticipant.isCameraEnabled ? "bg-emerald-400" : "bg-gray-400")} />
-                                <span>{localParticipant.isCameraEnabled ? "LIVE OUTBOUND" : "OFFLINE"}</span>
-                              </div>
-                            </div>
-
-                            {/* Telemetry Metrics */}
-                            <div className="grid grid-cols-2 gap-2">
-                              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200/70 flex flex-col justify-between">
-                                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Resolution</span>
-                                <span className="text-xs font-semibold text-gray-900 font-mono mt-1">{liveResolution}</span>
-                              </div>
-                              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200/70 flex flex-col justify-between">
-                                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Framerate</span>
-                                <span className="text-xs font-semibold text-gray-900 font-mono mt-1">{liveFps} FPS</span>
-                              </div>
-                              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200/70 flex flex-col justify-between">
-                                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Bitrate</span>
-                                <span className="text-xs font-semibold text-gray-900 font-mono mt-1">{liveBitrate}</span>
-                              </div>
-                              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200/70 flex flex-col justify-between">
-                                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">OBS Latency</span>
-                                <span className="text-xs font-semibold text-emerald-700 font-mono mt-1">&lt; 120ms</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Profile Toggle */}
-                          <div className="p-3.5 bg-gray-50 rounded-xl border border-gray-200/70 flex items-center justify-between">
-                            <div className="space-y-0.5 pr-4">
-                              <span className="text-xs font-semibold text-gray-800">High-Performance Streaming Profile</span>
-                              <p className="text-[11px] text-gray-500">Target 1080p@60fps (~3.5 Mbps) for crisp production captures</p>
-                            </div>
-                            <div 
-                              className={cn("w-11 h-6 rounded-full relative cursor-pointer transition-colors shrink-0", streamProfile === 'high' ? "bg-blue-600" : "bg-gray-300")}
-                              onClick={() => setStreamProfile(streamProfile === 'high' ? 'standard' : 'high')}
-                            >
-                              <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm", streamProfile === 'high' ? "left-6" : "left-1")} />
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Active Feed Exports */}
-                        <section className="space-y-3 pt-3 border-t border-gray-100">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="text-sm font-semibold text-gray-900">Active Isolated Feed Exports</h4>
-                              <p className="text-xs text-gray-500">Tokenized OBS Browser Source links generated for this meeting</p>
-                            </div>
-                            {feedExports.length > 0 && (
-                              <button
-                                onClick={() => copyIsolatedFeedLink(localParticipant)}
-                                className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
-                              >
-                                + Export My Feed
-                              </button>
-                            )}
-                          </div>
-
-                          {feedExports.length === 0 ? (
-                            <div className="p-5 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center space-y-2">
-                              <Radio className="mx-auto text-gray-400" size={22} />
-                              <p className="text-xs font-medium text-gray-700">No isolated feed links generated yet</p>
-                              <p className="text-[11px] text-gray-500 max-w-sm mx-auto">
-                                Right-click any participant's video tile in the call and click <span className="font-semibold text-gray-700">"Copy Isolated Feed Link"</span> to generate a dedicated OBS link.
-                              </p>
-                              <button
-                                onClick={() => copyIsolatedFeedLink(localParticipant)}
-                                className="mt-1 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-lg text-xs font-medium transition-colors shadow-sm inline-flex items-center gap-1.5"
-                              >
-                                <Radio size={13} className="text-blue-600" />
-                                <span>Export My Feed Link for OBS</span>
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-2 max-h-48 overflow-y-auto custom-scroll pr-1">
-                              {feedExports.map((item) => (
-                                <div
-                                  key={item.id}
-                                  className={cn(
-                                    "p-3 rounded-xl border flex items-center justify-between gap-3 text-xs transition-colors",
-                                    item.active !== false ? "bg-white border-gray-200/80" : "bg-gray-50 border-gray-200/50 opacity-60"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
-                                      {item.participantName?.charAt(0).toUpperCase() || 'P'}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="font-semibold text-gray-800 truncate">{item.participantName}</span>
-                                        <span className={cn("px-1.5 py-0.2 rounded text-[10px] font-medium", item.active !== false ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-600")}>
-                                          {item.active !== false ? 'Active' : 'Revoked'}
-                                        </span>
-                                      </div>
-                                      <span className="text-[11px] text-gray-400 font-mono truncate block">
-                                        {item.token}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    {item.active !== false ? (
-                                      <>
-                                        <button
-                                          onClick={() => copyExportLinkAgain(item)}
-                                          className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors flex items-center gap-1"
-                                          title="Copy feed URL again"
-                                        >
-                                          {copiedExportId === item.id ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
-                                          <span>{copiedExportId === item.id ? 'Copied' : 'Copy'}</span>
-                                        </button>
-                                        <button
-                                          onClick={() => revokeExportToken(item.id)}
-                                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                          title="Revoke Token"
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <span className="text-[11px] text-gray-400 italic">Deactivated</span>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </section>
-                      </div>
-                    )}
-                    {/* Audio Settings */}
-                    {settingsCategory === 'audio' && (
-                      <div className="max-w-md space-y-10">
-                        <section className="space-y-4">
-                          <label className="text-sm font-medium text-[#1a73e8] block">Microphone</label>
-                          <div className="relative">
-                            <select 
-                              value={selectedAudioId || audioDevices[0]?.deviceId}
-                              onChange={(e) => setSelectedAudioId(e.target.value)}
-                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] text-gray-900 appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
-                            >
-                              {audioDevices.map(device => (
-                                <option key={device.deviceId} value={device.deviceId} className="text-gray-900">{device.label}</option>
-                              ))}
-                            </select>
-                            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
-                          </div>
-                          <div className="flex items-center justify-between py-2 border-t border-gray-100 pt-4">
-                             <div className="flex flex-col">
-                                <span className="text-[14px] text-gray-700">Noise cancellation</span>
-                                <span className="text-[12px] text-gray-500">Filters out background noise</span>
-                             </div>
-                             <div 
-                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", noiseCancellation ? "bg-[#1a73e8]" : "bg-gray-300")}
-                               onClick={() => setNoiseCancellation(!noiseCancellation)}
-                             >
-                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", noiseCancellation ? "left-7" : "left-1")} />
-                             </div>
-                          </div>
-                        </section>
-
-                        <section className="space-y-4">
-                          <label className="text-sm font-medium text-[#1a73e8] block">Speaker</label>
-                          <div className="flex gap-4">
-                            <div className="relative flex-1">
-                              <select 
-                                value={selectedSpeakerId || speakerDevices[0]?.deviceId}
-                                onChange={(e) => setSelectedSpeakerId(e.target.value)}
-                                className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] text-gray-900 appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
-                              >
-                                {speakerDevices.map(device => (
-                                  <option key={device.deviceId} value={device.deviceId} className="text-gray-900">{device.label}</option>
-                                ))}
-                              </select>
-                              <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
-                            </div>
-                            <button 
-                              onClick={() => {
-                                const audio = new Audio('https://www.soundjay.com/buttons/beep-01a.mp3');
-                                if (selectedSpeakerId) (audio as any).setSinkId?.(selectedSpeakerId);
-                                audio.play();
-                              }}
-                              className="text-[#1a73e8] text-[14px] font-medium hover:bg-blue-50 px-4 py-2 rounded-md transition-all"
-                            >
-                              Test
-                            </button>
-                          </div>
-                        </section>
-                      </div>
-                    )}
-
-                    {/* Video Settings */}
-                    {settingsCategory === 'video' && (
-                      <div className="max-w-md space-y-10">
-                         <section className="space-y-4">
-                          <label className="text-sm font-medium text-[#1a73e8] block">Camera</label>
-                          <div className="relative">
-                            <select 
-                              value={selectedVideoId || videoDevices[0]?.deviceId}
-                              onChange={(e) => setSelectedVideoId(e.target.value)}
-                              className="w-full h-14 bg-white border border-gray-300 rounded-md px-4 pr-10 text-[14px] text-gray-900 appearance-none cursor-pointer focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none"
-                            >
-                              {videoDevices.map(device => (
-                                <option key={device.deviceId} value={device.deviceId} className="text-gray-900 bg-white">
-                                  {device.label || `Camera ${device.deviceId.slice(0, 4)}`}
-                                </option>
-                              ))}
-                            </select>
-                            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={20} />
-                          </div>
-                        </section>
-                        <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center border border-gray-200">
-                           <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center text-gray-300">
-                             <VideoIcon size={32} strokeWidth={1} />
-                           </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Effects Settings */}
-                    {settingsCategory === 'effects' && (
-                      <div className="space-y-8">
-                        <div>
-                          <label className="text-sm font-medium text-[#1a73e8] mb-4 block">Backgrounds</label>
-                          <div className="grid grid-cols-3 gap-4">
-                            <button 
-                              onClick={() => setSelectedBg('none')}
-                              className={cn(
-                                "flex flex-col items-center justify-center gap-2 p-4 rounded-lg border transition-all",
-                                selectedBg === 'none' ? "bg-[#e8f0fe] border-[#1a73e8] text-[#1a73e8]" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
-                              )}
-                            >
-                              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                                <X size={20} />
-                              </div>
-                              <span className="text-[12px] font-medium">None</span>
-                            </button>
-                            
-                            <button 
-                              onClick={() => {
-                                fileInputRef.current?.click();
-                              }}
-                              className="flex flex-col items-center justify-center gap-2 p-4 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all"
-                            >
-                              <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-[#1a73e8]">
-                                <Monitor size={20} />
-                              </div>
-                              <span className="text-[12px] font-medium">Upload Image</span>
-                              <input 
-                                type="file" 
-                                ref={fileInputRef} 
-                                className="hidden" 
-                                accept="image/*"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) {
-                                    const url = URL.createObjectURL(file);
-                                    setCustomBgImage(url);
-                                    setSelectedBg('image');
-                                  }
-                                }}
-                              />
-                            </button>
-
-                            <button 
-                              onClick={() => setSelectedBg('blur')}
-                              className={cn(
-                                "flex flex-col items-center justify-center gap-2 p-4 rounded-lg border transition-all",
-                                selectedBg === 'blur' ? "bg-[#e8f0fe] border-[#1a73e8] text-[#1a73e8]" : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
-                              )}
-                            >
-                              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center bg-gradient-to-tr from-gray-200 to-gray-50 blur-[2px]" />
-                              <span className="text-[12px] font-medium">Blur</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="space-y-4">
-                          <label className="text-[12px] font-medium text-gray-500">Preset backgrounds</label>
-                          <div className="grid grid-cols-4 gap-3">
-                            {bgImages.map(img => (
-                              <button 
-                                key={img.id}
-                                onClick={() => {
-                                  setSelectedBg('image');
-                                  setSelectedBgImage(img.url);
-                                  setCustomBgImage(null);
-                                }}
-                                className={cn(
-                                  "relative aspect-video rounded-md overflow-hidden border-2 transition-all",
-                                  selectedBg === 'image' && selectedBgImage === img.url && !customBgImage ? "border-[#1a73e8] scale-105 shadow-md" : "border-transparent hover:border-gray-200"
-                                )}
-                              >
-                                <img src={img.url} alt={img.label} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Captions Settings */}
-                    {settingsCategory === 'captions' && (
-                      <div className="max-w-md space-y-6">
-                        <div className="p-6 bg-[#f8f9fa] rounded-xl flex items-center justify-between">
-                           <div className="space-y-1">
-                             <h4 className="text-[14px] font-medium text-gray-800">Live Captions</h4>
-                             <p className="text-[12px] text-gray-500">Show what participants are saying on screen</p>
-                           </div>
-                           <div 
-                             className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", isCaptionsEnabled ? "bg-[#1a73e8]" : "bg-gray-300")}
-                             onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
-                           >
-                              <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all", isCaptionsEnabled ? "left-7" : "left-1")} />
-                           </div>
-                        </div>
-                        <div className="p-4 border border-gray-100 rounded-lg text-xs text-gray-500 leading-relaxed bg-white">
-                           Note: Client-side captions use the Web Speech API. For best results, use a modern browser like Chrome or Edge.
-                        </div>
-                      </div>
-                    )}
-
-                    {/* General Settings */}
-                    {settingsCategory === 'general' && (
-                      <div className="max-w-md space-y-8">
-                         <div className="flex items-center justify-between py-2 border-b border-gray-100 pb-6">
-                             <div className="flex flex-col">
-                                <span className="text-[14px] font-medium text-gray-800">Waiting Room</span>
-                                <span className="text-[12px] text-gray-500">New participants must be admitted by host</span>
-                             </div>
-                             <div 
-                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", lobbyEnabled ? "bg-blue-600 shadow-inner" : "bg-gray-200")}
-                               onClick={async (e) => {
-                                 e.stopPropagation();
-                                 if (!isHost || !room) return;
-                                 const next = !lobbyEnabled;
-                                 setLobbyEnabled(next);
-                                 try {
-                                   await updateDoc(doc(db, 'rooms', room), { lobby: next });
-                                 } catch (err) {
-                                   console.error("Failed to update lobby setting:", err);
-                                 }
-                               }}
-                             >
-                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm", lobbyEnabled ? "left-7" : "left-1")} />
-                             </div>
-                          </div>
-                         <div className="flex items-center justify-between py-2">
-                             <div className="flex flex-col">
-                                <span className="text-[14px] font-medium text-gray-800">Show current time</span>
-                                <span className="text-[12px] text-gray-500">Display Clock on the bottom bar</span>
-                             </div>
-                             <div 
-                               className={cn("w-12 h-6 rounded-full relative cursor-pointer transition-all", showClock ? "bg-blue-600 shadow-inner" : "bg-gray-200")}
-                               onClick={() => setShowClock(!showClock)}
-                             >
-                                <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm", showClock ? "left-7" : "left-1")} />
-                             </div>
-                          </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Settings Central Modal with Full Mobile Optimization, Category Navigation & Custom Dropdowns */}
+        <SettingsModal
+          isOpen={activeTab === 'settings'}
+          onClose={() => setActiveTab(null)}
+          isMobile={isMobile}
+          localParticipant={localParticipant}
+          audioDevices={audioDevices as any}
+          speakerDevices={speakerDevices as any}
+          videoDevices={videoDevices as any}
+          selectedAudioId={selectedAudioId}
+          setSelectedAudioId={setSelectedAudioId}
+          selectedSpeakerId={selectedSpeakerId}
+          setSelectedSpeakerId={setSelectedSpeakerId}
+          selectedVideoId={selectedVideoId}
+          setSelectedVideoId={setSelectedVideoId}
+          noiseCancellation={noiseCancellation}
+          setNoiseCancellation={setNoiseCancellation}
+          echoCancellation={echoCancellation}
+          setEchoCancellation={setEchoCancellation}
+          aiDenoise={aiDenoise}
+          setAiDenoise={setAiDenoise}
+          hvacFilter={hvacFilter}
+          setHvacFilter={setHvacFilter}
+          vocalCompressor={vocalCompressor}
+          setVocalCompressor={setVocalCompressor}
+          videoMirroring={videoMirroring}
+          setVideoMirroring={setVideoMirroring}
+          aiVideoOptions={aiVideoOptions}
+          setAiVideoOptions={setAiVideoOptions}
+          onFlipCamera={handleFlipCamera}
+          facingMode={facingMode}
+          showClock={showClock}
+          setShowClock={setShowClock}
+          lobbyEnabled={lobbyEnabled}
+          setLobbyEnabled={setLobbyEnabled}
+          isHost={isHost}
+          room={room}
+          isCaptionsEnabled={isCaptionsEnabled}
+          setIsCaptionsEnabled={setIsCaptionsEnabled}
+          selectedBg={selectedBg}
+          setSelectedBg={setSelectedBg}
+          selectedBgImage={selectedBgImage}
+          setSelectedBgImage={setSelectedBgImage}
+          customBgImage={customBgImage}
+          setCustomBgImage={setCustomBgImage}
+          bgImages={bgImages}
+          activeFeedCount={activeFeedCount}
+          feedExports={feedExports}
+          streamProfile={streamProfile}
+          setStreamProfile={setStreamProfile}
+          liveResolution={liveResolution}
+          liveFps={liveFps}
+          liveBitrate={liveBitrate}
+          copyIsolatedFeedLink={copyIsolatedFeedLink}
+          copyExportLinkAgain={copyExportLinkAgain}
+          revokeExportToken={revokeExportToken}
+          copiedExportId={copiedExportId}
+        />
       </div>
 
       {/* Taskbar */}
@@ -3073,59 +2598,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               <div className="relative">
                 <ControlButton 
                   onClick={async () => {
-                    if (!localParticipant) return;
                     try {
                       const targetState = !localParticipant.isCameraEnabled;
-                      const previousState = localParticipant.isCameraEnabled;
-                      
-                      // If enabling camera, ensure device is available first
-                      if (targetState && videoDevices.length === 0) {
-                        console.warn("No camera devices available.");
-                        setToastMessage("No camera devices available. Please check your hardware.");
-                        setTimeout(() => setToastMessage(null), 4000);
-                        return;
-                      }
-                      
-                      try {
-                        // Use current device or first available device
-                        const deviceId = selectedVideoId && videoDevices.some(d => d.deviceId === selectedVideoId) 
-                          ? selectedVideoId 
-                          : videoDevices[0]?.deviceId;
-                        
-                        if (targetState && !deviceId) {
-                          console.warn("Cannot enable camera: no valid device selected.");
-                          return;
-                        }
-                        
-                        const options = targetState && deviceId ? { deviceId } : undefined;
-                        await localParticipant.setCameraEnabled(targetState, options);
-                        
-                        // Update device selection if enabling with specific device
-                        if (targetState && deviceId && deviceId !== selectedVideoId) {
-                          setSelectedVideoId(deviceId);
-                        }
-                        
-                        setIsCamEnabled(targetState);
-                        setToastMessage(targetState ? "Camera enabled" : "Camera disabled");
-                        setTimeout(() => setToastMessage(null), 2000);
-                      } catch (innerErr: any) {
-                        setIsCamEnabled(previousState);
-                        const errorMsg = innerErr?.message || String(innerErr);
-                        
-                        if (errorMsg.includes("NotAllowedError") || errorMsg.includes("Permission denied")) {
-                          setToastMessage("Camera permission denied. Check browser settings.");
-                          console.warn("Camera permission denied.");
-                        } else if (errorMsg.includes("NotFoundError") || errorMsg.includes("Could not start")) {
-                          setToastMessage("Camera unavailable or already in use by another app.");
-                          console.warn("Camera device unavailable.");
-                        } else {
-                          setToastMessage("Failed to toggle camera. Try again.");
-                          console.warn("Camera toggle failed:", errorMsg);
-                        }
-                        setTimeout(() => setToastMessage(null), 4000);
-                      }
+                      setIsCamEnabled(targetState);
+                      await localParticipant.setCameraEnabled(targetState);
                     } catch (err: any) {
-                      console.error("Outer camera toggle error:", err?.message || err);
+                      console.warn("Camera toggle failed:", err?.message || err);
                     }
                   }}
                   icon={localParticipant.isCameraEnabled ? <VideoIcon size={isMobile ? 18 : 22} /> : <VideoOff size={isMobile ? 18 : 22} />}
@@ -3165,24 +2643,20 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 </AnimatePresence>
               </div>
 
+              {isMobile && localParticipant.isCameraEnabled && (
+                <ControlButton 
+                  onClick={handleFlipCamera}
+                  icon={<SwitchCamera size={18} />}
+                  size="small"
+                  title={`Flip Camera (${facingMode === 'user' ? 'Front' : 'Back'})`}
+                />
+              )}
+
               <ControlButton 
                 active={isCaptionsEnabled} 
                 onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
                 size={isMobile ? "small" : "normal"}
-                icon={
-                  <div className="relative">
-                    <Languages size={isMobile ? 18 : 22} />
-                    {isCaptionsEnabled && (
-                      <motion.span 
-                        animate={{ opacity: [0.5, 1, 0.5], scale: [0.9, 1.1, 0.9] }}
-                        transition={{ repeat: Infinity, duration: 2 }}
-                        className="absolute -top-1.5 -right-1.5 px-1 bg-green-500 text-[8px] font-bold text-white rounded-md border border-slate-900 shadow-lg"
-                      >
-                        ON
-                      </motion.span>
-                    )}
-                  </div>
-                }
+                icon={<Languages size={isMobile ? 18 : 22} />}
                 highlight={isCaptionsEnabled}
                 title="Captions (c)"
               />
@@ -3213,6 +2687,26 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       active={isReactionsMenuOpen}
                       title="Reactions"
                     />
+                    <AnimatePresence>
+                      {isReactionsMenuOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[70] flex items-center gap-1"
+                        >
+                          {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
+                            <button 
+                              key={emoji}
+                              onClick={() => { sendReaction(emoji); setIsReactionsMenuOpen(false); }}
+                              className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-xl transition-all active:scale-90"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
                 
@@ -3230,7 +2724,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 w-72 sm:w-80 bg-slate-900/95 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/10 p-3 z-[70] max-h-[80vh] overflow-y-auto custom-scroll"
+                        className="absolute bottom-full mb-3 right-0 sm:left-1/2 sm:-translate-x-1/2 w-72 sm:w-80 max-w-[calc(100vw-24px)] bg-slate-900/95 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/10 p-3 z-[70] max-h-[80vh] overflow-y-auto custom-scroll"
                       >
                       {isMobile && (
                         <div className="p-2 grid grid-cols-4 gap-2 mb-3 border-b border-white/10 pb-3">
@@ -3619,7 +3113,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   );
 }
 
-function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, mirror, showName = true, isFocal, onSpotlight, onContextMenu, onCopyIsolatedFeed, onSendFile }: any) {
+function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, mirror, aiVideoFilter, showName = true, isFocal, onSpotlight, onContextMenu, onCopyIsolatedFeed, onSendFile }: any) {
   const isSpeaking = useIsSpeaking(trackRef?.participant);
   const isVideoOff = !trackRef?.publication || trackRef.publication.isMuted || !trackRef.publication.isEnabled;
   const isHandRaised = raisedHands?.[trackRef?.participant.identity];
@@ -3666,7 +3160,12 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
           )}
         </div>
       ) : (
-        <div className={cn("w-full h-full", mirror ? "scale-x-[-1]" : "")}>
+        <div 
+          className={cn("w-full h-full transition-all duration-200", mirror ? "scale-x-[-1]" : "")}
+          style={{
+            filter: aiVideoFilter || 'none'
+          }}
+        >
           <VideoTrack 
             trackRef={trackRef} 
             className={cn("w-full h-full bg-black/40", isFocal ? "object-contain" : "object-cover")}

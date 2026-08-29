@@ -316,19 +316,12 @@ export function SharedFileCard({ file }: { file: SharedFileItem }) {
 // Dedicated In-Call Files Panel
 interface FilesPanelProps {
   files: SharedFileItem[];
-  onOpenSendDialog: () => void;
+  onOpenSendDialog?: () => void;
 }
 
-export function FilesPanel({ files, onOpenSendDialog }: FilesPanelProps) {
+export function FilesPanel({ files }: FilesPanelProps) {
   return (
-    <div className="flex flex-col h-full space-y-3">
-      <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-        <div>
-          <h3 className="text-xs font-semibold text-gray-900 uppercase tracking-wider">Shared Files</h3>
-          <p className="text-[11px] text-gray-500">{files.length} {files.length === 1 ? 'file' : 'files'} in this call</p>
-        </div>
-      </div>
-
+    <div className="flex flex-col h-full space-y-2.5">
       <div className="flex-1 overflow-y-auto space-y-2.5 custom-scroll pr-1">
         {files.length === 0 ? (
           <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center p-6 space-y-3 bg-[#f8f9fa] rounded-2xl border border-gray-200">
@@ -336,33 +329,18 @@ export function FilesPanel({ files, onOpenSendDialog }: FilesPanelProps) {
               <Paperclip size={18} />
             </div>
             <div>
-              <p className="text-xs font-semibold text-gray-800">No files shared yet</p>
-              <p className="text-[11px] text-gray-500 mt-0.5 max-w-[200px]">
-                Send documents, images, or code to participants in this call.
+              <p className="text-xs font-semibold text-gray-800">No files shared in this call</p>
+              <p className="text-[11px] text-gray-500 mt-0.5 max-w-[220px]">
+                Received and shared files will appear here automatically.
               </p>
             </div>
-            <button
-              onClick={onOpenSendDialog}
-              className="mt-1 px-5 py-2 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 text-xs font-medium rounded-full transition-colors cursor-pointer shadow-xs"
-            >
-              Share file
-            </button>
           </div>
         ) : (
-          <>
+          <div className="space-y-2">
             {files.map(file => (
               <SharedFileCard key={file.id} file={file} />
             ))}
-            <div className="pt-2 flex justify-center">
-              <button
-                onClick={onOpenSendDialog}
-                className="px-5 py-2 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 text-xs font-medium rounded-full transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
-              >
-                <Paperclip size={14} />
-                <span>Share another file</span>
-              </button>
-            </div>
-          </>
+          </div>
         )}
       </div>
     </div>
