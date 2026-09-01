@@ -1,29 +1,48 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, CSSProperties } from 'react';
 import { TrackReferenceOrPlaceholder } from '@livekit/components-react';
 
 export interface FacePosition {
   x: number; // 0 to 100 percentage
   y: number; // 0 to 100 percentage
+  width?: number; // approx percentage
+  height?: number;
+}
+
+export interface FaceTrackingResult {
+  facePosition: FacePosition;
+  faceLuma: number; // 0 to 255
+  frameLuma: number; // 0 to 255
+  isFaceDark: boolean;
+  faceSpotlightActive: boolean;
+  faceSpotlightStyle: CSSProperties;
 }
 
 /**
- * Intelligent face tracking hook that detects the user's face in the video stream
- * and calculates the optimal CSS object-position (X%, Y%) to keep their face centered
- * when the video tile is cropped by container aspect ratios.
+ * Intelligent face tracking & targeted facial lighting hook.
+ * 1. Detects face position (X, Y) to keep video centered.
+ * 2. Samples face vs frame luminance in real-time.
+ * 3. Generates dynamic facial studio spotlight illumination when the face is in shadow or backlit.
  */
 export function useFaceTracking(
   trackRef?: TrackReferenceOrPlaceholder | null,
   enabled: boolean = true
-): FacePosition {
-  const [facePosition, setFacePosition] = useState<FacePosition>({ x: 50, y: 50 });
-  const currentPosRef = useRef<FacePosition>({ x: 50, y: 50 });
-  const targetPosRef = useRef<FacePosition>({ x: 50, y: 50 });
+): FaceTrackingResult {
+  const [facePosition, setFacePosition] = useState<FacePosition>({ x: 50, y: 50, width: 35, height: 40 });
+  const [faceLuma, setFaceLuma] = useState<number>(140);
+  const [frameLuma, setFrameLuma] = useState<number>(130);
+  const [spotlightIntensity, setSpotlightIntensity] = useState<number>(0);
+
+  const currentPosRef = useRef<FacePosition>({ x: 50, y: 50, width: 35, height: 40 });
+  const targetPosRef = useRef<FacePosition>({ x: 50, y: 50, width: 35, height: 40 });
+  const targetSpotlightRef = useRef<number>(0);
+  const currentSpotlightRef = useRef<number>(0);
   const animFrameRef = useRef<number | null>(null);
   const intervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!enabled || !trackRef?.publication?.track?.mediaStreamTrack) {
-      setFacePosition({ x: 50, y: 50 });
+      setFacePosition({ x: 50, y: 50, width: 35, height: 40 });
+      setSpotlightIntensity(0);
       return;
     }
 
@@ -34,13 +53,13 @@ export function useFaceTracking(
 
     let isDestroyed = false;
 
-    // Create a hidden video element for sampling
+    // Sampling video element
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
     video.autoplay = true;
-    
-    // Create an offscreen canvas for fast sampling (64x48)
+
+    // Fast sampling offscreen canvas (64x48)
     const canvas = document.createElement('canvas');
     const width = 64;
     const height = 48;
@@ -52,95 +71,95 @@ export function useFaceTracking(
     video.srcObject = stream;
     video.play().catch(() => {});
 
-    // Check for native FaceDetector support
-    let nativeDetector: any = null;
-    if (typeof window !== 'undefined' && 'FaceDetector' in window) {
-      try {
-        nativeDetector = new (window as any).FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
-      } catch {
-        nativeDetector = null;
-      }
-    }
-
-    // Detection loop running at ~8 FPS (120ms) to save CPU/battery while remaining responsive
+    // Detection loop running at ~8 FPS (125ms)
     const detectFace = async () => {
       if (isDestroyed || !video.videoWidth || !video.videoHeight || !ctx) return;
 
       try {
-        let detectedCenterX: number | null = null;
-        let detectedCenterY: number | null = null;
+        ctx.drawImage(video, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
 
-        if (nativeDetector) {
-          try {
-            const faces = await nativeDetector.detect(video);
-            if (faces && faces.length > 0) {
-              const face = faces[0].boundingBox;
-              detectedCenterX = ((face.x + face.width / 2) / video.videoWidth) * 100;
-              detectedCenterY = ((face.y + face.height / 2) / video.videoHeight) * 100;
-            }
-          } catch {
-            nativeDetector = null;
-          }
-        }
+        let sumX = 0;
+        let sumY = 0;
+        let totalSkinWeight = 0;
+        let totalFrameLuma = 0;
+        let facePixelLumaSum = 0;
+        let facePixelCount = 0;
 
-        // Fast centroid skin & feature fallback detector
-        if (detectedCenterX === null || detectedCenterY === null) {
-          ctx.drawImage(video, 0, 0, width, height);
-          const imageData = ctx.getImageData(0, 0, width, height);
-          const data = imageData.data;
+        const pixelCount = width * height;
 
-          let sumX = 0;
-          let sumY = 0;
-          let totalWeight = 0;
+        // 1. Scan pixels for human skin tones & calculate overall frame brightness
+        for (let y = 0; y < height; y++) {
+          const verticalWeight = y < height * 0.75 ? 1.2 : 0.6;
 
-          // Scan pixels for human skin tones & face features
-          for (let y = 0; y < height; y++) {
-            // Prioritize upper 65% of screen where faces naturally appear
-            const verticalWeight = y < height * 0.75 ? 1.2 : 0.6;
+          for (let x = 0; x < width; x++) {
+            const idx = (y * width + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
 
-            for (let x = 0; x < width; x++) {
-              const idx = (y * width + x) * 4;
-              const r = data[idx];
-              const g = data[idx + 1];
-              const b = data[idx + 2];
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            totalFrameLuma += lum;
 
-              // Skin chrominance model
-              const isSkin = 
-                r > 70 && 
-                g > 40 && 
-                b > 20 && 
-                r > g && 
-                r > b && 
-                (r - g) > 10 && 
-                (r - b) > 10 &&
-                Math.abs(r - g) < 120;
+            // Skin chrominance model
+            const isSkin =
+              r > 60 &&
+              g > 35 &&
+              b > 20 &&
+              r > g &&
+              r > b &&
+              (r - g) > 8 &&
+              (r - b) > 8 &&
+              Math.abs(r - g) < 130;
 
-              if (isSkin) {
-                const w = verticalWeight;
-                sumX += x * w;
-                sumY += y * w;
-                totalWeight += w;
-              }
+            if (isSkin) {
+              const w = verticalWeight;
+              sumX += x * w;
+              sumY += y * w;
+              totalSkinWeight += w;
+              facePixelLumaSum += lum;
+              facePixelCount++;
             }
           }
-
-          // If enough skin pixels were detected, calculate centroid
-          if (totalWeight > (width * height * 0.02)) {
-            const rawX = (sumX / totalWeight / width) * 100;
-            const rawY = (sumY / totalWeight / height) * 100;
-
-            // Clamp so we don't over-shift to the very extreme borders
-            detectedCenterX = Math.max(20, Math.min(80, rawX));
-            detectedCenterY = Math.max(15, Math.min(75, rawY));
-          }
         }
 
-        if (detectedCenterX !== null && detectedCenterY !== null) {
-          targetPosRef.current = {
-            x: detectedCenterX,
-            y: detectedCenterY
-          };
+        const avgFrameLuma = Math.round(totalFrameLuma / pixelCount);
+        setFrameLuma(avgFrameLuma);
+
+        let detectedCenterX = 50;
+        let detectedCenterY = 45;
+        let avgFaceLuma = avgFrameLuma;
+
+        if (totalSkinWeight > (pixelCount * 0.015)) {
+          const rawX = (sumX / totalSkinWeight / width) * 100;
+          const rawY = (sumY / totalSkinWeight / height) * 100;
+
+          detectedCenterX = Math.max(20, Math.min(80, rawX));
+          detectedCenterY = Math.max(15, Math.min(75, rawY));
+          avgFaceLuma = Math.round(facePixelLumaSum / Math.max(1, facePixelCount));
         }
+
+        setFaceLuma(avgFaceLuma);
+        targetPosRef.current = {
+          x: detectedCenterX,
+          y: detectedCenterY,
+          width: 36,
+          height: 42,
+        };
+
+        // If the user's face is dark (<130) or backlit (face is significantly darker than frame),
+        // activate the AI studio face illumination spotlight!
+        let intensity = 0;
+        if (avgFaceLuma < 125) {
+          // Low light face boost: up to 0.45 intensity
+          intensity = Math.min(0.48, ((125 - avgFaceLuma) / 100) * 0.55 + 0.12);
+        } else if (avgFrameLuma > avgFaceLuma + 18) {
+          // Backlit face lift
+          intensity = Math.min(0.42, ((avgFrameLuma - avgFaceLuma) / 80) * 0.45);
+        }
+
+        targetSpotlightRef.current = intensity;
       } catch {
         // Ignore sampling errors
       }
@@ -148,23 +167,35 @@ export function useFaceTracking(
 
     intervalRef.current = window.setInterval(detectFace, 125);
 
-    // Smooth animation lerp loop (60 FPS) for buttery smooth camera re-centering
+    // 60 FPS smooth interpolation
     const smoothUpdate = () => {
       if (isDestroyed) return;
 
       const cur = currentPosRef.current;
       const target = targetPosRef.current;
 
-      const lerpFactor = 0.08; // Smooth exponential damping
+      const lerpFactor = 0.08;
       const nextX = cur.x + (target.x - cur.x) * lerpFactor;
       const nextY = cur.y + (target.y - cur.y) * lerpFactor;
 
+      const curSpot = currentSpotlightRef.current;
+      const targetSpot = targetSpotlightRef.current;
+      const nextSpot = curSpot + (targetSpot - curSpot) * 0.06;
+
+      currentSpotlightRef.current = nextSpot;
+      currentPosRef.current = { ...cur, x: nextX, y: nextY };
+
       if (Math.abs(nextX - cur.x) > 0.05 || Math.abs(nextY - cur.y) > 0.05) {
-        currentPosRef.current = { x: nextX, y: nextY };
         setFacePosition({
           x: Math.round(nextX * 10) / 10,
-          y: Math.round(nextY * 10) / 10
+          y: Math.round(nextY * 10) / 10,
+          width: 36,
+          height: 42,
         });
+      }
+
+      if (Math.abs(nextSpot - curSpot) > 0.005) {
+        setSpotlightIntensity(nextSpot);
       }
 
       animFrameRef.current = requestAnimationFrame(smoothUpdate);
@@ -182,5 +213,31 @@ export function useFaceTracking(
     };
   }, [trackRef?.publication?.track?.mediaStreamTrack, enabled]);
 
-  return facePosition;
+  // Dynamic CSS spotlight overlay style targeting user's face coordinates
+  const faceSpotlightStyle = useMemo<CSSProperties>(() => {
+    if (spotlightIntensity <= 0.02) {
+      return { display: 'none' };
+    }
+
+    const clampedIntensity = Math.min(0.5, spotlightIntensity);
+    const alphaCore = (clampedIntensity * 0.95).toFixed(3);
+    const alphaMid = (clampedIntensity * 0.45).toFixed(3);
+
+    return {
+      backgroundImage: `radial-gradient(ellipse 42% 48% at ${facePosition.x}% ${facePosition.y}%, rgba(255, 248, 235, ${alphaCore}) 0%, rgba(255, 244, 225, ${alphaMid}) 42%, rgba(255, 240, 215, 0.02) 75%, transparent 100%)`,
+      mixBlendMode: 'screen',
+      filter: 'blur(12px)',
+      opacity: Math.min(1, spotlightIntensity * 1.8),
+      pointerEvents: 'none',
+    };
+  }, [facePosition.x, facePosition.y, spotlightIntensity]);
+
+  return {
+    facePosition,
+    faceLuma,
+    frameLuma,
+    isFaceDark: faceLuma < 125,
+    faceSpotlightActive: spotlightIntensity > 0.02,
+    faceSpotlightStyle,
+  };
 }

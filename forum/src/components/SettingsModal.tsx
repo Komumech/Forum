@@ -20,7 +20,9 @@ import {
   Subtitles,
   Globe,
   RefreshCw,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Sparkles,
+  Palette
 } from 'lucide-react';
 import { VideoTrack } from '@livekit/components-react';
 import { Track, Participant } from 'livekit-client';
@@ -35,6 +37,7 @@ import {
   AI_PRESET_CONFIGS, 
   getAIVideoFilterStyle 
 } from '../utils/mediaEnhancer';
+import { SOLID_STUDIO_COLORS, VIRTUAL_BG_PRESETS } from '../utils/backgroundProcessor';
 
 export type SettingsCategoryType = 'video' | 'audio' | 'effects' | 'streaming' | 'general' | 'captions' | 'reactions';
 
@@ -76,8 +79,8 @@ interface SettingsModalProps {
   room: string | undefined;
   isCaptionsEnabled: boolean;
   setIsCaptionsEnabled: (val: boolean) => void;
-  selectedBg: 'none' | 'blur' | 'image';
-  setSelectedBg: (val: 'none' | 'blur' | 'image') => void;
+  selectedBg: 'none' | 'blur' | 'image' | 'greenscreen' | 'color';
+  setSelectedBg: (val: any) => void;
   selectedBgImage: string;
   setSelectedBgImage: (val: string) => void;
   customBgImage: string | null;
@@ -208,12 +211,13 @@ export default function SettingsModal({
   }));
 
   const videoEnhanceOptions: DropdownOption[] = [
-    { value: 'off', label: 'Off', sublabel: 'Original camera capture' },
+    { value: 'auto', label: 'Auto (AI Dynamic)', sublabel: 'Auto-adjusts lighting, exposure & skin tones in real-time' },
     { value: 'studio', label: 'Studio lighting', sublabel: 'Enhanced exposure and natural warmth' },
     { value: 'lowlight', label: 'Low-light boost', sublabel: 'Increases brightness in dim environments' },
     { value: 'smooth', label: 'Skin smoothing', sublabel: 'Gentle portrait soften and balanced tone' },
     { value: 'sharp', label: 'Edge sharpness', sublabel: 'High-contrast edge definition' },
-    { value: 'warm', label: 'Warm daylight', sublabel: 'Warm golden color balance' }
+    { value: 'warm', label: 'Warm daylight', sublabel: 'Warm golden color balance' },
+    { value: 'off', label: 'Off', sublabel: 'Original camera capture' }
   ];
 
   const resolutionOptions: DropdownOption[] = [
@@ -437,17 +441,20 @@ export default function SettingsModal({
           <div className="space-y-6 max-w-xl">
             {/* Background Modes */}
             <div className="space-y-3">
-              <label className="text-sm font-medium text-[#1f1f1f] block">
-                Background
+              <label className="text-sm font-semibold text-[#1f1f1f] block">
+                Virtual Background & Green Screen
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setSelectedBg('none')}
+                  onClick={() => {
+                    setSelectedBg('none');
+                    setCustomBgImage(null);
+                  }}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2 p-3.5 rounded-xl border transition-all cursor-pointer",
+                    "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
                     selectedBg === 'none' 
-                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium" 
+                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
                       : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
                   )}
                 >
@@ -459,32 +466,55 @@ export default function SettingsModal({
 
                 <button
                   type="button"
-                  onClick={() => setSelectedBg('blur')}
+                  onClick={() => {
+                    setSelectedBg('blur');
+                    setCustomBgImage(null);
+                  }}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2 p-3.5 rounded-xl border transition-all cursor-pointer",
+                    "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
                     selectedBg === 'blur' 
-                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium" 
+                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
                       : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
                   )}
                 >
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#c4c7c5] to-[#f1f3f4] flex items-center justify-center blur-[1px]" />
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#94a3b8] to-[#cbd5e1] flex items-center justify-center blur-[1.5px] border border-white/40" />
                   <span className="text-xs">Blur</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedBg('greenscreen');
+                    setSelectedBgImage('#00FF00');
+                    setCustomBgImage(null);
+                  }}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
+                    selectedBg === 'greenscreen' || (selectedBg === 'color' && selectedBgImage === '#00FF00')
+                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
+                      : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
+                  )}
+                >
+                  <div className="w-8 h-8 rounded-full bg-[#00FF00] flex items-center justify-center text-black font-bold shadow-inner border border-black/10">
+                    <Sparkles size={14} className="text-emerald-950" />
+                  </div>
+                  <span className="text-xs">Green Screen</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2 p-3.5 rounded-xl border transition-all cursor-pointer",
+                    "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
                     selectedBg === 'image' && customBgImage 
-                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium" 
+                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
                       : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
                   )}
                 >
                   <div className="w-8 h-8 rounded-full bg-[#e8f0fe] text-[#0b57d0] flex items-center justify-center">
                     <ImageIcon size={16} />
                   </div>
-                  <span className="text-xs truncate max-w-[90px]">Upload image</span>
+                  <span className="text-xs truncate max-w-[85px]">Custom Photo</span>
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -503,35 +533,75 @@ export default function SettingsModal({
               </div>
             </div>
 
-            {/* Preset Backgrounds */}
+            {/* Studio Green & Solid Chroma Backdrops */}
             <div className="space-y-3 pt-3 border-t border-[#e0e2ec]">
-              <label className="text-sm font-medium text-[#1f1f1f] block">
-                Background presets
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold text-[#1f1f1f] block">
+                  Studio Colors & Green Screens
+                </label>
+                <span className="text-[11px] text-gray-500">Perfect for OBS & stream keying</span>
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {bgImages.map((img) => {
-                  const isSelected = selectedBg === 'image' && selectedBgImage === img.url && !customBgImage;
+                {SOLID_STUDIO_COLORS.map((item) => {
+                  const isSelected = (selectedBg === item.type || selectedBg === 'color') && selectedBgImage === item.value && !customBgImage;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setCustomBgImage(null);
+                        setSelectedBgImage(item.value);
+                        setSelectedBg(item.type);
+                      }}
+                      className={cn(
+                        "relative flex items-center gap-2.5 p-2.5 rounded-xl border-2 transition-all cursor-pointer text-left group",
+                        isSelected ? "border-[#0b57d0] bg-[#f0f4f9] ring-2 ring-[#0b57d0]/20" : "border-[#e0e2ec] bg-white hover:border-[#747775]"
+                      )}
+                    >
+                      <div 
+                        className="w-7 h-7 rounded-lg shrink-0 shadow-sm border border-black/10 flex items-center justify-center"
+                        style={{ backgroundColor: item.value }}
+                      >
+                        {isSelected && <Check size={12} className={item.value === '#F8FAFC' || item.value === '#00FF00' || item.value === '#00E676' ? "text-black" : "text-white"} />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-medium text-gray-900 block truncate">{item.label}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Preset Photo Backgrounds */}
+            <div className="space-y-3 pt-3 border-t border-[#e0e2ec]">
+              <label className="text-sm font-semibold text-[#1f1f1f] block">
+                Virtual Scene Backgrounds
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                {VIRTUAL_BG_PRESETS.map((img) => {
+                  const isSelected = selectedBg === 'image' && selectedBgImage === img.value && !customBgImage;
                   return (
                     <button
                       key={img.id}
                       type="button"
                       onClick={() => {
                         setCustomBgImage(null);
-                        setSelectedBgImage(img.url);
+                        setSelectedBgImage(img.value);
                         setSelectedBg('image');
                       }}
                       className={cn(
-                        "relative aspect-video rounded-lg overflow-hidden border-2 transition-all cursor-pointer group",
-                        isSelected ? "border-[#0b57d0] ring-2 ring-[#0b57d0]/20" : "border-[#e0e2ec] hover:border-[#747775]"
+                        "relative aspect-video rounded-xl overflow-hidden border-2 transition-all cursor-pointer group shadow-sm",
+                        isSelected ? "border-[#0b57d0] ring-2 ring-[#0b57d0]/25" : "border-[#e0e2ec] hover:border-[#747775]"
                       )}
                     >
-                      <img src={img.url} alt={img.label} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/30 flex items-end p-1.5">
-                        <span className="text-[11px] font-normal text-white truncate">{img.label}</span>
+                      <img src={img.value} alt={img.label} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" referrerPolicy="no-referrer" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent flex items-end p-2">
+                        <span className="text-xs font-medium text-white truncate">{img.label}</span>
                       </div>
                       {isSelected && (
-                        <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#0b57d0] text-white flex items-center justify-center">
-                          <Check size={10} />
+                        <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-[#0b57d0] text-white flex items-center justify-center shadow">
+                          <Check size={12} />
                         </div>
                       )}
                     </button>

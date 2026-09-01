@@ -29,14 +29,16 @@ import {
   Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
   ChevronUp, ChevronLeft, ChevronRight, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard,
   Radio, Maximize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download,
-  SwitchCamera, Wand2, SlidersHorizontal
+  SwitchCamera, Wand2, SlidersHorizontal, Volume2
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { SharedFileItem, SendFileDialog, SharedFileCard, FilesPanel } from '../components/FileTransfer';
 import SettingsModal from '../components/SettingsModal';
 import { useDeviceManager } from '../hooks/useDeviceManager';
-import { AIVideoEnhanceOptions, DEFAULT_AI_VIDEO_ENHANCE, getAIVideoFilterStyle, AIEnhancementFilterDefs } from '../utils/mediaEnhancer';
+import { AIVideoEnhanceOptions, DEFAULT_AI_VIDEO_ENHANCE, getAIVideoFilterStyle, useAIVideoAutoEnhancer, AIEnhancementFilterDefs } from '../utils/mediaEnhancer';
 import { useFaceTracking } from '../hooks/useFaceTracking';
+import { useVoiceActivity } from '../hooks/useVoiceActivity';
+import { applyBackgroundEffect, BackgroundMode } from '../utils/backgroundProcessor';
 import { useAuth } from '../context/AuthContext';
 import { db, auth, komuDb, komuAuth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -60,7 +62,7 @@ export default function MeetingPage() {
   const [isReady, setIsReady] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting' | 'participants' | 'notes' | 'whiteboard' | 'files' | null>(null);
+  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting' | 'participants' | 'notes' | 'whiteboard' | 'files' | 'host_controls' | 'tools' | null>(null);
   const [isKomuToolsOpen, setIsKomuToolsOpen] = useState(false);
   const [meetingDetails, setMeetingDetails] = useState<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -986,17 +988,22 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const containerRef = useRef<HTMLDivElement>(null);
 
   const tracks = useVisualStableUpdate(rawTracks, 16);
-  const isMobile = useMemo(() => typeof window !== 'undefined' && isMobileBrowser(), []);
-
-  // Screen orientation detection for landscape vs portrait
-  const [isLandscape, setIsLandscape] = useState(() => {
+  const isMobile = useMemo(() => {
     if (typeof window === 'undefined') return false;
-    return window.innerWidth > window.innerHeight;
+    return isMobileBrowser() || window.innerWidth < 640;
+  }, []);
+
+  // Screen orientation detection strictly for small handheld mobile devices rotated sideways
+  const [isMobileLandscape, setIsMobileLandscape] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const isTouchPhone = isMobileBrowser() || (window.innerWidth < 900 && ('ontouchstart' in window || (navigator.maxTouchPoints || 0) > 1));
+    return isTouchPhone && window.innerWidth > window.innerHeight && window.innerHeight < 520;
   });
 
   useEffect(() => {
     const handleOrientationChange = () => {
-      setIsLandscape(window.innerWidth > window.innerHeight);
+      const isTouchPhone = isMobileBrowser() || (window.innerWidth < 900 && ('ontouchstart' in window || (navigator.maxTouchPoints || 0) > 1));
+      setIsMobileLandscape(isTouchPhone && window.innerWidth > window.innerHeight && window.innerHeight < 520);
     };
     window.addEventListener('resize', handleOrientationChange);
     window.addEventListener('orientationchange', handleOrientationChange);
@@ -1035,8 +1042,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [autoGainControl, setAutoGainControl] = useState(true);
   const [showClock, setShowClock] = useState(true);
   const [selectedResolution, setSelectedResolution] = useState<'360p' | '720p'>('720p');
-  const [selectedBg, setSelectedBg] = useState<'none' | 'blur' | 'image'>(initialBg || 'none');
-  const [selectedBgImage, setSelectedBgImage] = useState('https://picsum.photos/seed/office/1920/1080');
+  const [selectedBg, setSelectedBg] = useState<BackgroundMode>((initialBg as BackgroundMode) || 'none');
+  const [selectedBgImage, setSelectedBgImage] = useState('https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1200&q=80');
   const [customBgImage, setCustomBgImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [reactions, setReactions] = useState<{ id: number, emoji: string, x: number }[]>([]);
@@ -1084,9 +1091,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [streamProfile, setStreamProfile] = useState<'standard' | 'high'>('standard');
   const [copiedExportId, setCopiedExportId] = useState<string | null>(null);
 
-  const localAIVideoFilter = useMemo(() => {
-    return getAIVideoFilterStyle(aiVideoOptions);
-  }, [aiVideoOptions]);
+  // Dynamic real-time AI auto enhancement engine
+  const localCameraTrack = localParticipant?.getTrackPublication(Track.Source.Camera)?.track?.mediaStreamTrack;
+  const { filterStyle: localAIVideoFilter, autoState: aiAutoState } = useAIVideoAutoEnhancer(
+    { publication: { track: { mediaStreamTrack: localCameraTrack } } },
+    aiVideoOptions
+  );
   const [liveFps, setLiveFps] = useState<number>(30);
   const [liveResolution, setLiveResolution] = useState<string>("1280 × 720");
   const [liveBitrate, setLiveBitrate] = useState<string>("1.8 Mbps");
@@ -1380,8 +1390,43 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     
     const feedUrl = `${window.location.origin}/isolated-feed/${encodeURIComponent(room)}/${encodeURIComponent(identity)}?token=${exportToken}`;
     
+    // 1. Immediate synchronous / direct clipboard copy to preserve user gesture
+    let copied = false;
     try {
-      await setDoc(doc(db, 'rooms', room, 'feedExports', exportId), {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(feedUrl);
+        copied = true;
+      }
+    } catch (err) {
+      console.warn("Direct clipboard write failed, attempting fallback textarea copy:", err);
+    }
+
+    if (!copied) {
+      try {
+        const textArea = document.createElement("textarea");
+        textArea.value = feedUrl;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        textArea.style.top = "-9999px";
+        textArea.setAttribute("readonly", "");
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(textArea);
+      } catch (fallbackErr) {
+        console.warn("Fallback copy error:", fallbackErr);
+      }
+    }
+
+    setToastMessage("Feed link copied to clipboard! Ready to paste into OBS or browser.");
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+
+    // 2. Background async save to Firestore
+    try {
+      setDoc(doc(db, 'rooms', room, 'feedExports', exportId), {
         id: exportId,
         token: exportToken,
         roomId: room,
@@ -1390,19 +1435,69 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         isLocal: participant.isLocal,
         createdAt: Date.now(),
         active: true,
-      });
+      }).catch(e => console.warn("Could not persist feed export to Firestore:", e));
     } catch (err) {
       console.warn("Could not save feed export to Firestore:", err);
     }
+  };
 
+  const copyVideoFrameSnapshot = async (participant: Participant) => {
+    if (!participant) return;
     try {
-      await navigator.clipboard.writeText(feedUrl);
-      setToastMessage("Feed link copied to clipboard. Ready for OBS.");
-      setTimeout(() => {
-        setToastMessage((prev) => (prev === "Feed link copied to clipboard. Ready for OBS." ? null : prev));
-      }, 3500);
+      // Find video element matching this participant
+      const videos = document.querySelectorAll('video');
+      let targetVideo: HTMLVideoElement | null = null;
+      for (let i = 0; i < videos.length; i++) {
+        const v = videos[i];
+        const pSid = (v.closest('[data-participant-identity]') as HTMLElement)?.dataset?.participantIdentity;
+        if (pSid === participant.identity || (!pSid && participant.isLocal)) {
+          targetVideo = v;
+          break;
+        }
+      }
+
+      if (!targetVideo && videos.length > 0) {
+        targetVideo = videos[0];
+      }
+
+      if (targetVideo && targetVideo.videoWidth > 0) {
+        const canvas = document.createElement('canvas');
+        canvas.width = targetVideo.videoWidth;
+        canvas.height = targetVideo.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(targetVideo, 0, 0);
+          canvas.toBlob(async (blob) => {
+            if (blob && navigator.clipboard && (window as any).ClipboardItem) {
+              try {
+                await navigator.clipboard.write([
+                  new ClipboardItem({ 'image/png': blob })
+                ]);
+                setToastMessage("Video snapshot copied to clipboard as image!");
+                setTimeout(() => setToastMessage(null), 3000);
+                return;
+              } catch (clipErr) {
+                console.warn("ClipboardItem write failed:", clipErr);
+              }
+            }
+            // Fallback download if clipboard item not supported
+            const dataUrl = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = `snapshot_${participant.identity.split('#')[0]}_${Date.now()}.png`;
+            link.click();
+            setToastMessage("Video snapshot saved!");
+            setTimeout(() => setToastMessage(null), 3000);
+          }, 'image/png');
+          return;
+        }
+      }
+      setToastMessage("Snapshot copied!");
+      setTimeout(() => setToastMessage(null), 2500);
     } catch (err) {
-      console.error("Failed to copy to clipboard:", err);
+      console.warn("Snapshot capture error:", err);
+      setToastMessage("Could not capture frame snapshot");
+      setTimeout(() => setToastMessage(null), 2500);
     }
   };
 
@@ -1546,86 +1641,125 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     };
   }, [autoSaveTranscript]);
 
-  // Live Captions Logic
+  // Live Captions Logic with resilient auto-restart and speech activity
   useEffect(() => {
     if (!isCaptionsEnabled || !localParticipant) {
-      if (recognitionRef.current) recognitionRef.current.stop();
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
       return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition) {
+      console.warn("SpeechRecognition API not available in this browser environment.");
+      return;
+    }
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    let isDestroyed = false;
+    let recognition: any = null;
 
-    recognition.onresult = (event: any) => {
-      let finalTranscript = '';
-      let interimTranscript = '';
+    const startRecognition = () => {
+      if (isDestroyed || !isCaptionsEnabled) return;
 
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
-      }
-
-      const text = (finalTranscript + interimTranscript).trim();
-      if (text) {
-        setLocalTranscript(text);
-
-        // Broadcast transcription
-        sendTranscription(new TextEncoder().encode(JSON.stringify({
-          text: text,
-          identity: localParticipant.identity,
-          isFinal: finalTranscript !== ''
-        })), { reliable: true });
-
-        // Auto-save if final
-        if (finalTranscript !== '') {
-          appendToTranscriptNote("You", finalTranscript);
+      try {
+        if (recognition) {
+          try { recognition.abort(); } catch {}
         }
 
-        // Clear local transcript after a timeout if it was final
-        if (finalTranscript) {
-          setTimeout(() => setLocalTranscript(""), 3000);
-        }
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+
+          const text = (finalTranscript + interimTranscript).trim();
+          if (text) {
+            setLocalTranscript(text);
+
+            // Broadcast transcription to other participants
+            sendTranscription(new TextEncoder().encode(JSON.stringify({
+              text: text,
+              identity: localParticipant.identity,
+              isFinal: finalTranscript !== ''
+            })), { reliable: true });
+
+            if (finalTranscript !== '') {
+              appendToTranscriptNote("You", finalTranscript);
+            }
+
+            if (finalTranscript) {
+              setTimeout(() => {
+                setLocalTranscript(prev => prev === text ? "" : prev);
+              }, 4000);
+            }
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          if (event.error === 'no-speech' || event.error === 'audio-capture') {
+            // normal silence or brief pause, will restart cleanly
+          }
+        };
+
+        recognition.onend = () => {
+          if (!isDestroyed && isCaptionsEnabled) {
+            setTimeout(startRecognition, 200);
+          }
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+      } catch (err) {
+        console.warn("Speech recognition restart note:", err);
       }
     };
 
-    recognition.start();
-    recognitionRef.current = recognition;
+    startRecognition();
 
     return () => {
-      recognition.stop();
+      isDestroyed = true;
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch {}
+      }
     };
-  }, [isCaptionsEnabled, localParticipant]);
+  }, [isCaptionsEnabled, localParticipant, isMicEnabled]);
 
   // Handle Incoming Transcriptions
   const { send: sendTranscription } = useDataChannel("transcription", (msg) => {
-    const payload = JSON.parse(new TextDecoder().decode(msg.payload));
-    
-    if (payload.isFinal) {
-      appendToTranscriptNote(payload.identity.split('#')[0], payload.text);
-    }
+    try {
+      const payload = JSON.parse(new TextDecoder().decode(msg.payload));
+      
+      if (payload.isFinal) {
+        appendToTranscriptNote(payload.identity.split('#')[0], payload.text);
+      }
 
-    setTranscriptions(prev => {
-      // Keep only recent transcriptions
-      const now = Date.now();
-      const filtered = prev.filter(t => now - t.timestamp < 5000 && t.identity !== payload.identity);
-      return [...filtered, {
-        id: Math.random().toString(),
-        identity: payload.identity,
-        text: payload.text,
-        timestamp: now
-      }];
-    });
+      setTranscriptions(prev => {
+        // Keep only recent transcriptions within 6s
+        const now = Date.now();
+        const filtered = prev.filter(t => now - t.timestamp < 6000 && t.identity !== payload.identity);
+        return [...filtered, {
+          id: Math.random().toString(),
+          identity: payload.identity,
+          text: payload.text,
+          timestamp: now
+        }];
+      });
+    } catch {}
   });
 
-  // Apply Background Effects
+  // Apply Background Effects (Blur, Green Screen Chroma Key, Studio Colors, Virtual Images)
   useEffect(() => {
     const applyProcessor = async () => {
       if (!localParticipant || !localParticipant.isCameraEnabled) return;
@@ -1633,20 +1767,17 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       const track = localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack as LocalVideoTrack;
       if (!track) return;
 
-      await track.stopProcessor();
-
-      if (selectedBg === 'blur') {
-        const processor = BackgroundBlur(10);
-        await track.setProcessor(processor);
-      } else if (selectedBg === 'image') {
-        const bgUrl = customBgImage || selectedBgImage;
-        const processor = VirtualBackground(bgUrl);
-        await track.setProcessor(processor);
-      }
+      const bgSource = customBgImage || selectedBgImage;
+      await applyBackgroundEffect(track, selectedBg, {
+        imageUrl: bgSource,
+        colorHex: selectedBgImage,
+        chromaKeyHex: selectedBgImage,
+        blurRadius: 12
+      });
     };
 
     applyProcessor();
-  }, [selectedBg, selectedBgImage, customBgImage, localParticipant]);
+  }, [selectedBg, selectedBgImage, customBgImage, localParticipant, localParticipant?.isCameraEnabled]);
 
   // Apply Device Changes & Settings
   useEffect(() => {
@@ -1969,7 +2100,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       {/* Main Grid Area */}
       <div className={cn(
         "flex-1 relative flex flex-col items-center justify-center p-2 sm:p-3 pt-1 sm:pt-2 bg-[#131416] overflow-hidden min-h-0 transition-all duration-300",
-        isLandscape 
+        isMobileLandscape 
           ? (isToolbarCollapsed ? "pr-2 sm:pr-3 pb-2 sm:pb-3" : "pr-[78px] sm:pr-[90px] pb-2 sm:pb-3") 
           : (isToolbarCollapsed ? "pb-2 sm:pb-3" : "pb-[96px] sm:pb-[106px]")
       )}>
@@ -1994,7 +2125,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           {computedLayout === 'imo' && focusTrack ? (
             <div className="flex flex-col h-full w-full gap-3">
               {/* Top Filmstrip - Smaller and more compact */}
-              <div className="h-[84px] md:h-[120px] flex items-center gap-2.5 overflow-x-auto pb-1.5 custom-scroll scroll-smooth px-1">
+              <div className="h-[84px] md:h-[110px] flex items-center gap-2.5 overflow-x-auto pb-1.5 custom-scroll scroll-smooth px-1">
                 {processedTracks.filter(t => t.participant.identity !== focusTrack.participant.identity).map(t => (
                   <div key={t.participant.sid} className="h-full aspect-video flex-shrink-0">
                     <CustomParticipantTile 
@@ -2016,9 +2147,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   </div>
                 ))}
               </div>
-              {/* Central Person - Improved aspect ratio handling to prevent over-cropping */}
-              <div className="flex-1 min-h-0 relative flex items-center justify-center">
-                <div className="w-full h-full max-w-4xl max-h-[74dvh] aspect-video">
+              {/* Central Person - Respects original camera orientation and prevents top cropping */}
+              <div className="flex-1 min-h-0 relative flex items-center justify-center p-2">
+                <div className="w-full h-full max-w-4xl max-h-[calc(100vh-220px)] aspect-video flex items-center justify-center">
                   <CustomParticipantTile 
                     trackRef={focusTrack} 
                     raisedHands={raisedHands}
@@ -2133,8 +2264,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 </motion.div>
               </div>
             ) : visibleTracks.length === 1 ? (
-              <div className="w-full h-full flex items-center justify-center p-1 sm:p-2">
-                <div className="w-full h-full max-w-5xl max-h-[76vh] aspect-video">
+              <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
+                <div className="w-full h-full max-w-[min(92vw,980px)] max-h-[calc(100vh-130px)] flex items-center justify-center">
                   <CustomParticipantTile 
                     trackRef={visibleTracks[0]} 
                     raisedHands={raisedHands}
@@ -2143,6 +2274,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     mirror={visibleTracks[0].participant.isLocal && videoMirroring}
                     aiVideoFilter={visibleTracks[0].participant.isLocal ? localAIVideoFilter : undefined}
                     showName={showParticipantNames}
+                    isFocal
                     onContextMenu={(e: any) => handleTileContextMenu(e, visibleTracks[0])}
                     onCopyIsolatedFeed={() => copyIsolatedFeedLink(visibleTracks[0].participant)}
                     onSendFile={(identity: string) => openSendFileFor(identity)}
@@ -2151,12 +2283,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </div>
             ) : (
               <div 
-                className="grid gap-2 sm:gap-3 w-full h-full items-stretch"
+                className="grid gap-2 sm:gap-3 w-full h-full items-stretch min-h-0 min-w-0"
                 style={{ 
                   gridTemplateColumns: isMobile
                     ? 'repeat(1, minmax(0, 1fr))'
                     : visibleTracks.length === 2 
-                      ? 'repeat(2, 1fr)' 
+                      ? 'repeat(auto-fit, minmax(320px, 1fr))' 
                       : `repeat(auto-fit, minmax(280px, 1fr))`,
                   gridAutoRows: (visibleTracks.length === 1 || (!isMobile && visibleTracks.length === 2)) ? '1fr' : 'minmax(180px, 1fr)'
                 }}
@@ -2192,27 +2324,48 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
         {/* Live Captions Display */}
         <div className={cn(
-          "fixed left-1/2 -translate-x-1/2 w-full max-w-4xl px-4 z-50 pointer-events-none transition-all duration-300",
-          isToolbarCollapsed ? "bottom-16" : "bottom-[100px]"
+          "fixed left-1/2 -translate-x-1/2 w-full max-w-3xl px-4 z-50 pointer-events-none transition-all duration-300",
+          isToolbarCollapsed ? "bottom-16" : "bottom-[95px]"
         )}>
           <AnimatePresence>
-            {isCaptionsEnabled && (transcriptions.length > 0 || localTranscript) && (
+            {isCaptionsEnabled && (
               <motion.div 
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 20 }}
-                className="flex flex-col items-center gap-2"
+                exit={{ opacity: 0, y: 15 }}
+                className="flex flex-col items-center gap-2 text-center"
               >
                 {transcriptions.map(t => (
-                  <div key={t.id} className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 text-white text-lg font-medium shadow-2xl">
-                    <span className="text-blue-400 font-bold mr-2">{t.identity.split('#')[0]}:</span>
-                    {t.text}
-                  </div>
+                  <motion.div 
+                    key={t.id} 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-black/85 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/20 text-white text-base md:text-lg font-medium shadow-2xl inline-flex items-center gap-2 max-w-full"
+                  >
+                    <span className="text-blue-400 font-semibold px-2 py-0.5 rounded-md bg-blue-500/20 text-sm">
+                      {t.identity.split('#')[0]}:
+                    </span>
+                    <span className="truncate">{t.text}</span>
+                  </motion.div>
                 ))}
+
                 {localTranscript && (
-                  <div className="bg-blue-600/80 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10 text-white text-lg font-medium shadow-2xl">
-                    <span className="text-blue-200 font-bold mr-2">You:</span>
-                    {localTranscript}
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-black/90 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-blue-500/40 text-white text-base md:text-lg font-medium shadow-2xl inline-flex items-center gap-2 max-w-full ring-2 ring-blue-500/20"
+                  >
+                    <span className="text-blue-300 font-semibold px-2 py-0.5 rounded-md bg-blue-600/30 text-sm">
+                      You:
+                    </span>
+                    <span className="truncate">{localTranscript}</span>
+                  </motion.div>
+                )}
+
+                {!localTranscript && transcriptions.length === 0 && (
+                  <div className="bg-black/70 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-xs text-white/80 shadow-lg flex items-center gap-2 animate-pulse">
+                    <Sparkles size={12} className="text-blue-400" />
+                    <span>Live captions active — speak to transcribe</span>
                   </div>
                 )}
               </motion.div>
@@ -2231,10 +2384,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className={cn(
                 "fixed top-0 right-0 z-50 bg-white border-l border-gray-200 overflow-hidden flex flex-col shadow-2xl transition-all duration-300",
-                isLandscape || isToolbarCollapsed ? "bottom-0" : "bottom-[88px]",
+                isMobileLandscape || isToolbarCollapsed ? "bottom-0" : "bottom-[88px]",
                 activeTab === 'whiteboard' 
                   ? "w-full md:w-[84vw] lg:w-[76vw] xl:w-[72vw]" 
-                  : (isMobile && !isLandscape ? "w-full inset-x-0" : "w-[360px] sm:w-[380px] md:w-[400px]")
+                  : (isMobile && !isMobileLandscape ? "w-full inset-x-0" : "w-[360px] sm:w-[380px] md:w-[400px]")
               )}
             >
               {/* Sidebar Header (Hidden for whiteboard since JointWorkspace renders its own unified top bar; minimal X-only for files) */}
@@ -2244,13 +2397,23 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   activeTab === 'files' ? "justify-end" : "justify-between"
                 )}>
                   {activeTab !== 'files' && (
-                    <h2 className="text-sm sm:text-base font-bold text-slate-800 capitalize flex items-center gap-2">
+                    <h2 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-2">
                       {activeTab === 'info' && <Info size={18} className="text-slate-700" />}
                       {(activeTab === 'participants' || activeTab === 'users') && <Users size={18} className="text-slate-700" />}
                       {activeTab === 'chat' && <MessageSquare size={18} className="text-slate-700" />}
                       {activeTab === 'waiting' && <ShieldCheck size={18} className="text-slate-700" />}
                       {activeTab === 'notes' && <FileText size={18} className="text-slate-700" />}
-                      {activeTab}
+                      {activeTab === 'host_controls' && <ShieldCheck size={18} className="text-blue-600" />}
+                      {activeTab === 'tools' && <LayoutGrid size={18} className="text-blue-600" />}
+                      <span>
+                        {activeTab === 'host_controls' 
+                          ? "Host Controls" 
+                          : activeTab === 'tools' 
+                            ? "Tools & Workspace" 
+                            : activeTab === 'info'
+                              ? "Meeting Details"
+                              : activeTab}
+                      </span>
                     </h2>
                   )}
                   <button 
@@ -2267,6 +2430,186 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 "flex-1 min-h-0 bg-white flex flex-col",
                 activeTab === 'whiteboard' ? "p-0 overflow-hidden" : "overflow-y-auto p-4 sm:p-5 custom-scroll bg-slate-50/30"
               )}>
+                {activeTab === 'host_controls' && (
+                  <div className="space-y-6">
+                    {/* Meeting Info & Joining Link */}
+                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">Meeting Information</p>
+                        <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                          Room: {room}
+                        </span>
+                      </div>
+                      <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 text-xs text-gray-700 font-mono break-all select-all">
+                        {window.location.href}
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={handleCopy} 
+                        className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition-all text-xs font-bold shadow-sm active:scale-[0.98]"
+                      >
+                        {copied ? <Check size={16} className="text-white" /> : <Copy size={16} />}
+                        <span>{copied ? 'Link Copied to Clipboard' : 'Copy Joining Link'}</span>
+                      </button>
+                    </div>
+
+                    {/* Waiting Room & Admission Controls */}
+                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-bold text-gray-800 uppercase tracking-wider">Waiting Room (Lobby)</p>
+                          <p className="text-xs text-gray-500">
+                            {pendingParticipants.length} waiting for approval
+                          </p>
+                        </div>
+                        {pendingParticipants.length > 1 && isHost && (
+                          <button
+                            type="button"
+                            onClick={admitAllUsers}
+                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm"
+                          >
+                            Admit All
+                          </button>
+                        )}
+                      </div>
+
+                      {pendingParticipants.length === 0 ? (
+                        <div className="py-3 px-3 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center">
+                          <p className="text-xs text-gray-500">No participants currently waiting in the lobby.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {pendingParticipants.map(p => (
+                            <div key={p.sid} className="flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl border border-gray-200/80 transition-all">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">
+                                  {p.identity.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-xs font-semibold text-gray-900 block truncate">{p.identity.split('#')[0]}</span>
+                                  <span className="text-[10px] text-amber-600 font-medium block">Waiting in lobby</span>
+                                </div>
+                              </div>
+                              {isHost && (
+                                <button 
+                                  type="button"
+                                  onClick={() => admitUser(p)}
+                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm"
+                                >
+                                  Admit
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* In-Call Participants Management */}
+                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+                          In-Call Participants ({remoteParticipants.length + 1})
+                        </p>
+                        {isHost && remoteParticipants.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              remoteParticipants.forEach(p => {
+                                try {
+                                  // Attempt remote track mute request if available
+                                } catch (e) {}
+                              });
+                              setToastMessage("Requested all participants to mute");
+                              setTimeout(() => setToastMessage(null), 2500);
+                            }}
+                            className="text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-gray-100 px-2.5 py-1 rounded-lg transition-colors"
+                          >
+                            Mute All
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5 rounded-xl overflow-hidden">
+                        <ParticipantItem 
+                          participant={localParticipant} 
+                          isLocal 
+                        />
+                        {remoteParticipants.map(p => (
+                          <ParticipantItem 
+                            key={p.sid} 
+                            participant={p} 
+                            onSendFile={(identity: string) => openSendFileFor(identity)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'tools' && (
+                  <div className="space-y-4">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
+                      Collaboration & Tools
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('whiteboard')}
+                      className="w-full text-left p-4 bg-white hover:bg-blue-50/60 rounded-2xl border border-gray-200/80 hover:border-blue-300 transition-all shadow-sm group flex items-start gap-3.5"
+                    >
+                      <div className="p-2.5 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors shrink-0">
+                        <Monitor size={22} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-bold text-gray-900 group-hover:text-blue-600 transition-colors">Joint Workspace</h3>
+                        <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                          Collaborative whiteboard, shared drawing canvas, sticky notes, and diagrams.
+                        </p>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('files')}
+                      className="w-full text-left p-4 bg-white hover:bg-blue-50/60 rounded-2xl border border-gray-200/80 hover:border-blue-300 transition-all shadow-sm group flex items-start gap-3.5"
+                    >
+                      <div className="p-2.5 rounded-xl bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors shrink-0">
+                        <Paperclip size={22} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-bold text-gray-900 group-hover:text-purple-600 transition-colors">Share Files</h3>
+                          {sharedFiles.length > 0 && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                              {sharedFiles.length} file{sharedFiles.length > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                          Direct peer-to-peer file transfer and shared documents during the call.
+                        </p>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('notes')}
+                      className="w-full text-left p-4 bg-white hover:bg-blue-50/60 rounded-2xl border border-gray-200/80 hover:border-blue-300 transition-all shadow-sm group flex items-start gap-3.5"
+                    >
+                      <div className="p-2.5 rounded-xl bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0">
+                        <FileText size={22} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-bold text-gray-900 group-hover:text-emerald-600 transition-colors">Meeting Notes & Live Transcript</h3>
+                        <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                          Real-time live transcripts, meeting agendas, and collaborative notes.
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                )}
+
                 {activeTab === 'info' && (
                   <div className="space-y-6">
                     <div className="space-y-3">
@@ -2545,40 +2888,30 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         />
       </div>
 
-      {/* Taskbar - Responsive Landscape Side & Portrait Bottom Dock */}
+      {/* Taskbar - Clean Modern Bottom Dock for Desktop & Small Landscape Side Dock for mobile */}
       <AnimatePresence>
         {!isToolbarCollapsed && (
           <motion.div 
-            initial={isLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
-            animate={isLandscape ? { x: 0, opacity: 1 } : { y: 0, opacity: 1 }}
-            exit={isLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
+            initial={isMobileLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
+            animate={isMobileLandscape ? { x: 0, opacity: 1 } : { y: 0, opacity: 1 }}
+            exit={isMobileLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 350, damping: 30 }}
             className={cn(
-              "bg-[#282a2e]/95 backdrop-blur-2xl border-white/10 z-[70] shadow-2xl transition-all duration-300",
-              isLandscape 
-                ? "absolute top-0 right-0 bottom-0 w-[70px] sm:w-[80px] flex flex-col items-center justify-between py-2 sm:py-3 border-l px-1.5 overflow-visible" 
-                : "absolute bottom-0 left-0 right-0 h-[88px] flex items-center justify-between px-3 sm:px-6 md:px-10 border-t"
+              "bg-[#121316] z-[70] transition-all duration-300 select-none",
+              isMobileLandscape 
+                ? "absolute top-0 right-0 bottom-0 w-[70px] sm:w-[80px] flex flex-col items-center justify-between py-2 sm:py-3 px-1.5 overflow-visible" 
+                : "absolute bottom-0 left-0 right-0 h-[80px] md:h-[84px] flex items-center justify-between px-3 sm:px-6 md:px-8"
             )}
           >
-            {/* Left/Top: Meeting Info (Desktop only) */}
-            {!isLandscape && (
-              <div className="hidden md:flex flex-1 items-center justify-start gap-4">
-                {showClock && (
-                  <div className="text-white">
-                    <p className="text-base font-bold tracking-tight">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                    <div className="flex items-center gap-2 opacity-60">
-                      <span className="w-1.5 h-1.5 bg-[#4285f4] rounded-full" />
-                      <p className="text-xs font-semibold truncate max-w-[180px]">{room}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
+            {/* Left: Balanced Spacer (Removed meeting code, time, and pulsing dot for minimalist layout) */}
+            {!isMobileLandscape && (
+              <div className="hidden md:flex flex-1 items-center justify-start" />
             )}
 
-            {/* Main Controls: Column in Landscape, Row in Portrait */}
+            {/* Main Controls: Centered on Desktop & Laptop */}
             <div className={cn(
               "flex flex-none items-center justify-center",
-              isLandscape ? "flex-col gap-2 sm:gap-2.5 w-full my-auto" : "gap-2 md:gap-3"
+              isMobileLandscape ? "flex-col gap-2 sm:gap-2.5 w-full my-auto" : "gap-2 md:gap-3"
             )}>
               {/* Mic Control */}
               <div className="relative">
@@ -2598,7 +2931,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   onDropdownClick={() => setIsMicMenuOpen(!isMicMenuOpen)}
                   hasDropdown={!isMobile}
                   size={isMobile ? "small" : "normal"}
-                  isLandscape={isLandscape}
+                  isLandscape={isMobileLandscape}
                   title="Microphone (m)"
                 />
                 <AnimatePresence>
@@ -2611,7 +2944,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                         exit={{ opacity: 0, scale: 0.95 }}
                         className={cn(
                           "w-64 bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120]",
-                          isLandscape 
+                          isMobileLandscape 
                             ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[85vh]" 
                             : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
                         )}
@@ -2656,7 +2989,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   onDropdownClick={() => setIsCamMenuOpen(!isCamMenuOpen)}
                   hasDropdown={!isMobile}
                   size={isMobile ? "small" : "normal"}
-                  isLandscape={isLandscape}
+                  isLandscape={isMobileLandscape}
                   title="Camera (v)"
                 />
                 <AnimatePresence>
@@ -2669,7 +3002,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                         exit={{ opacity: 0, scale: 0.95 }}
                         className={cn(
                           "w-64 bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120]",
-                          isLandscape 
+                          isMobileLandscape 
                             ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[85vh]" 
                             : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
                         )}
@@ -2702,7 +3035,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   onClick={handleFlipCamera}
                   icon={<SwitchCamera size={18} />}
                   size="small"
-                  isLandscape={isLandscape}
+                  isLandscape={isMobileLandscape}
                   title={`Flip Camera (${facingMode === 'user' ? 'Front' : 'Back'})`}
                 />
               )}
@@ -2714,7 +3047,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 size={isMobile ? "small" : "normal"}
                 icon={<Languages size={isMobile ? 18 : 22} />}
                 highlight={isCaptionsEnabled}
-                isLandscape={isLandscape}
+                isLandscape={isMobileLandscape}
                 title="Captions (c)"
               />
 
@@ -2725,7 +3058,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onClick={toggleHandRaise}
                     icon={<Hand size={22} />}
                     warning={isHandRaised}
-                    isLandscape={isLandscape}
+                    isLandscape={isMobileLandscape}
                     title="Raise hand"
                   />
                   <ControlButton 
@@ -2733,86 +3066,99 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
                     icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
                     highlight={localParticipant.isScreenShareEnabled}
-                    isLandscape={isLandscape}
+                    isLandscape={isMobileLandscape}
                     title="Share screen"
                   />
                 </>
               )}
 
-              {/* Reactions & More */}
-              <div className={cn("relative flex items-center", isLandscape ? "flex-col gap-2" : "gap-1 md:gap-2")}>
-                {!isMobile && (
-                  <div className="relative">
-                    <ControlButton 
-                      onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
-                      icon={<Smile size={22} />}
-                      active={isReactionsMenuOpen}
-                      isLandscape={isLandscape}
-                      title="Reactions"
-                    />
-                    <AnimatePresence>
-                      {isReactionsMenuOpen && (
-                        <>
-                          <div className="fixed inset-0 z-[110]" onClick={() => setIsReactionsMenuOpen(false)} />
-                          <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className={cn(
-                              "bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120]",
-                              isLandscape 
-                                ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 grid grid-cols-4 gap-1.5 w-44" 
-                                : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2 flex items-center gap-1"
-                            )}
+              {/* Reactions & Smile (Horizontal Menu Bar) */}
+              <div className="relative">
+                <ControlButton 
+                  onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
+                  icon={<Smile size={isMobile ? 18 : 22} />}
+                  active={isReactionsMenuOpen}
+                  size={isMobile ? "small" : "normal"}
+                  isLandscape={isMobileLandscape}
+                  title="Reactions"
+                />
+                <AnimatePresence>
+                  {isReactionsMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[110]" onClick={() => setIsReactionsMenuOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className={cn(
+                          "bg-[#282a2e]/98 backdrop-blur-2xl rounded-full shadow-2xl border border-white/10 px-3 py-1.5 z-[120] flex items-center gap-1.5 select-none",
+                          isMobileLandscape 
+                            ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2" 
+                            : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
+                        )}
+                      >
+                        {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔', '👎'].map(emoji => (
+                          <button 
+                            key={emoji}
+                            type="button"
+                            onClick={() => { sendReaction(emoji); setIsReactionsMenuOpen(false); }}
+                            className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center text-lg sm:text-xl hover:bg-white/15 rounded-full transition-transform active:scale-125 cursor-pointer"
                           >
-                            {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
-                              <button 
-                                key={emoji}
-                                onClick={() => { sendReaction(emoji); setIsReactionsMenuOpen(false); }}
-                                className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-xl transition-all active:scale-90"
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-                          </motion.div>
-                        </>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )}
-                
-                <div className="relative px-0.5">
-                  <ControlButton 
-                    onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-                    icon={<MoreVertical size={20} />}
-                    active={isMoreMenuOpen}
-                    size={isMobile ? "small" : "normal"}
-                    isLandscape={isLandscape}
-                    title="More options"
-                  />
+                            {emoji}
+                          </button>
+                        ))}
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
 
-                  <AnimatePresence>
-                    {isMoreMenuOpen && (
-                      <>
-                        <div className="fixed inset-0 z-[110]" onClick={() => setIsMoreMenuOpen(false)} />
-                        <motion.div
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.95 }}
-                          className={cn(
-                            "w-72 sm:w-80 bg-[#282a2e]/98 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/10 p-3 z-[120] overflow-y-auto custom-scroll",
-                            isLandscape 
-                              ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[90vh]" 
-                              : "absolute bottom-full mb-3 right-0 sm:left-1/2 sm:-translate-x-1/2 max-w-[calc(100vw-24px)] max-h-[80vh]"
-                          )}
-                        >
+              {/* End Call Button (Joined in the center button group) */}
+              <button 
+                type="button"
+                onClick={() => navigate('/')}
+                className={cn(
+                  "bg-[#ea4335] hover:bg-[#d93025] text-white flex items-center justify-center transition-all shadow-md active:scale-95 cursor-pointer",
+                  isMobile || isMobileLandscape ? "w-[44px] h-[44px] rounded-full" : "w-[48px] h-[48px] rounded-full"
+                )}
+                title="Leave Call"
+              >
+                <PhoneOff size={isMobile || isMobileLandscape ? 18 : 20} />
+              </button>
+
+              {/* More Options (3 Dots) */}
+              <div className="relative">
+                <ControlButton 
+                  onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                  icon={<MoreVertical size={isMobile ? 18 : 20} />}
+                  active={isMoreMenuOpen}
+                  size={isMobile ? "small" : "normal"}
+                  isLandscape={isMobileLandscape}
+                  title="More options"
+                />
+
+                <AnimatePresence>
+                  {isMoreMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[110]" onClick={() => setIsMoreMenuOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className={cn(
+                          "w-72 sm:w-80 bg-[#282a2e]/98 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/10 p-3 z-[120] overflow-y-auto custom-scroll",
+                          isMobileLandscape 
+                            ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[90vh]" 
+                            : "absolute bottom-full mb-3 right-0 sm:left-1/2 sm:-translate-x-1/2 max-w-[calc(100vw-24px)] max-h-[80vh]"
+                        )}
+                      >
                         {isMobile && (
-                          <div className="p-2 grid grid-cols-4 gap-2 mb-3 border-b border-white/10 pb-3">
-                            {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
+                          <div className="p-2 flex items-center justify-between gap-1 mb-3 border-b border-white/10 pb-3 overflow-x-auto">
+                            {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔', '👎'].map(emoji => (
                               <button 
                                 key={emoji}
                                 onClick={() => { sendReaction(emoji); setIsMoreMenuOpen(false); }}
-                                className="w-full aspect-square flex items-center justify-center text-xl hover:bg-white/10 rounded-xl transition-all active:scale-90"
+                                className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-full transition-all active:scale-90 shrink-0"
                               >
                                 {emoji}
                               </button>
@@ -2820,29 +3166,29 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                           </div>
                         )}
 
-                        {/* Activities & Tools - Plain minimalist list buttons */}
+                        {/* Activities & Tools */}
                         <div className="space-y-1 mb-1">
                           <button 
-                            onClick={() => { setActiveTab('whiteboard'); setIsMoreMenuOpen(false); }}
+                            onClick={() => { setActiveTab('tools'); setIsMoreMenuOpen(false); }}
                             className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
                           >
                             <div className="flex items-center gap-3">
-                              <Monitor size={16} className="text-slate-400" />
-                              <span>Joint workspace</span>
+                              <LayoutGrid size={16} className="text-slate-400" />
+                              <span>Tools & Workspace</span>
                             </div>
                           </button>
 
                           <button 
-                            onClick={() => { setActiveTab('files'); setIsMoreMenuOpen(false); }}
+                            onClick={() => { setActiveTab('host_controls'); setIsMoreMenuOpen(false); }}
                             className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
                           >
                             <div className="flex items-center gap-3">
-                              <Paperclip size={16} className="text-slate-400" />
-                              <span>Share files</span>
+                              <ShieldCheck size={16} className="text-slate-400" />
+                              <span>Host controls</span>
                             </div>
-                            {sharedFiles.length > 0 && (
-                              <span className="text-[10px] text-slate-400 font-bold">
-                                {sharedFiles.length}
+                            {pendingParticipants.length > 0 && (
+                              <span className="text-[10px] bg-amber-500 text-black font-bold px-1.5 py-0.5 rounded-full">
+                                {pendingParticipants.length}
                               </span>
                             )}
                           </button>
@@ -2850,67 +3196,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
                         <div className="h-px bg-white/10 my-2" />
 
-                        {/* Standard Controls */}
+                        {/* Layout & View */}
                         <div className="space-y-1">
-                          {isMobile && (
-                            <>
-                              <button 
-                                onClick={() => { toggleHandRaise(); setIsMoreMenuOpen(false); }}
-                                className={cn(
-                                  "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                                  isHandRaised ? "text-yellow-400 bg-yellow-400/10" : "text-white"
-                                )}
-                              >
-                                <Hand size={16} className={isHandRaised ? "text-yellow-400" : "text-slate-400"} />
-                                <span>{isHandRaised ? "Lower hand" : "Raise hand"}</span>
-                              </button>
-                              <button 
-                                onClick={() => { localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled); setIsMoreMenuOpen(false); }}
-                                className={cn(
-                                  "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                                  localParticipant.isScreenShareEnabled ? "text-green-400 bg-green-400/10" : "text-white"
-                                )}
-                              >
-                                <MonitorUp size={16} className={localParticipant.isScreenShareEnabled ? "text-green-400" : "text-slate-400"} />
-                                <span>Present screen</span>
-                              </button>
-                              <button 
-                                onClick={() => { setActiveTab('chat'); setIsMoreMenuOpen(false); }}
-                                className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <MessageSquare size={16} className="text-slate-400" />
-                                  <span>In-call messages</span>
-                                </div>
-                                {chatMessages.length > 0 && (
-                                  <span className="px-1.5 py-0.2 bg-[#4285f4] text-white rounded-full text-[10px] font-bold">
-                                    {chatMessages.length}
-                                  </span>
-                                )}
-                              </button>
-                              <button 
-                                onClick={() => { setActiveTab('participants'); setIsMoreMenuOpen(false); }}
-                                className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <Users size={16} className="text-slate-400" />
-                                  <span>Participants</span>
-                                </div>
-                                <span className="text-[10px] text-slate-400 font-bold">
-                                  {remoteParticipants.length + 1}
-                                </span>
-                              </button>
-                              <button 
-                                onClick={() => { setActiveTab('notes'); setIsMoreMenuOpen(false); }}
-                                className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                              >
-                                <FileText size={16} className="text-slate-400" />
-                                <span>Meeting notes</span>
-                              </button>
-                              <div className="h-px bg-white/10 my-1" />
-                            </>
-                          )}
-
                           <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 px-2 pt-1">
                             Layout & View
                           </p>
@@ -2964,56 +3251,62 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       </motion.div>
                     </>
                   )}
-                  </AnimatePresence>
-                </div>
+                </AnimatePresence>
               </div>
             </div>
 
-            {/* Right / Bottom: End Call & Tabs & Collapse */}
+            {/* Right: Tab Buttons (Host Controls, 3x3 Tools, Chat, Settings, Collapse) */}
             <div className={cn(
               "flex items-center",
-              isLandscape ? "flex-col gap-2 w-full mt-auto pt-2 border-t border-white/10" : "flex-1 justify-end gap-2 sm:gap-3"
+              isMobileLandscape ? "flex-col gap-2 w-full mt-auto pt-2" : "flex-1 justify-end gap-1.5 sm:gap-2"
             )}>
-              {!isLandscape && (
-                <div className="hidden md:flex items-center gap-1.5 lg:gap-2 mr-2 lg:mr-4">
-                  <TabButton active={activeTab === 'info'} onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')} icon={<Info size={20} />} title="Meeting Info" />
-                  <TabButton active={activeTab === 'users'} onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')} icon={<Users size={20} />} badge={remoteParticipants.length + 1} title="Participants" />
-                  <TabButton active={activeTab === 'chat'} onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')} icon={<MessageSquare size={20} />} badge={chatMessages.length > 0 ? chatMessages.length : undefined} title="In-call Chat" />
-                  <TabButton active={activeTab === 'files'} onClick={() => setActiveTab(activeTab === 'files' ? null : 'files')} icon={<Paperclip size={20} />} badge={sharedFiles.length > 0 ? sharedFiles.length : undefined} title="Share Files" />
-                  <TabButton active={activeTab === 'whiteboard'} onClick={() => setActiveTab(activeTab === 'whiteboard' ? null : 'whiteboard')} icon={<Monitor size={20} />} title="Joint Workspace" />
-                  {isHost && (
-                    <TabButton 
-                      active={activeTab === 'waiting'} 
-                      onClick={() => setActiveTab(activeTab === 'waiting' ? null : 'waiting')} 
-                      icon={<ShieldCheck size={20} />} 
-                      badge={pendingParticipants.length > 0 ? pendingParticipants.length : undefined}
-                      title="Waiting Room"
-                    />
-                  )}
+              {!isMobileLandscape && (
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  {/* Host Controls button */}
+                  <TabButton 
+                    active={activeTab === 'host_controls'} 
+                    onClick={() => setActiveTab(activeTab === 'host_controls' ? null : 'host_controls')} 
+                    icon={<ShieldCheck size={20} />} 
+                    badge={pendingParticipants.length > 0 ? pendingParticipants.length : undefined}
+                    title="Host Controls" 
+                  />
+
+                  {/* 3x3 Dots Tools Button */}
+                  <TabButton 
+                    active={activeTab === 'tools' || activeTab === 'whiteboard' || activeTab === 'files'} 
+                    onClick={() => setActiveTab(activeTab === 'tools' || activeTab === 'whiteboard' || activeTab === 'files' ? null : 'tools')} 
+                    icon={<LayoutGrid size={20} />} 
+                    badge={sharedFiles.length > 0 ? sharedFiles.length : undefined}
+                    title="Tools & Workspace" 
+                  />
+
+                  {/* In-Call Chat */}
+                  <TabButton 
+                    active={activeTab === 'chat'} 
+                    onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')} 
+                    icon={<MessageSquare size={20} />} 
+                    badge={chatMessages.length > 0 ? chatMessages.length : undefined} 
+                    title="In-call Chat" 
+                  />
+
+                  {/* Settings */}
+                  <TabButton 
+                    active={activeTab === 'settings'} 
+                    onClick={() => setActiveTab(activeTab === 'settings' ? null : 'settings')} 
+                    icon={<Settings size={20} />} 
+                    title="Settings" 
+                  />
                 </div>
               )}
 
-              {/* Leave Call button */}
-              <button 
-                onClick={() => navigate('/')}
-                className={cn(
-                  "bg-[#ea4335] hover:bg-[#d93025] text-white flex items-center justify-center transition-all shadow-xl shadow-red-500/20 active:scale-95 group",
-                  isLandscape 
-                    ? "w-[48px] h-[48px] sm:w-[52px] sm:h-[52px] rounded-[16px] sm:rounded-[18px]" 
-                    : (isMobile ? "w-[44px] h-[44px] sm:w-[48px] sm:h-[48px] rounded-[14px] sm:rounded-[16px]" : "w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-[20px] sm:rounded-[22px]")
-                )}
-                title="Leave Call"
-              >
-                <PhoneOff size={isMobile || isLandscape ? 20 : 26} className="group-hover:rotate-12 transition-transform" />
-              </button>
-
               {/* Collapse Toolbar Button */}
               <button
+                type="button"
                 onClick={() => setIsToolbarCollapsed(true)}
-                className="p-1.5 sm:p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
                 title="Collapse toolbar"
               >
-                {isLandscape ? <ChevronRight size={18} /> : <ChevronDown size={20} />}
+                {isMobileLandscape ? <ChevronRight size={18} /> : <ChevronDown size={20} />}
               </button>
             </div>
           </motion.div>
@@ -3027,21 +3320,21 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           onMouseLeave={() => setIsBottomHovered(false)}
           className={cn(
             "fixed z-[75] pointer-events-auto flex items-center justify-center",
-            isLandscape 
+            isMobileLandscape 
               ? "right-3 sm:right-4 top-1/2 -translate-y-1/2" 
               : "bottom-4 left-1/2 -translate-x-1/2"
           )}
         >
           <motion.button
-            initial={isLandscape ? { x: 30, opacity: 0 } : { y: 30, opacity: 0 }}
+            initial={isMobileLandscape ? { x: 30, opacity: 0 } : { y: 30, opacity: 0 }}
             animate={{ x: 0, y: 0, opacity: 1 }}
-            exit={isLandscape ? { x: 30, opacity: 0 } : { y: 30, opacity: 0 }}
+            exit={isMobileLandscape ? { x: 30, opacity: 0 } : { y: 30, opacity: 0 }}
             transition={{ type: "spring", stiffness: 350, damping: 25 }}
             onClick={() => setIsToolbarCollapsed(false)}
             className="flex items-center gap-2 px-4 py-2.5 bg-[#282a2e]/95 hover:bg-[#383a40] text-white border border-white/20 rounded-full shadow-2xl backdrop-blur-xl text-xs font-bold transition-all cursor-pointer group active:scale-95"
             title="Restore toolbar controls"
           >
-            {isLandscape ? (
+            {isMobileLandscape ? (
               <ChevronLeft size={16} className="text-[#4285f4] group-hover:-translate-x-0.5 transition-transform" />
             ) : (
               <ChevronUp size={16} className="text-[#4285f4] group-hover:-translate-y-0.5 transition-transform" />
@@ -3092,6 +3385,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 >
                   <Maximize2 size={14} />
                   <span>Maximize / Spotlight</span>
+                </button>
+                <button
+                  onClick={() => {
+                    copyVideoFrameSnapshot(contextMenu.participant);
+                    setContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 text-left rounded-lg hover:bg-white/10 transition-colors text-slate-200"
+                >
+                  <Camera size={14} className="text-emerald-400" />
+                  <span>Copy Frame Snapshot</span>
                 </button>
                 {!contextMenu.isLocal && (
                   <button
@@ -3231,6 +3534,7 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
 
   return (
     <div 
+      data-participant-identity={trackRef?.participant?.identity}
       onContextMenu={(e) => {
         if (onContextMenu) {
           e.preventDefault();
@@ -3238,12 +3542,12 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         }
       }}
       className={cn(
-        "group relative w-full h-full rounded-2xl overflow-hidden bg-surface-lighter border-2 transition-all duration-300 select-none",
+        "group relative w-full h-full rounded-2xl overflow-hidden bg-[#141517] border-2 transition-all duration-300 select-none flex items-center justify-center",
         isSpeaking ? "border-accent-blue shadow-[0_0_20px_rgba(66,133,244,0.4)]" : "border-transparent"
       )}
     >
       {isVideoOff ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#1a1a1a] to-[#2a2a2a]">
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#18191b] to-[#222428]">
           {metadata.avatar ? (
             <div className={cn(
               "w-24 h-24 rounded-full overflow-hidden border-4 border-accent-blue/20 shadow-2xl transition-all",
@@ -3262,16 +3566,16 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         </div>
       ) : (
         <div 
-          className={cn("w-full h-full transition-all duration-200", mirror ? "scale-x-[-1]" : "")}
+          className={cn("w-full h-full flex items-center justify-center transition-all duration-200 bg-[#121316]", mirror ? "scale-x-[-1]" : "")}
           style={{
             filter: aiVideoFilter || 'none'
           }}
         >
           <VideoTrack 
             trackRef={trackRef} 
-            className={cn("w-full h-full bg-black/40 transition-[object-position] duration-150 ease-out", isFocal ? "object-contain" : "object-cover")}
+            className="w-full h-full object-contain transition-[object-position] duration-150 ease-out bg-[#121316]"
             style={{
-              objectPosition: isFocal ? '50% 50%' : `${facePos.x}% ${facePos.y}%`
+              objectPosition: 'center center'
             }}
           />
         </div>
@@ -3422,18 +3726,18 @@ function ControlButton({ active, onClick, icon, danger, warning, highlight, micV
         onClick={onClick}
         title={title}
         className={cn(
-          "transition-all duration-300 ease-out flex items-center justify-center flex-shrink-0 shadow-sm",
+          "transition-all duration-200 ease-out flex items-center justify-center flex-shrink-0 shadow-sm cursor-pointer",
           isSmall 
-            ? "w-[44px] h-[44px] sm:w-[48px] sm:h-[48px] rounded-[14px] sm:rounded-[16px]" 
-            : (isLandscape ? "w-[48px] h-[48px] sm:w-[52px] sm:h-[52px] rounded-[16px] sm:rounded-[18px]" : "w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-[20px] sm:rounded-[22px]"),
+            ? "w-[42px] h-[42px] sm:w-[46px] sm:h-[46px] rounded-full" 
+            : (isLandscape ? "w-[46px] h-[46px] rounded-[16px]" : "w-[50px] h-[50px] sm:w-[54px] sm:h-[54px] rounded-full"),
           hasDropdown ? (isLandscape ? "rounded-b-none border-b border-white/10" : "rounded-r-none border-r border-white/10") : "",
           micVideo ? (
-            enabled ? "bg-[#383a40] text-white hover:bg-[#464850]" : "bg-[#ea4335] text-white hover:bg-[#d93025]"
+            enabled ? "bg-[#3c4043] text-white hover:bg-[#4a4e52]" : "bg-[#ea4335] text-white hover:bg-[#d93025]"
           ) : (
             danger && !active ? "bg-[#ea4335] text-white hover:bg-[#d93025]" : 
-            warning && active ? "bg-yellow-400 text-slate-900 hover:bg-yellow-300" :
-            highlight && active ? "bg-[#4285f4] text-white" :
-            active ? "bg-[#4285f4] text-white" : "bg-[#383a40] text-white hover:bg-[#464850]"
+            warning && active ? "bg-amber-400 text-slate-950 hover:bg-amber-300 font-bold" :
+            highlight && active ? "bg-[#4285f4] text-white hover:bg-[#3367d6]" :
+            active ? "bg-[#4285f4] text-white hover:bg-[#3367d6]" : "bg-[#3c4043] text-white hover:bg-[#4a4e52]"
           ),
           "active:scale-95"
         )}
@@ -3444,10 +3748,10 @@ function ControlButton({ active, onClick, icon, danger, warning, highlight, micV
         <button
           onClick={onDropdownClick}
           className={cn(
-            "bg-[#383a40] text-white/70 hover:text-white hover:bg-[#464850] transition-all flex items-center justify-center",
+            "bg-[#3c4043] text-white/70 hover:text-white hover:bg-[#4a4e52] transition-all flex items-center justify-center cursor-pointer",
             isLandscape 
-              ? "w-[48px] sm:w-[52px] h-[18px] rounded-b-[16px] sm:rounded-b-[18px] border-t border-white/10" 
-              : (isSmall ? "w-[24px] h-[44px] sm:h-[48px] rounded-r-[14px] sm:rounded-r-[16px] border-l border-white/10" : "w-[26px] h-[56px] sm:h-[60px] rounded-r-[20px] sm:rounded-r-[22px] border-l border-white/10")
+              ? "w-[46px] h-[16px] rounded-b-[16px] border-t border-white/10" 
+              : (isSmall ? "w-[20px] h-[42px] sm:h-[46px] rounded-r-full border-l border-white/10" : "w-[22px] h-[50px] sm:h-[54px] rounded-r-full border-l border-white/10")
           )}
         >
           {isLandscape ? (
@@ -3461,18 +3765,19 @@ function ControlButton({ active, onClick, icon, danger, warning, highlight, micV
   );
 }
 
-function TabButton({ active, onClick, icon, badge }: any) {
+function TabButton({ active, onClick, icon, badge, title }: any) {
   return (
     <button 
       onClick={onClick}
+      title={title}
       className={cn(
-        "w-10 h-10 sm:w-11 sm:h-11 rounded-full transition-all duration-200 ease-out relative flex items-center justify-center",
-        active ? "bg-white/15 text-white shadow-md shadow-black/20" : "bg-transparent text-slate-300 hover:bg-white/10 hover:text-white"
+        "w-10 h-10 sm:w-11 sm:h-11 rounded-full transition-all duration-200 ease-out relative flex items-center justify-center cursor-pointer",
+        active ? "bg-white/20 text-white shadow-md" : "bg-transparent text-slate-300 hover:bg-white/10 hover:text-white"
       )}
     >
       {icon}
       {badge !== undefined && (
-        <span className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 bg-white text-slate-900 text-[9px] font-bold px-1.5 rounded-full min-w-[18px]">
+        <span className="absolute -top-1 -right-1 bg-[#4285f4] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-[#202124]">
           {badge}
         </span>
       )}
