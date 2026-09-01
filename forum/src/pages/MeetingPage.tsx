@@ -27,7 +27,7 @@ import {
   X, Send, ChevronDown, Settings, Copy, Check, Pin, PinOff,
   Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight, ArrowLeft,
   Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
-  ChevronUp, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard,
+  ChevronUp, ChevronLeft, ChevronRight, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard,
   Radio, Maximize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download,
   SwitchCamera, Wand2, SlidersHorizontal
 } from 'lucide-react';
@@ -35,7 +35,8 @@ import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { SharedFileItem, SendFileDialog, SharedFileCard, FilesPanel } from '../components/FileTransfer';
 import SettingsModal from '../components/SettingsModal';
 import { useDeviceManager } from '../hooks/useDeviceManager';
-import { AIVideoEnhanceOptions, DEFAULT_AI_VIDEO_ENHANCE, getAIVideoFilterStyle } from '../utils/mediaEnhancer';
+import { AIVideoEnhanceOptions, DEFAULT_AI_VIDEO_ENHANCE, getAIVideoFilterStyle, AIEnhancementFilterDefs } from '../utils/mediaEnhancer';
+import { useFaceTracking } from '../hooks/useFaceTracking';
 import { useAuth } from '../context/AuthContext';
 import { db, auth, komuDb, komuAuth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -272,48 +273,49 @@ export default function MeetingPage() {
 
   if (!isReady) {
     return (
-      <div className="min-h-screen bg-[#f4f5f6] flex flex-col items-center justify-center p-4 sm:p-6">
-        <div className="max-w-5xl w-full flex flex-col lg:flex-row items-center gap-8 lg:gap-12 bg-white p-6 sm:p-10 md:p-12 rounded-[28px] shadow-xl border border-gray-100/80">
-          <div className="flex-1 w-full relative aspect-video bg-bg-dark rounded-2xl overflow-hidden shadow-inner group">
+      <div className="min-h-screen bg-white sm:bg-[#f4f5f6] flex flex-col items-center justify-center p-4 sm:p-6 md:p-8">
+        <div className="w-full max-w-5xl flex flex-col lg:flex-row items-center gap-8 lg:gap-14 bg-white sm:p-8 md:p-12 sm:rounded-[32px] sm:shadow-xl sm:border sm:border-gray-200/80">
+          <div className="flex-1 w-full relative aspect-[4/3] sm:aspect-video bg-[#131416] rounded-2xl sm:rounded-3xl overflow-hidden shadow-inner group flex items-center justify-center">
             <div className="relative w-full h-full flex items-center justify-center">
               {preJoinCam && !cameraPermissionError ? (
                 <video ref={videoRef} autoPlay muted playsInline className={cn("scale-x-[-1] w-full h-full object-cover", preJoinBg === 'blur' && "blur-md")} />
               ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-[#121824] to-[#1e293b] p-6 text-center space-y-3">
-                  <div className="w-20 h-20 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-3xl font-bold text-white shadow-xl">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#131416] p-6 text-center space-y-4">
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#202226] border border-white/10 flex items-center justify-center text-3xl sm:text-4xl font-bold text-white shadow-xl">
                     {name.charAt(0).toUpperCase() || "?"}
                   </div>
                   {cameraPermissionError ? (
-                    <div className="space-y-2 max-w-sm">
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-300 text-xs font-semibold border border-amber-500/20">
+                    <div className="space-y-2 max-w-xs">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-300 text-xs font-semibold border border-amber-500/25">
                         <VideoOff size={14} />
                         <span>Camera Off / Permission Needed</span>
                       </div>
-                      <p className="text-slate-400 text-xs">
-                        You can join the room without video, or allow camera permissions in your browser.
+                      <p className="text-slate-400 text-xs leading-relaxed">
+                        You can join without video, or enable camera access in your browser.
                       </p>
                       <button
                         type="button"
                         onClick={requestCameraAccess}
-                        className="mt-1 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-all shadow-md"
+                        className="mt-1 px-4 py-2 bg-[#4285f4] hover:bg-blue-600 text-white text-xs font-bold rounded-xl transition-all shadow-md active:scale-95"
                       >
                         Enable Camera
                       </button>
                     </div>
                   ) : (
-                    <p className="text-slate-400 text-xs font-medium">Camera is currently off</p>
+                    <p className="text-slate-400 text-xs sm:text-sm font-medium">Camera is currently off</p>
                   )}
                 </div>
               )}
             </div>
             
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 transition-opacity z-10">
+            {/* Audio & Video Controls with generous spacing */}
+            <div className="absolute bottom-5 sm:bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 sm:gap-4 transition-opacity z-20">
                <button 
                 type="button"
                 onClick={() => setPreJoinMic(!preJoinMic)}
                 className={cn(
-                  "p-3.5 rounded-full backdrop-blur-md border border-white/15 shadow-xl transition-all",
-                  preJoinMic ? "bg-slate-800/90 text-white hover:bg-slate-700" : "bg-red-600 text-white hover:bg-red-500"
+                  "w-12 h-12 rounded-full backdrop-blur-md border border-white/20 shadow-xl transition-all flex items-center justify-center active:scale-95",
+                  preJoinMic ? "bg-[#282a2e]/90 text-white hover:bg-[#383a40]" : "bg-red-600 text-white hover:bg-red-500"
                 )}
                 title={preJoinMic ? "Mute Microphone" : "Unmute Microphone"}
                >
@@ -329,8 +331,8 @@ export default function MeetingPage() {
                   }
                 }}
                 className={cn(
-                  "p-3.5 rounded-full backdrop-blur-md border border-white/15 shadow-xl transition-all",
-                  preJoinCam ? "bg-slate-800/90 text-white hover:bg-slate-700" : "bg-red-600 text-white hover:bg-red-500"
+                  "w-12 h-12 rounded-full backdrop-blur-md border border-white/20 shadow-xl transition-all flex items-center justify-center active:scale-95",
+                  preJoinCam ? "bg-[#282a2e]/90 text-white hover:bg-[#383a40]" : "bg-red-600 text-white hover:bg-red-500"
                 )}
                 title={preJoinCam ? "Turn Camera Off" : "Turn Camera On"}
                >
@@ -341,18 +343,18 @@ export default function MeetingPage() {
                   type="button"
                   onClick={() => setPreJoinBg(preJoinBg === 'none' ? 'blur' : 'none')}
                   className={cn(
-                    "p-3.5 rounded-full backdrop-blur-md border border-white/15 shadow-xl transition-all",
-                    preJoinBg !== 'none' ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-slate-800/90 text-white hover:bg-slate-700"
+                    "w-12 h-12 rounded-full backdrop-blur-md border border-white/20 shadow-xl transition-all flex items-center justify-center active:scale-95",
+                    preJoinBg !== 'none' ? "bg-[#4285f4] text-white hover:bg-blue-600" : "bg-[#282a2e]/90 text-white hover:bg-[#383a40]"
                   )}
                   title="Toggle Blur Effect"
                  >
-                  <Sparkles size={20} />
+                  <SlidersHorizontal size={20} />
                  </button>
                )}
             </div>
 
             {preJoinCam && videoDevices.length > 0 && (
-              <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
+              <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
                 <select 
                   onChange={(e) => {
                     const deviceId = e.target.value;
@@ -365,7 +367,7 @@ export default function MeetingPage() {
                         console.warn("Could not switch camera preview device:", err);
                       });
                   }}
-                  className="bg-black/70 text-white text-xs p-2 rounded-lg border border-white/15 outline-none backdrop-blur-md"
+                  className="bg-black/70 text-white text-xs px-2.5 py-1.5 rounded-xl border border-white/15 outline-none backdrop-blur-md"
                 >
                   <option value="">Default Camera</option>
                   {videoDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0, 4)}`}</option>)}
@@ -376,7 +378,7 @@ export default function MeetingPage() {
 
           <div className="w-full lg:w-[380px] space-y-6 text-center lg:text-left">
             <div>
-              <div className="flex items-center gap-2 text-accent-blue text-xs font-bold mb-3">
+              <div className="flex items-center justify-center lg:justify-start gap-2 text-accent-blue text-xs font-bold mb-2">
                 {user ? (
                   <>
                     <ShieldCheck size={14} />
@@ -390,15 +392,15 @@ export default function MeetingPage() {
                 )}
               </div>
 
-              <h1 className="text-3xl font-black text-gray-900 tracking-tight mb-2">
+              <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
                 {meetingDetails?.title || "Ready to join?"}
               </h1>
               {meetingDetails && (
-                <p className="text-gray-500 text-sm mb-1">
+                <p className="text-gray-500 text-xs sm:text-sm mt-1">
                   Hosted by <span className="font-bold text-accent-blue">{meetingDetails.hostName}</span>
                 </p>
               )}
-              <p className="text-gray-500 text-sm">Room: <span className="font-mono font-bold text-accent-blue">{room}</span></p>
+              <p className="text-gray-500 text-xs sm:text-sm mt-1">Room: <span className="font-mono font-bold text-accent-blue">{room}</span></p>
             </div>
 
             <form onSubmit={(e) => { e.preventDefault(); handleJoin(); }} className="space-y-4">
@@ -409,13 +411,13 @@ export default function MeetingPage() {
               )}
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5 text-left">
-                  Your Username / Display Name <span className="text-accent-red">*</span>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 text-left">
+                  Your Display Name <span className="text-accent-red">*</span>
                 </label>
                 <input 
                   type="text" 
                   required
-                  placeholder="Enter your username" 
+                  placeholder="Enter your name" 
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={isJoining}
@@ -426,7 +428,7 @@ export default function MeetingPage() {
               <button 
                 type="submit"
                 disabled={!name.trim() || isJoining}
-                className="w-full py-3.5 bg-accent-blue text-white rounded-xl font-bold text-sm hover:bg-blue-600 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-accent-blue/20 flex items-center justify-center gap-2"
+                className="w-full py-4 bg-accent-blue text-white rounded-xl font-bold text-sm hover:bg-blue-600 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-accent-blue/25 flex items-center justify-center gap-2"
               >
                 {isJoining ? (
                   <>
@@ -439,7 +441,7 @@ export default function MeetingPage() {
               </button>
 
               {!user && (
-                <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
                   <span>Want to save notes & meetings?</span>
                   <button 
                     type="button" 
@@ -508,6 +510,7 @@ export default function MeetingPage() {
       className="h-full w-full"
     >
       <div className="flex flex-col h-full relative">
+        <AIEnhancementFilterDefs />
         <MeetingRoomHeader 
           isRecording={isRecording} 
         />
@@ -984,6 +987,24 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   const tracks = useVisualStableUpdate(rawTracks, 16);
   const isMobile = useMemo(() => typeof window !== 'undefined' && isMobileBrowser(), []);
+
+  // Screen orientation detection for landscape vs portrait
+  const [isLandscape, setIsLandscape] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth > window.innerHeight;
+  });
+
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      setIsLandscape(window.innerWidth > window.innerHeight);
+    };
+    window.addEventListener('resize', handleOrientationChange);
+    window.addEventListener('orientationchange', handleOrientationChange);
+    return () => {
+      window.removeEventListener('resize', handleOrientationChange);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+    };
+  }, []);
 
   const [pinnedIdentities, setPinnedIdentities] = useState<Set<string>>(new Set());
   const [hideNonVideo, setHideNonVideo] = useState(false);
@@ -1947,8 +1968,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
       {/* Main Grid Area */}
       <div className={cn(
-        "flex-1 relative flex items-center justify-center p-3 sm:p-4 pt-4 sm:pt-5 bg-slate-950 overflow-hidden min-h-0 transition-all duration-300",
-        isToolbarCollapsed ? "pb-3 sm:pb-4" : "pb-[96px]"
+        "flex-1 relative flex flex-col items-center justify-center p-2 sm:p-3 pt-1 sm:pt-2 bg-[#131416] overflow-hidden min-h-0 transition-all duration-300",
+        isLandscape 
+          ? (isToolbarCollapsed ? "pr-2 sm:pr-3 pb-2 sm:pb-3" : "pr-[78px] sm:pr-[90px] pb-2 sm:pb-3") 
+          : (isToolbarCollapsed ? "pb-2 sm:pb-3" : "pb-[96px] sm:pb-[106px]")
       )}>
         {/* Click Outside Backdrop for Dropdowns */}
         {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen) && (
@@ -1963,15 +1986,15 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           />
         )}
         <div className={cn(
-          "relative w-full h-full transition-all duration-500 min-h-0",
+          "relative w-full h-full transition-all duration-500 min-h-0 flex flex-col justify-center items-center",
           activeTab && activeTab !== 'settings' && !isMobile 
             ? (activeTab === 'whiteboard' ? "hidden md:block md:mr-[84vw] lg:mr-[76vw] xl:mr-[72vw]" : "lg:mr-[380px]") 
             : ""
         )}>
           {computedLayout === 'imo' && focusTrack ? (
-            <div className="flex flex-col h-full w-full gap-4">
+            <div className="flex flex-col h-full w-full gap-3">
               {/* Top Filmstrip - Smaller and more compact */}
-              <div className="h-[90px] md:h-[130px] flex items-center gap-3 overflow-x-auto pb-2 custom-scroll scroll-smooth px-2">
+              <div className="h-[84px] md:h-[120px] flex items-center gap-2.5 overflow-x-auto pb-1.5 custom-scroll scroll-smooth px-1">
                 {processedTracks.filter(t => t.participant.identity !== focusTrack.participant.identity).map(t => (
                   <div key={t.participant.sid} className="h-full aspect-video flex-shrink-0">
                     <CustomParticipantTile 
@@ -1995,7 +2018,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </div>
               {/* Central Person - Improved aspect ratio handling to prevent over-cropping */}
               <div className="flex-1 min-h-0 relative flex items-center justify-center">
-                <div className="w-full h-full max-w-3xl max-h-[68dvh] aspect-video">
+                <div className="w-full h-full max-w-4xl max-h-[74dvh] aspect-video">
                   <CustomParticipantTile 
                     trackRef={focusTrack} 
                     raisedHands={raisedHands}
@@ -2017,7 +2040,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </div>
             </div>
           ) : computedLayout === 'sidebar' && focusTrack ? (
-            <div className="flex flex-col md:flex-row gap-4 h-full w-full">
+            <div className="flex flex-col md:flex-row gap-3 h-full w-full">
               <div className="flex-[3] bg-bg-dark rounded-2xl overflow-hidden relative shadow-2xl border border-white/5">
                 <CustomParticipantTile 
                   trackRef={focusTrack} 
@@ -2034,7 +2057,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 />
               </div>
               {/* Sidebar Rail - Fixed for mobile visibility */}
-              <div className="w-full md:w-[280px] h-[120px] md:h-full overflow-x-auto md:overflow-y-auto flex md:flex-col gap-3 custom-scroll p-1 shrink-0">
+              <div className="w-full md:w-[260px] h-[110px] md:h-full overflow-x-auto md:overflow-y-auto flex md:flex-col gap-2.5 custom-scroll p-1 shrink-0">
                 {processedTracks.filter(t => t.participant.sid !== focusTrack.participant.sid).map(t => (
                   <div key={t.participant.sid} className="h-full md:h-auto aspect-video flex-shrink-0">
                     <CustomParticipantTile 
@@ -2080,8 +2103,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   dragConstraints={containerRef}
                   dragMomentum={false}
                   className={cn(
-                  "absolute bottom-4 z-20 w-[140px] h-[190px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-bg-dark active:scale-105 transition-transform cursor-move",
-                  mobileOverlaySide === 'right' ? 'right-4' : 'left-4'
+                  "absolute bottom-4 z-20 w-[130px] h-[175px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-bg-dark active:scale-105 transition-transform cursor-move",
+                  mobileOverlaySide === 'right' ? 'right-3' : 'left-3'
                 )}>
                   <div className="relative w-full h-full">
                     <CustomParticipantTile 
@@ -2096,7 +2119,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       onCopyIsolatedFeed={() => copyIsolatedFeedLink(mobileSecondaryTrack.participant)}
                       onSendFile={(identity: string) => openSendFileFor(identity)}
                     />
-                    <div className="absolute top-3 right-3 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-2.5 right-2.5 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => {
                           setMobilePrimaryIdentity(mobileSecondaryTrack.participant.identity);
@@ -2110,8 +2133,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 </motion.div>
               </div>
             ) : visibleTracks.length === 1 ? (
-              <div className="w-full h-full flex items-center justify-center p-4">
-                <div className="w-full h-full max-w-5xl max-h-[72vh] aspect-video">
+              <div className="w-full h-full flex items-center justify-center p-1 sm:p-2">
+                <div className="w-full h-full max-w-5xl max-h-[76vh] aspect-video">
                   <CustomParticipantTile 
                     trackRef={visibleTracks[0]} 
                     raisedHands={raisedHands}
@@ -2128,7 +2151,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </div>
             ) : (
               <div 
-                className="grid gap-2 w-full h-full items-stretch"
+                className="grid gap-2 sm:gap-3 w-full h-full items-stretch"
                 style={{ 
                   gridTemplateColumns: isMobile
                     ? 'repeat(1, minmax(0, 1fr))'
@@ -2208,10 +2231,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className={cn(
                 "fixed top-0 right-0 z-50 bg-white border-l border-gray-200 overflow-hidden flex flex-col shadow-2xl transition-all duration-300",
-                isToolbarCollapsed ? "bottom-0" : "bottom-[88px]",
+                isLandscape || isToolbarCollapsed ? "bottom-0" : "bottom-[88px]",
                 activeTab === 'whiteboard' 
                   ? "w-full md:w-[84vw] lg:w-[76vw] xl:w-[72vw]" 
-                  : (isMobile ? "w-full inset-x-0" : "w-[380px]")
+                  : (isMobile && !isLandscape ? "w-full inset-x-0" : "w-[360px] sm:w-[380px] md:w-[400px]")
               )}
             >
               {/* Sidebar Header (Hidden for whiteboard since JointWorkspace renders its own unified top bar; minimal X-only for files) */}
@@ -2522,31 +2545,42 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         />
       </div>
 
-      {/* Taskbar */}
+      {/* Taskbar - Responsive Landscape Side & Portrait Bottom Dock */}
       <AnimatePresence>
         {!isToolbarCollapsed && (
           <motion.div 
-            initial={{ y: 88, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 88, opacity: 0 }}
+            initial={isLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
+            animate={isLandscape ? { x: 0, opacity: 1 } : { y: 0, opacity: 1 }}
+            exit={isLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-            className="absolute bottom-0 left-0 right-0 h-[88px] flex items-center justify-between px-6 md:px-10 bg-slate-900/90 backdrop-blur-xl border-t border-white/5 z-[70]"
+            className={cn(
+              "bg-[#282a2e]/95 backdrop-blur-2xl border-white/10 z-[70] shadow-2xl transition-all duration-300",
+              isLandscape 
+                ? "absolute top-0 right-0 bottom-0 w-[70px] sm:w-[80px] flex flex-col items-center justify-between py-2 sm:py-3 border-l px-1.5 overflow-visible" 
+                : "absolute bottom-0 left-0 right-0 h-[88px] flex items-center justify-between px-3 sm:px-6 md:px-10 border-t"
+            )}
           >
-            {/* Left: Meeting Info */}
-            <div className="hidden md:flex flex-1 items-center justify-start gap-4">
-              {showClock && (
-                <div className="text-white">
-                  <p className="text-base font-bold tracking-tight">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                  <div className="flex items-center gap-2 opacity-60">
-                    <span className="w-1.5 h-1.5 bg-accent-blue rounded-full" />
-                    <p className="text-xs font-semibold truncate max-w-[180px]">{room}</p>
+            {/* Left/Top: Meeting Info (Desktop only) */}
+            {!isLandscape && (
+              <div className="hidden md:flex flex-1 items-center justify-start gap-4">
+                {showClock && (
+                  <div className="text-white">
+                    <p className="text-base font-bold tracking-tight">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                    <div className="flex items-center gap-2 opacity-60">
+                      <span className="w-1.5 h-1.5 bg-[#4285f4] rounded-full" />
+                      <p className="text-xs font-semibold truncate max-w-[180px]">{room}</p>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
-            {/* Center: Main Controls */}
-            <div className="flex flex-none items-center gap-2 md:gap-3 justify-center">
+            {/* Main Controls: Column in Landscape, Row in Portrait */}
+            <div className={cn(
+              "flex flex-none items-center justify-center",
+              isLandscape ? "flex-col gap-2 sm:gap-2.5 w-full my-auto" : "gap-2 md:gap-3"
+            )}>
+              {/* Mic Control */}
               <div className="relative">
                 <ControlButton 
                   onClick={async () => {
@@ -2564,37 +2598,47 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   onDropdownClick={() => setIsMicMenuOpen(!isMicMenuOpen)}
                   hasDropdown={!isMobile}
                   size={isMobile ? "small" : "normal"}
+                  isLandscape={isLandscape}
                   title="Microphone (m)"
                 />
                 <AnimatePresence>
                   {isMicMenuOpen && !isMobile && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700 p-2 z-[70]"
-                    >
-                      <p className="text-[10px] font-bold text-slate-500 px-3 py-1 uppercase tracking-wider">Microphone</p>
-                      <div className="max-h-48 overflow-y-auto custom-scroll">
-                        {audioDevices.map(d => (
-                          <button 
-                            key={d.deviceId}
-                            onClick={() => { setSelectedAudioId(d.deviceId); setIsMicMenuOpen(false); }}
-                            className={cn(
-                              "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
-                              selectedAudioId === d.deviceId ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/5"
-                            )}
-                          >
-                            <Mic size={14} />
-                            <span className="truncate">{d.label || `Microphone ${d.deviceId.slice(0, 4)}`}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
+                    <>
+                      <div className="fixed inset-0 z-[110]" onClick={() => setIsMicMenuOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className={cn(
+                          "w-64 bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120]",
+                          isLandscape 
+                            ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[85vh]" 
+                            : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
+                        )}
+                      >
+                        <p className="text-[10px] font-bold text-slate-400 px-3 py-1 uppercase tracking-wider">Microphone</p>
+                        <div className="max-h-48 overflow-y-auto custom-scroll">
+                          {audioDevices.map(d => (
+                            <button 
+                              key={d.deviceId}
+                              onClick={() => { setSelectedAudioId(d.deviceId); setIsMicMenuOpen(false); }}
+                              className={cn(
+                                "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
+                                selectedAudioId === d.deviceId ? "bg-[#4285f4] text-white" : "text-slate-300 hover:bg-white/10"
+                              )}
+                            >
+                              <Mic size={14} />
+                              <span className="truncate">{d.label || `Microphone ${d.deviceId.slice(0, 4)}`}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    </>
                   )}
                 </AnimatePresence>
               </div>
 
+              {/* Camera Control */}
               <div className="relative">
                 <ControlButton 
                   onClick={async () => {
@@ -2612,52 +2656,65 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   onDropdownClick={() => setIsCamMenuOpen(!isCamMenuOpen)}
                   hasDropdown={!isMobile}
                   size={isMobile ? "small" : "normal"}
+                  isLandscape={isLandscape}
                   title="Camera (v)"
                 />
                 <AnimatePresence>
                   {isCamMenuOpen && !isMobile && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 w-64 bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700 p-2 z-[70]"
-                    >
-                      <p className="text-[10px] font-bold text-slate-500 px-3 py-1 uppercase tracking-wider">Camera</p>
-                      <div className="max-h-48 overflow-y-auto custom-scroll">
-                        {videoDevices.map(d => (
-                          <button 
-                            key={d.deviceId}
-                            onClick={() => { setSelectedVideoId(d.deviceId); setIsCamMenuOpen(false); }}
-                            className={cn(
-                              "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
-                              selectedVideoId === d.deviceId ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/5"
-                            )}
-                          >
-                            <VideoIcon size={14} />
-                            <span className="truncate">{d.label || `Camera ${d.deviceId.slice(0, 4)}`}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
+                    <>
+                      <div className="fixed inset-0 z-[110]" onClick={() => setIsCamMenuOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className={cn(
+                          "w-64 bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120]",
+                          isLandscape 
+                            ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[85vh]" 
+                            : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
+                        )}
+                      >
+                        <p className="text-[10px] font-bold text-slate-400 px-3 py-1 uppercase tracking-wider">Camera</p>
+                        <div className="max-h-48 overflow-y-auto custom-scroll">
+                          {videoDevices.map(d => (
+                            <button 
+                              key={d.deviceId}
+                              onClick={() => { setSelectedVideoId(d.deviceId); setIsCamMenuOpen(false); }}
+                              className={cn(
+                                "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
+                                selectedVideoId === d.deviceId ? "bg-[#4285f4] text-white" : "text-slate-300 hover:bg-white/10"
+                              )}
+                            >
+                              <VideoIcon size={14} />
+                              <span className="truncate">{d.label || `Camera ${d.deviceId.slice(0, 4)}`}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    </>
                   )}
                 </AnimatePresence>
               </div>
 
+              {/* Mobile Flip Camera */}
               {isMobile && localParticipant.isCameraEnabled && (
                 <ControlButton 
                   onClick={handleFlipCamera}
                   icon={<SwitchCamera size={18} />}
                   size="small"
+                  isLandscape={isLandscape}
                   title={`Flip Camera (${facingMode === 'user' ? 'Front' : 'Back'})`}
                 />
               )}
 
+              {/* Captions */}
               <ControlButton 
                 active={isCaptionsEnabled} 
                 onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
                 size={isMobile ? "small" : "normal"}
                 icon={<Languages size={isMobile ? 18 : 22} />}
                 highlight={isCaptionsEnabled}
+                isLandscape={isLandscape}
                 title="Captions (c)"
               />
 
@@ -2668,43 +2725,57 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onClick={toggleHandRaise}
                     icon={<Hand size={22} />}
                     warning={isHandRaised}
+                    isLandscape={isLandscape}
+                    title="Raise hand"
                   />
                   <ControlButton 
                     active={localParticipant.isScreenShareEnabled} 
                     onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
                     icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
                     highlight={localParticipant.isScreenShareEnabled}
+                    isLandscape={isLandscape}
+                    title="Share screen"
                   />
                 </>
               )}
 
-              <div className="relative flex items-center gap-1 md:gap-2">
+              {/* Reactions & More */}
+              <div className={cn("relative flex items-center", isLandscape ? "flex-col gap-2" : "gap-1 md:gap-2")}>
                 {!isMobile && (
                   <div className="relative">
                     <ControlButton 
                       onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
                       icon={<Smile size={22} />}
                       active={isReactionsMenuOpen}
+                      isLandscape={isLandscape}
                       title="Reactions"
                     />
                     <AnimatePresence>
                       {isReactionsMenuOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[70] flex items-center gap-1"
-                        >
-                          {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
-                            <button 
-                              key={emoji}
-                              onClick={() => { sendReaction(emoji); setIsReactionsMenuOpen(false); }}
-                              className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-xl transition-all active:scale-90"
-                            >
-                              {emoji}
-                            </button>
-                          ))}
-                        </motion.div>
+                        <>
+                          <div className="fixed inset-0 z-[110]" onClick={() => setIsReactionsMenuOpen(false)} />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className={cn(
+                              "bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120]",
+                              isLandscape 
+                                ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 grid grid-cols-4 gap-1.5 w-44" 
+                                : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2 flex items-center gap-1"
+                            )}
+                          >
+                            {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
+                              <button 
+                                key={emoji}
+                                onClick={() => { sendReaction(emoji); setIsReactionsMenuOpen(false); }}
+                                className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-xl transition-all active:scale-90"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </motion.div>
+                        </>
                       )}
                     </AnimatePresence>
                   </div>
@@ -2716,240 +2787,267 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     icon={<MoreVertical size={20} />}
                     active={isMoreMenuOpen}
                     size={isMobile ? "small" : "normal"}
+                    isLandscape={isLandscape}
+                    title="More options"
                   />
 
                   <AnimatePresence>
                     {isMoreMenuOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        className="absolute bottom-full mb-3 right-0 sm:left-1/2 sm:-translate-x-1/2 w-72 sm:w-80 max-w-[calc(100vw-24px)] bg-slate-900/95 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/10 p-3 z-[70] max-h-[80vh] overflow-y-auto custom-scroll"
-                      >
-                      {isMobile && (
-                        <div className="p-2 grid grid-cols-4 gap-2 mb-3 border-b border-white/10 pb-3">
-                          {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
-                            <button 
-                              key={emoji}
-                              onClick={() => { sendReaction(emoji); setIsMoreMenuOpen(false); }}
-                              className="w-full aspect-square flex items-center justify-center text-xl hover:bg-white/10 rounded-xl transition-all active:scale-90"
-                            >
-                              {emoji}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Activities & Tools - Plain minimalist list buttons */}
-                      <div className="space-y-1 mb-1">
-                        <button 
-                          onClick={() => { setActiveTab('whiteboard'); setIsMoreMenuOpen(false); }}
-                          className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Monitor size={16} className="text-slate-400" />
-                            <span>Joint workspace</span>
-                          </div>
-                        </button>
-
-                        <button 
-                          onClick={() => { setActiveTab('files'); setIsMoreMenuOpen(false); }}
-                          className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Paperclip size={16} className="text-slate-400" />
-                            <span>Share files</span>
-                          </div>
-                          {sharedFiles.length > 0 && (
-                            <span className="text-[10px] text-slate-400 font-bold">
-                              {sharedFiles.length}
-                            </span>
+                      <>
+                        <div className="fixed inset-0 z-[110]" onClick={() => setIsMoreMenuOpen(false)} />
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          className={cn(
+                            "w-72 sm:w-80 bg-[#282a2e]/98 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/10 p-3 z-[120] overflow-y-auto custom-scroll",
+                            isLandscape 
+                              ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[90vh]" 
+                              : "absolute bottom-full mb-3 right-0 sm:left-1/2 sm:-translate-x-1/2 max-w-[calc(100vw-24px)] max-h-[80vh]"
                           )}
-                        </button>
-                      </div>
-
-                      <div className="h-px bg-white/10 my-2" />
-
-                      {/* Standard Controls */}
-                      <div className="space-y-1">
+                        >
                         {isMobile && (
-                          <>
-                            <button 
-                              onClick={() => { toggleHandRaise(); setIsMoreMenuOpen(false); }}
-                              className={cn(
-                                "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                                isHandRaised ? "text-yellow-400 bg-yellow-400/10" : "text-white"
-                              )}
-                            >
-                              <Hand size={16} className={isHandRaised ? "text-yellow-400" : "text-slate-400"} />
-                              <span>{isHandRaised ? "Lower hand" : "Raise hand"}</span>
-                            </button>
-                            <button 
-                              onClick={() => { localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled); setIsMoreMenuOpen(false); }}
-                              className={cn(
-                                "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                                localParticipant.isScreenShareEnabled ? "text-green-400 bg-green-400/10" : "text-white"
-                              )}
-                            >
-                              <MonitorUp size={16} className={localParticipant.isScreenShareEnabled ? "text-green-400" : "text-slate-400"} />
-                              <span>Present screen</span>
-                            </button>
-                            <button 
-                              onClick={() => { setActiveTab('chat'); setIsMoreMenuOpen(false); }}
-                              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                            >
-                              <div className="flex items-center gap-3">
-                                <MessageSquare size={16} className="text-slate-400" />
-                                <span>In-call messages</span>
-                              </div>
-                              {chatMessages.length > 0 && (
-                                <span className="px-1.5 py-0.2 bg-blue-500 text-white rounded-full text-[10px] font-bold">
-                                  {chatMessages.length}
-                                </span>
-                              )}
-                            </button>
-                            <button 
-                              onClick={() => { setActiveTab('participants'); setIsMoreMenuOpen(false); }}
-                              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                            >
-                              <div className="flex items-center gap-3">
-                                <Users size={16} className="text-slate-400" />
-                                <span>Participants</span>
-                              </div>
-                              <span className="text-[10px] text-slate-400 font-bold">
-                                {remoteParticipants.length + 1}
-                              </span>
-                            </button>
-                            <button 
-                              onClick={() => { setActiveTab('notes'); setIsMoreMenuOpen(false); }}
-                              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                            >
-                              <FileText size={16} className="text-slate-400" />
-                              <span>Meeting notes</span>
-                            </button>
-                            <div className="h-px bg-white/10 my-1" />
-                          </>
+                          <div className="p-2 grid grid-cols-4 gap-2 mb-3 border-b border-white/10 pb-3">
+                            {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔'].map(emoji => (
+                              <button 
+                                key={emoji}
+                                onClick={() => { sendReaction(emoji); setIsMoreMenuOpen(false); }}
+                                className="w-full aspect-square flex items-center justify-center text-xl hover:bg-white/10 rounded-xl transition-all active:scale-90"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
                         )}
 
-                        <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 px-2 pt-1">
-                          Layout & View
-                        </p>
-                        <button 
-                          onClick={() => { setLayoutMode('tiled'); setIsMoreMenuOpen(false); }}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                            layoutMode === 'tiled' ? "text-accent-blue bg-accent-blue/10" : "text-white"
-                          )}
-                        >
-                          <LayoutIcon size={16} className={layoutMode === 'tiled' ? "text-accent-blue" : "text-slate-400"} />
-                          <span>Tiled layout</span>
-                        </button>
-                        <button 
-                          onClick={() => { setLayoutMode('sidebar'); setIsMoreMenuOpen(false); }}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                            layoutMode === 'sidebar' ? "text-accent-blue bg-accent-blue/10" : "text-white"
-                          )}
-                        >
-                          <Monitor size={16} className={layoutMode === 'sidebar' ? "text-accent-blue" : "text-slate-400"} />
-                          <span>Sidebar layout</span>
-                        </button>
-                        <button 
-                          onClick={() => { setLayoutMode('imo'); setIsMoreMenuOpen(false); }}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                            layoutMode === 'imo' ? "text-accent-blue bg-accent-blue/10" : "text-white"
-                          )}
-                        >
-                          <LayoutIcon size={16} className={cn("text-slate-400", layoutMode === 'imo' && "text-accent-blue rotate-90")} />
-                          <span>IMO view (filmstrip)</span>
-                        </button>
-                        <button 
-                          onClick={() => { setHideNonVideo(!hideNonVideo); setIsMoreMenuOpen(false); }}
-                          className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                        >
-                          <UserX size={16} className="text-slate-400" />
-                          <span>{hideNonVideo ? "Show non-video" : "Hide non-video"}</span>
-                        </button>
+                        {/* Activities & Tools - Plain minimalist list buttons */}
+                        <div className="space-y-1 mb-1">
+                          <button 
+                            onClick={() => { setActiveTab('whiteboard'); setIsMoreMenuOpen(false); }}
+                            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Monitor size={16} className="text-slate-400" />
+                              <span>Joint workspace</span>
+                            </div>
+                          </button>
 
-                        <div className="h-px bg-white/10 my-1" />
-                        <button 
-                          onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); }}
-                          className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                        >
-                          <Settings size={16} className="text-slate-400" />
-                          <span>Settings</span>
-                        </button>
-                      </div>
-                    </motion.div>
+                          <button 
+                            onClick={() => { setActiveTab('files'); setIsMoreMenuOpen(false); }}
+                            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Paperclip size={16} className="text-slate-400" />
+                              <span>Share files</span>
+                            </div>
+                            {sharedFiles.length > 0 && (
+                              <span className="text-[10px] text-slate-400 font-bold">
+                                {sharedFiles.length}
+                              </span>
+                            )}
+                          </button>
+                        </div>
+
+                        <div className="h-px bg-white/10 my-2" />
+
+                        {/* Standard Controls */}
+                        <div className="space-y-1">
+                          {isMobile && (
+                            <>
+                              <button 
+                                onClick={() => { toggleHandRaise(); setIsMoreMenuOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs transition-colors",
+                                  isHandRaised ? "text-yellow-400 bg-yellow-400/10" : "text-white"
+                                )}
+                              >
+                                <Hand size={16} className={isHandRaised ? "text-yellow-400" : "text-slate-400"} />
+                                <span>{isHandRaised ? "Lower hand" : "Raise hand"}</span>
+                              </button>
+                              <button 
+                                onClick={() => { localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled); setIsMoreMenuOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs transition-colors",
+                                  localParticipant.isScreenShareEnabled ? "text-green-400 bg-green-400/10" : "text-white"
+                                )}
+                              >
+                                <MonitorUp size={16} className={localParticipant.isScreenShareEnabled ? "text-green-400" : "text-slate-400"} />
+                                <span>Present screen</span>
+                              </button>
+                              <button 
+                                onClick={() => { setActiveTab('chat'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <MessageSquare size={16} className="text-slate-400" />
+                                  <span>In-call messages</span>
+                                </div>
+                                {chatMessages.length > 0 && (
+                                  <span className="px-1.5 py-0.2 bg-[#4285f4] text-white rounded-full text-[10px] font-bold">
+                                    {chatMessages.length}
+                                  </span>
+                                )}
+                              </button>
+                              <button 
+                                onClick={() => { setActiveTab('participants'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Users size={16} className="text-slate-400" />
+                                  <span>Participants</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-bold">
+                                  {remoteParticipants.length + 1}
+                                </span>
+                              </button>
+                              <button 
+                                onClick={() => { setActiveTab('notes'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
+                              >
+                                <FileText size={16} className="text-slate-400" />
+                                <span>Meeting notes</span>
+                              </button>
+                              <div className="h-px bg-white/10 my-1" />
+                            </>
+                          )}
+
+                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 px-2 pt-1">
+                            Layout & View
+                          </p>
+                          <button 
+                            onClick={() => { setLayoutMode('tiled'); setIsMoreMenuOpen(false); }}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
+                              layoutMode === 'tiled' ? "text-[#4285f4] bg-[#4285f4]/10" : "text-white"
+                            )}
+                          >
+                            <LayoutIcon size={16} className={layoutMode === 'tiled' ? "text-[#4285f4]" : "text-slate-400"} />
+                            <span>Tiled layout</span>
+                          </button>
+                          <button 
+                            onClick={() => { setLayoutMode('sidebar'); setIsMoreMenuOpen(false); }}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
+                              layoutMode === 'sidebar' ? "text-[#4285f4] bg-[#4285f4]/10" : "text-white"
+                            )}
+                          >
+                            <Monitor size={16} className={layoutMode === 'sidebar' ? "text-[#4285f4]" : "text-slate-400"} />
+                            <span>Sidebar layout</span>
+                          </button>
+                          <button 
+                            onClick={() => { setLayoutMode('imo'); setIsMoreMenuOpen(false); }}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
+                              layoutMode === 'imo' ? "text-[#4285f4] bg-[#4285f4]/10" : "text-white"
+                            )}
+                          >
+                            <LayoutIcon size={16} className={cn("text-slate-400", layoutMode === 'imo' && "text-[#4285f4] rotate-90")} />
+                            <span>IMO view (filmstrip)</span>
+                          </button>
+                          <button 
+                            onClick={() => { setHideNonVideo(!hideNonVideo); setIsMoreMenuOpen(false); }}
+                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
+                          >
+                            <UserX size={16} className="text-slate-400" />
+                            <span>{hideNonVideo ? "Show non-video" : "Hide non-video"}</span>
+                          </button>
+
+                          <div className="h-px bg-white/10 my-1" />
+                          <button 
+                            onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); }}
+                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
+                          >
+                            <Settings size={16} className="text-slate-400" />
+                            <span>Settings</span>
+                          </button>
+                        </div>
+                      </motion.div>
+                    </>
                   )}
                   </AnimatePresence>
                 </div>
               </div>
             </div>
 
-            {/* Right: End Call & Tabs & Collapse */}
-            <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3">
-              <div className="hidden md:flex items-center gap-1.5 lg:gap-2 mr-2 lg:mr-4">
-                <TabButton active={activeTab === 'info'} onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')} icon={<Info size={20} />} title="Meeting Info" />
-                <TabButton active={activeTab === 'users'} onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')} icon={<Users size={20} />} badge={remoteParticipants.length + 1} title="Participants" />
-                <TabButton active={activeTab === 'chat'} onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')} icon={<MessageSquare size={20} />} badge={chatMessages.length > 0 ? chatMessages.length : undefined} title="In-call Chat" />
-                <TabButton active={activeTab === 'files'} onClick={() => setActiveTab(activeTab === 'files' ? null : 'files')} icon={<Paperclip size={20} />} badge={sharedFiles.length > 0 ? sharedFiles.length : undefined} title="Share Files" />
-                <TabButton active={activeTab === 'whiteboard'} onClick={() => setActiveTab(activeTab === 'whiteboard' ? null : 'whiteboard')} icon={<Monitor size={20} />} title="Joint Workspace" />
-                {isHost && (
-                  <TabButton 
-                    active={activeTab === 'waiting'} 
-                    onClick={() => setActiveTab(activeTab === 'waiting' ? null : 'waiting')} 
-                    icon={<ShieldCheck size={20} />} 
-                    badge={pendingParticipants.length > 0 ? pendingParticipants.length : undefined}
-                    title="Waiting Room"
-                  />
-                )}
-              </div>
+            {/* Right / Bottom: End Call & Tabs & Collapse */}
+            <div className={cn(
+              "flex items-center",
+              isLandscape ? "flex-col gap-2 w-full mt-auto pt-2 border-t border-white/10" : "flex-1 justify-end gap-2 sm:gap-3"
+            )}>
+              {!isLandscape && (
+                <div className="hidden md:flex items-center gap-1.5 lg:gap-2 mr-2 lg:mr-4">
+                  <TabButton active={activeTab === 'info'} onClick={() => setActiveTab(activeTab === 'info' ? null : 'info')} icon={<Info size={20} />} title="Meeting Info" />
+                  <TabButton active={activeTab === 'users'} onClick={() => setActiveTab(activeTab === 'users' ? null : 'users')} icon={<Users size={20} />} badge={remoteParticipants.length + 1} title="Participants" />
+                  <TabButton active={activeTab === 'chat'} onClick={() => setActiveTab(activeTab === 'chat' ? null : 'chat')} icon={<MessageSquare size={20} />} badge={chatMessages.length > 0 ? chatMessages.length : undefined} title="In-call Chat" />
+                  <TabButton active={activeTab === 'files'} onClick={() => setActiveTab(activeTab === 'files' ? null : 'files')} icon={<Paperclip size={20} />} badge={sharedFiles.length > 0 ? sharedFiles.length : undefined} title="Share Files" />
+                  <TabButton active={activeTab === 'whiteboard'} onClick={() => setActiveTab(activeTab === 'whiteboard' ? null : 'whiteboard')} icon={<Monitor size={20} />} title="Joint Workspace" />
+                  {isHost && (
+                    <TabButton 
+                      active={activeTab === 'waiting'} 
+                      onClick={() => setActiveTab(activeTab === 'waiting' ? null : 'waiting')} 
+                      icon={<ShieldCheck size={20} />} 
+                      badge={pendingParticipants.length > 0 ? pendingParticipants.length : undefined}
+                      title="Waiting Room"
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Leave Call button */}
               <button 
                 onClick={() => navigate('/')}
-                className="w-[54px] h-[54px] md:w-[68px] md:h-[68px] bg-red-600 hover:bg-red-700 text-white rounded-[20px] md:rounded-[24px] flex items-center justify-center transition-all shadow-xl shadow-red-500/20 active:scale-95 group"
+                className={cn(
+                  "bg-[#ea4335] hover:bg-[#d93025] text-white flex items-center justify-center transition-all shadow-xl shadow-red-500/20 active:scale-95 group",
+                  isLandscape 
+                    ? "w-[48px] h-[48px] sm:w-[52px] sm:h-[52px] rounded-[16px] sm:rounded-[18px]" 
+                    : (isMobile ? "w-[44px] h-[44px] sm:w-[48px] sm:h-[48px] rounded-[14px] sm:rounded-[16px]" : "w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-[20px] sm:rounded-[22px]")
+                )}
                 title="Leave Call"
               >
-                <PhoneOff size={isMobile ? 22 : 28} className="group-hover:rotate-12 transition-transform" />
+                <PhoneOff size={isMobile || isLandscape ? 20 : 26} className="group-hover:rotate-12 transition-transform" />
               </button>
 
-              {/* Collapse Toolbar Button (Material 3 style) */}
+              {/* Collapse Toolbar Button */}
               <button
                 onClick={() => setIsToolbarCollapsed(true)}
-                className="p-2.5 sm:p-3 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors ml-1"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
                 title="Collapse toolbar"
               >
-                <ChevronDown size={20} />
+                {isLandscape ? <ChevronRight size={18} /> : <ChevronDown size={20} />}
               </button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Floating Bottom Hover Zone when toolbar is collapsed */}
+      {/* Floating Restore Controls Button when toolbar is collapsed */}
       {isToolbarCollapsed && (
         <div 
           onMouseEnter={() => setIsBottomHovered(true)}
           onMouseLeave={() => setIsBottomHovered(false)}
-          className="fixed bottom-0 left-0 right-0 h-16 z-[75] flex items-end justify-center pb-3 pointer-events-auto"
+          className={cn(
+            "fixed z-[75] pointer-events-auto flex items-center justify-center",
+            isLandscape 
+              ? "right-3 sm:right-4 top-1/2 -translate-y-1/2" 
+              : "bottom-4 left-1/2 -translate-x-1/2"
+          )}
         >
-          <AnimatePresence>
-            {isBottomHovered && (
-              <motion.button
-                initial={{ y: 24, opacity: 0, scale: 0.92 }}
-                animate={{ y: 0, opacity: 1, scale: 1 }}
-                exit={{ y: 24, opacity: 0, scale: 0.92 }}
-                transition={{ duration: 0.16 }}
-                onClick={() => setIsToolbarCollapsed(false)}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-900/95 hover:bg-slate-800 text-white border border-slate-700/80 rounded-full shadow-2xl backdrop-blur-md text-xs font-medium transition-all cursor-pointer group"
-                title="Restore toolbar controls"
-              >
-                <ChevronUp size={16} className="text-[#a8c7fa] group-hover:-translate-y-0.5 transition-transform" />
-                <span>Show meeting controls</span>
-              </motion.button>
+          <motion.button
+            initial={isLandscape ? { x: 30, opacity: 0 } : { y: 30, opacity: 0 }}
+            animate={{ x: 0, y: 0, opacity: 1 }}
+            exit={isLandscape ? { x: 30, opacity: 0 } : { y: 30, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 350, damping: 25 }}
+            onClick={() => setIsToolbarCollapsed(false)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#282a2e]/95 hover:bg-[#383a40] text-white border border-white/20 rounded-full shadow-2xl backdrop-blur-xl text-xs font-bold transition-all cursor-pointer group active:scale-95"
+            title="Restore toolbar controls"
+          >
+            {isLandscape ? (
+              <ChevronLeft size={16} className="text-[#4285f4] group-hover:-translate-x-0.5 transition-transform" />
+            ) : (
+              <ChevronUp size={16} className="text-[#4285f4] group-hover:-translate-y-0.5 transition-transform" />
             )}
-          </AnimatePresence>
+            <span>Show controls</span>
+          </motion.button>
         </div>
       )}
 
@@ -3119,6 +3217,9 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
   const isHandRaised = raisedHands?.[trackRef?.participant.identity];
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   
+  // Real-time face tracking for auto-centering faces when cropped
+  const facePos = useFaceTracking(trackRef, !isVideoOff && !isFocal);
+  
   // Parse metadata for avatar
   const metadata = useMemo(() => {
     try {
@@ -3168,7 +3269,10 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         >
           <VideoTrack 
             trackRef={trackRef} 
-            className={cn("w-full h-full bg-black/40", isFocal ? "object-contain" : "object-cover")}
+            className={cn("w-full h-full bg-black/40 transition-[object-position] duration-150 ease-out", isFocal ? "object-contain" : "object-cover")}
+            style={{
+              objectPosition: isFocal ? '50% 50%' : `${facePos.x}% ${facePos.y}%`
+            }}
           />
         </div>
       )}
@@ -3310,24 +3414,26 @@ function ParticipantItem(props: any) {
   );
 }
 
-function ControlButton({ active, onClick, icon, danger, warning, highlight, micVideo, enabled, title, hasDropdown, onDropdownClick, size }: any) {
+function ControlButton({ active, onClick, icon, danger, warning, highlight, micVideo, enabled, title, hasDropdown, onDropdownClick, size, isLandscape }: any) {
   const isSmall = size === "small";
   return (
-    <div className="flex items-center group/btn relative">
+    <div className={cn("flex group/btn relative", isLandscape ? "flex-col items-center" : "flex-row items-center")}>
       <button 
         onClick={onClick}
         title={title}
         className={cn(
           "transition-all duration-300 ease-out flex items-center justify-center flex-shrink-0 shadow-sm",
-          isSmall ? "w-[48px] h-[48px] rounded-[16px]" : "w-[60px] h-[60px] rounded-[22px]",
-          hasDropdown ? "rounded-r-none border-r border-white/5" : "",
+          isSmall 
+            ? "w-[44px] h-[44px] sm:w-[48px] sm:h-[48px] rounded-[14px] sm:rounded-[16px]" 
+            : (isLandscape ? "w-[48px] h-[48px] sm:w-[52px] sm:h-[52px] rounded-[16px] sm:rounded-[18px]" : "w-[56px] h-[56px] sm:w-[60px] sm:h-[60px] rounded-[20px] sm:rounded-[22px]"),
+          hasDropdown ? (isLandscape ? "rounded-b-none border-b border-white/10" : "rounded-r-none border-r border-white/10") : "",
           micVideo ? (
-            enabled ? "bg-slate-800 text-white hover:bg-slate-700" : "bg-red-600 text-white hover:bg-red-700"
+            enabled ? "bg-[#383a40] text-white hover:bg-[#464850]" : "bg-[#ea4335] text-white hover:bg-[#d93025]"
           ) : (
-            danger && !active ? "bg-red-600 text-white hover:bg-red-700" : 
-            warning && active ? "bg-yellow-400 text-slate-900 hover:bg-white" :
-            highlight && active ? "bg-accent-blue text-white" :
-            active ? "bg-accent-blue text-white" : "bg-slate-800 text-white hover:bg-slate-700"
+            danger && !active ? "bg-[#ea4335] text-white hover:bg-[#d93025]" : 
+            warning && active ? "bg-yellow-400 text-slate-900 hover:bg-yellow-300" :
+            highlight && active ? "bg-[#4285f4] text-white" :
+            active ? "bg-[#4285f4] text-white" : "bg-[#383a40] text-white hover:bg-[#464850]"
           ),
           "active:scale-95"
         )}
@@ -3337,9 +3443,18 @@ function ControlButton({ active, onClick, icon, danger, warning, highlight, micV
       {hasDropdown && (
         <button
           onClick={onDropdownClick}
-          className="w-[28px] h-[60px] bg-slate-800 text-white/70 hover:text-white rounded-r-[22px] hover:bg-slate-700 transition-all flex items-center justify-center border-l border-white/10"
+          className={cn(
+            "bg-[#383a40] text-white/70 hover:text-white hover:bg-[#464850] transition-all flex items-center justify-center",
+            isLandscape 
+              ? "w-[48px] sm:w-[52px] h-[18px] rounded-b-[16px] sm:rounded-b-[18px] border-t border-white/10" 
+              : (isSmall ? "w-[24px] h-[44px] sm:h-[48px] rounded-r-[14px] sm:rounded-r-[16px] border-l border-white/10" : "w-[26px] h-[56px] sm:h-[60px] rounded-r-[20px] sm:rounded-r-[22px] border-l border-white/10")
+          )}
         >
-          <ChevronUp size={16} className="group-hover/btn:translate-y-[-1px] transition-transform" />
+          {isLandscape ? (
+            <ChevronLeft size={13} className="group-hover/btn:translate-x-[-1px] transition-transform" />
+          ) : (
+            <ChevronUp size={15} className="group-hover/btn:translate-y-[-1px] transition-transform" />
+          )}
         </button>
       )}
     </div>
@@ -3351,8 +3466,8 @@ function TabButton({ active, onClick, icon, badge }: any) {
     <button 
       onClick={onClick}
       className={cn(
-        "w-11 h-11 rounded-full transition-all duration-200 ease-out relative flex items-center justify-center",
-        active ? "bg-white/10 text-white shadow-lg shadow-black/10" : "bg-transparent text-slate-200 hover:bg-white/10 hover:text-white"
+        "w-10 h-10 sm:w-11 sm:h-11 rounded-full transition-all duration-200 ease-out relative flex items-center justify-center",
+        active ? "bg-white/15 text-white shadow-md shadow-black/20" : "bg-transparent text-slate-300 hover:bg-white/10 hover:text-white"
       )}
     >
       {icon}
