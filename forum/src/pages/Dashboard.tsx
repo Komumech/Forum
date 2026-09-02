@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import Whiteboard from '../components/Whiteboard.tsx';
 import { 
   Video, Calendar, Plus, Search, Settings, Clock, 
-  MessageSquare, Users, ChevronRight, LogOut, 
+  MessageSquare, Users, ChevronRight, ChevronDown, LogOut, 
   LayoutDashboard, FileText, Bell, RefreshCw, X, MoreVertical, Globe,
   Copy, Check, Monitor, ChevronLeft, Calendar as CalendarIcon,
   Filter, Grid, List as ListIcon, Trash2, Edit2, Menu,
@@ -70,7 +70,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, login, isLoggingIn, logout } = useAuth();
   const navigate = useNavigate();
   const [activeSidebarTab, setActiveSidebarTab] = useState<'dashboard' | 'meetings' | 'contacts' | 'notes' | 'settings' | 'whiteboard' | 'calendar' | 'files'>('dashboard');
   const [dashboardFiles, setDashboardFiles] = useState<Array<{ id: string; name: string; size: number; type: string; timestamp: number; url?: string }>>([
@@ -174,7 +174,10 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     
     // Load local settings
     const savedSettings = localStorage.getItem(`settings_${user.uid}`);
@@ -578,20 +581,6 @@ export default function Dashboard() {
             collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
-            icon={<Monitor size={20} />} 
-            label="Joint Workspace" 
-            active={activeSidebarTab === 'whiteboard'} 
-            onClick={() => setActiveSidebarTab('whiteboard')}
-            collapsed={isSidebarCollapsed}
-          />
-          <SidebarItem 
-            icon={<Paperclip size={20} />} 
-            label="Shared Files" 
-            active={activeSidebarTab === 'files'} 
-            onClick={() => setActiveSidebarTab('files')}
-            collapsed={isSidebarCollapsed}
-          />
-          <SidebarItem 
             icon={<Calendar size={20} />} 
             label="Calendar" 
             active={activeSidebarTab === 'calendar'} 
@@ -678,18 +667,6 @@ export default function Dashboard() {
                   label="Meetings" 
                   active={activeSidebarTab === 'meetings'} 
                   onClick={() => { setActiveSidebarTab('meetings'); setIsMobileMenuOpen(false); }}
-                />
-                <SidebarItem 
-                  icon={<Monitor size={20} />} 
-                  label="Joint Workspace" 
-                  active={activeSidebarTab === 'whiteboard'} 
-                  onClick={() => { setActiveSidebarTab('whiteboard'); setIsMobileMenuOpen(false); }}
-                />
-                <SidebarItem 
-                  icon={<Paperclip size={20} />} 
-                  label="Shared Files" 
-                  active={activeSidebarTab === 'files'} 
-                  onClick={() => { setActiveSidebarTab('files'); setIsMobileMenuOpen(false); }}
                 />
                 <SidebarItem 
                   icon={<Calendar size={20} />} 
@@ -969,102 +946,87 @@ export default function Dashboard() {
               </AnimatePresence>
             </div>
 
-            <div className="flex items-center gap-3 pl-6 border-l border-gray-100">
-              <div className="text-right hidden md:block ml-2">
-                <div className="flex items-center justify-end gap-2">
-                  <div className={cn(
-                    "w-2 h-2 rounded-full",
-                    userStatus === 'available' ? "bg-success-green" :
-                    userStatus === 'away' ? "bg-orange-400" :
-                    userStatus === 'busy' ? "bg-accent-red" : "bg-gray-400"
-                  )} />
-                  <p className="text-sm font-bold text-gray-900">{user?.displayName}</p>
-                </div>
-                <select 
-                  className="text-[10px] text-gray-500 bg-transparent border-none outline-none cursor-pointer p-0 h-auto"
-                  value={userStatus}
-                  onChange={(e) => handleStatusChange(e.target.value as any)}
+            <div className="flex items-center gap-3 pl-4">
+              {user ? (
+                <img 
+                  src={user.photoURL || `https://picsum.photos/seed/${user.uid}/40/40`} 
+                  alt="Avatar" 
+                  className="w-9 h-9 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <button 
+                  onClick={login}
+                  disabled={isLoggingIn}
+                  className="bg-white hover:bg-gray-50 text-gray-800 border border-gray-200 flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-60"
                 >
-                  <option value="available">Available</option>
-                  <option value="away">Away</option>
-                  <option value="busy">Busy</option>
-                  <option value="offline">Offline</option>
-                </select>
-              </div>
-              <img 
-                src={user?.photoURL || `https://picsum.photos/seed/${user?.uid}/40/40`} 
-                alt="Avatar" 
-                className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm"
-                referrerPolicy="no-referrer"
-              />
+                  {isLoggingIn ? (
+                    <div className="w-3.5 h-3.5 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0" alt="Google" />
+                  )}
+                  <span>Sign in with Google</span>
+                </button>
+              )}
             </div>
           </div>
         </header>
 
         <div onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scroll bg-gray-50/30">
-          <div className="max-w-6xl mx-auto space-y-6 lg:space-y-10">
-            {activeSidebarTab === 'dashboard' && (
-              <>
-                {/* Welcome Section */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                  <div className="text-center lg:text-left">
-                    <h2 className="text-2xl lg:text-3xl font-bold text-gray-900 tracking-tight">Welcome back, {user?.displayName?.split(' ')[0]}!</h2>
-                    <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 lg:gap-4 mt-2">
-                      <p className="text-xs sm:text-sm text-gray-500 whitespace-nowrap">You have {meetings.filter(m => isToday(m.startTime)).length} meetings today.</p>
-                      <div className="hidden sm:block h-4 w-px bg-gray-200" />
-                      <p className="text-xs sm:text-sm text-gray-500">{format(new Date(), 'EEEE, MMMM do')}</p>
-                    </div>
+          <div className="max-w-6xl mx-auto space-y-6 lg:space-y-8">
+            {/* Guest Banner */}
+            {!user && (
+              <div className="bg-white border border-gray-200/80 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                <div className="flex items-center gap-3.5 text-center sm:text-left">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 lg:gap-3">
-                    {/* Compact Sync Controller */}
-                    <div className="flex items-center gap-1.5 bg-white border border-gray-150 py-1.5 px-3 rounded-2xl shadow-sm">
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mr-1">Cal Sync:</span>
-                      <button 
-                        onClick={syncGoogleCalendar}
-                        disabled={syncing}
-                        title="Sync Google Calendar"
-                        className="p-1 hover:bg-slate-50 rounded-lg transition-all disabled:opacity-50"
-                      >
-                        <img src="https://www.gstatic.com/images/branding/product/1x/calendar_2020q4_48dp.png" className="w-[18px] h-[18px] shrink-0" alt="Google" />
-                      </button>
-                      <button 
-                        onClick={syncKomuCalendar}
-                        disabled={syncing}
-                        title="Sync Komu Calendar"
-                        className="p-1 hover:bg-slate-50 text-accent-blue rounded-lg transition-all disabled:opacity-50"
-                      >
-                        <RefreshCw size={14} className={cn("shrink-0", syncing && "animate-spin")} />
-                      </button>
-                    </div>
-                    <button 
-                      onClick={() => setIsScheduling(true)}
-                      className="flex items-center justify-center gap-2 px-6 py-2.5 bg-accent-blue text-white rounded-2xl font-bold text-sm shadow-md shadow-accent-blue/10 hover:bg-blue-600 transition-all active:scale-95"
-                    >
-                      <Plus size={18} className="shrink-0" />
-                      Schedule
-                    </button>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900">Sign in to save your workspace</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Sync meetings, contacts, notes, and Google Calendar seamlessly across all your devices.</p>
                   </div>
                 </div>
+                <button 
+                  onClick={login}
+                  disabled={isLoggingIn}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-accent-blue hover:bg-blue-600 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-accent-blue/15 flex items-center justify-center gap-2 shrink-0 active:scale-95 disabled:opacity-60"
+                >
+                  {isLoggingIn ? (
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0 brightness-0 invert" alt="Google" />
+                  )}
+                  <span>Sign in with Google</span>
+                </button>
+              </div>
+            )}
 
-                {/* Quick Actions & Recurring Card Layout */}
-                <div className="space-y-6">
-                  {/* Primary 4-Card Quick Actions Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-5 w-full items-stretch">
-                    <div className="relative h-full">
-                      <QuickActionCard 
-                        icon={<Plus size={22} />} 
-                        label="New Meeting" 
-                        sub="Instant meeting" 
-                        color="bg-accent-blue"
-                        onClick={() => setIsNewMeetingMenuOpen(!isNewMeetingMenuOpen)}
-                      />
-                      <AnimatePresence>
-                        {isNewMeetingMenuOpen && (
+            {activeSidebarTab === 'dashboard' && (
+              <>
+                {/* Header Action Bar */}
+                <div className="flex items-center justify-between gap-4">
+                  <h2 className="text-xl font-bold text-gray-900 tracking-tight">Dashboard</h2>
+                  
+                  {/* Simple Grey Dropdown Button */}
+                  <div className="relative">
+                    <button 
+                      onClick={() => setIsNewMeetingMenuOpen(!isNewMeetingMenuOpen)}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-xs sm:text-sm rounded-xl transition-all"
+                    >
+                      <Video size={16} className="text-gray-500" />
+                      <span>Meeting</span>
+                      <ChevronDown size={14} className={cn("text-gray-400 transition-transform", isNewMeetingMenuOpen && "rotate-180")} />
+                    </button>
+                    
+                    <AnimatePresence>
+                      {isNewMeetingMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsNewMeetingMenuOpen(false)} />
                           <motion.div 
-                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            initial={{ opacity: 0, y: 4, scale: 0.98 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 overflow-hidden"
+                            exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                            className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl py-1.5 z-50 overflow-hidden"
                           >
                             <button 
                               onClick={() => {
@@ -1072,242 +1034,35 @@ export default function Dashboard() {
                                 joinMeeting(id, true);
                                 setIsNewMeetingMenuOpen(false);
                               }}
-                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
+                              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs sm:text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left"
                             >
-                              <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center text-accent-blue">
-                                <Video size={18} />
-                              </div>
-                              <div>
-                                <p className="text-sm font-extrabold text-gray-900">Start instantly</p>
-                                <p className="text-[10px] text-gray-400">Create a dynamic meeting room</p>
-                              </div>
+                              <Video size={15} className="text-gray-400 shrink-0" />
+                              <span>Create instant meeting</span>
                             </button>
                             <button 
                               onClick={() => {
                                 setIsScheduling(true);
                                 setIsNewMeetingMenuOpen(false);
                               }}
-                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
+                              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs sm:text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left"
                             >
-                              <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center text-purple-500">
-                                <CalendarIcon size={18} />
-                              </div>
-                              <div>
-                                <p className="text-sm font-extrabold text-gray-900">Schedule for later</p>
-                                <p className="text-[10px] text-gray-400">Pick a future date & time</p>
-                              </div>
+                              <Calendar size={15} className="text-gray-400 shrink-0" />
+                              <span>Schedule meeting</span>
                             </button>
-
-                            {/* Integrated Personal Meeting Room Actions */}
-                            <div className="border-t border-gray-50 my-1" />
-                            
                             <button 
                               onClick={() => {
-                                const id = user?.uid?.substring(0, 8) || 'room';
-                                joinMeeting(id);
+                                setIsJoinMeetingModalOpen(true);
                                 setIsNewMeetingMenuOpen(false);
                               }}
-                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
+                              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs sm:text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left"
                             >
-                              <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center text-success-green">
-                                <Globe size={18} />
-                              </div>
-                              <div>
-                                <p className="text-sm font-extrabold text-gray-900">Personal Boardroom</p>
-                                <p className="text-[10px] text-gray-400">Start your permanent room</p>
-                              </div>
-                            </button>
-
-                            <button 
-                              onClick={() => {
-                                const link = `${window.location.origin}/meeting/${user?.uid?.substring(0, 8)}`;
-                                navigator.clipboard.writeText(link);
-                                alert("Personal room shareable link copied successfully!");
-                                setIsNewMeetingMenuOpen(false);
-                              }}
-                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-gray-700 transition-all text-left"
-                            >
-                              <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-500">
-                                <Copy size={18} />
-                              </div>
-                              <div>
-                                <p className="text-sm font-extrabold text-gray-900">Copy personal link</p>
-                                <p className="text-[10px] text-gray-400">forum.app/m/{user?.uid?.substring(0, 8)}</p>
-                              </div>
+                              <Users size={15} className="text-gray-400 shrink-0" />
+                              <span>Join meeting</span>
                             </button>
                           </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-
-                    <QuickActionCard 
-                      icon={<Users size={22} />} 
-                      label="Join Meeting" 
-                      sub="Using code or link" 
-                      color="bg-emerald-600"
-                      onClick={() => setIsJoinMeetingModalOpen(true)}
-                    />
-
-                    <QuickActionCard 
-                      icon={<Monitor size={22} />} 
-                      label="Joint Workspace" 
-                      sub="Live canvas & whiteboard" 
-                      badge="Workspace"
-                      color="bg-indigo-600"
-                      onClick={() => setActiveSidebarTab('whiteboard')}
-                    />
-
-                    <QuickActionCard 
-                      icon={<Paperclip size={22} />} 
-                      label="Share Files" 
-                      sub="Instant peer transfer" 
-                      badge="Transfer"
-                      color="bg-amber-500"
-                      onClick={() => setActiveSidebarTab('files')}
-                    />
-                  </div>
-
-                  {/* Collaboration Hub & Recurring Meeting Section */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {/* Joint Workspace Card */}
-                    <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                            <Layers size={20} />
-                          </div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                            Multi-User Sync
-                          </span>
-                        </div>
-                        <div>
-                          <h4 className="text-lg font-black text-gray-900">Joint Workspace & Whiteboard</h4>
-                          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                            Draw, diagram, brainstorm with sticky notes, and collaborate in real-time with zero lag.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 pt-5 mt-4 border-t border-gray-100">
-                        <button 
-                          onClick={() => setActiveSidebarTab('whiteboard')}
-                          className="flex-1 py-2.5 px-4 bg-accent-blue hover:bg-blue-600 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2"
-                        >
-                          <Monitor size={14} />
-                          <span>Open Workspace</span>
-                        </button>
-                        <button 
-                          onClick={() => {
-                            const id = Math.random().toString(36).substring(2, 10);
-                            navigate(`/meeting/${id}?board=true`);
-                          }}
-                          className="py-2.5 px-3.5 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                          title="Start a live room with whiteboard open"
-                        >
-                          <span>Launch in Room</span>
-                          <ArrowRight size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Share Files Hub Card */}
-                    <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="w-10 h-10 rounded-2xl bg-[#f1f3f4] text-gray-700 flex items-center justify-center">
-                            <FolderUp size={20} />
-                          </div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                            P2P Encrypted
-                          </span>
-                        </div>
-                        <div>
-                          <h4 className="text-lg font-black text-gray-900">Direct File Transfer & Hub</h4>
-                          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                            Share documents, decks, images, and archives directly in calls or via instant peer transfer rooms.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 pt-5 mt-4 border-t border-gray-100">
-                        <button 
-                          onClick={() => setActiveSidebarTab('files')}
-                          className="flex-1 py-2.5 px-4 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-full text-xs font-semibold transition-all shadow-sm flex items-center justify-center gap-2"
-                        >
-                          <Paperclip size={14} />
-                          <span>Open Shared Files</span>
-                        </button>
-                        <button 
-                          onClick={() => {
-                            const id = Math.random().toString(36).substring(2, 10);
-                            navigate(`/meeting/${id}`);
-                          }}
-                          className="py-2.5 px-3.5 bg-[#f1f3f4] hover:bg-[#e3e3e3] text-gray-800 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5"
-                          title="Start meeting room to share files"
-                        >
-                          <span>Share in Call</span>
-                          <ArrowRight size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Recurring Meeting / Next Session Card */}
-                    <div className="h-full">
-                      {meetings.find(m => m.recurrence && m.recurrence !== 'none') ? (
-                        <div className="h-full bg-white border border-gray-100 p-6 rounded-[32px] shadow-sm hover:shadow-xl transition-all flex flex-col justify-between group overflow-hidden relative min-h-[220px]">
-                          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-125 transition-transform duration-700">
-                            <RefreshCw size={120} className="text-indigo-600" />
-                          </div>
-                          <div className="relative z-10">
-                            <div className="flex items-center gap-2 text-indigo-600 mb-4 font-bold text-[10px] uppercase tracking-widest">
-                              <RefreshCw size={12} className="animate-spin-slow" />
-                              <span>Recurring</span>
-                            </div>
-                            <h4 className="text-xl font-black leading-tight line-clamp-2 text-gray-900">
-                              {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.title}
-                            </h4>
-                            <p className="text-sm text-gray-400 mt-1 uppercase text-[10px] font-black tracking-widest">
-                              {meetings.find(m => m.recurrence && m.recurrence !== 'none')?.recurrence}
-                            </p>
-                          </div>
-                          <div className="mt-6 relative z-10">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex -space-x-2">
-                                {[1, 2, 3].map(i => (
-                                  <img key={i} src={`https://picsum.photos/seed/${i}/32/32`} className="w-7 h-7 rounded-full border-2 border-white shadow-sm" alt="" referrerPolicy="no-referrer" />
-                                ))}
-                              </div>
-                              <div className="text-right">
-                                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Next session</p>
-                                <p className="text-base font-black tracking-tight text-gray-900">
-                                  {format(meetings.find(m => m.recurrence && m.recurrence !== 'none')!.startTime, 'h:mm a')}
-                                </p>
-                              </div>
-                            </div>
-                            <button 
-                              onClick={() => joinMeeting(meetings.find(m => m.recurrence && m.recurrence !== 'none')?.roomId || '')}
-                              className="w-full py-3 bg-accent-blue text-white rounded-2xl font-black text-xs hover:bg-blue-600 transition-all active:scale-95 shadow-md shadow-accent-blue/10"
-                            >
-                              Join Now
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="h-full bg-white border border-gray-100 border-dashed p-6 rounded-[32px] flex flex-col items-center justify-center text-center space-y-3 group min-h-[220px]">
-                          <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-300 group-hover:scale-110 group-hover:text-accent-blue transition-all duration-500">
-                            <RefreshCw size={24} />
-                          </div>
-                          <div>
-                            <p className="text-sm font-bold text-gray-900">No recurring meetings</p>
-                            <p className="text-xs text-gray-400 mt-0.5">Plan your weekly syncs.</p>
-                          </div>
-                          <button 
-                            onClick={() => setIsScheduling(true)}
-                            className="px-5 py-2 bg-gray-50 text-gray-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue hover:text-white transition-all"
-                          >
-                            Schedule First
-                          </button>
-                        </div>
+                        </>
                       )}
-                    </div>
+                    </AnimatePresence>
                   </div>
                 </div>
 
@@ -1316,7 +1071,7 @@ export default function Dashboard() {
                   <div className="lg:col-span-2 space-y-6">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                        <Clock size={20} className="text-accent-blue" />
+                        <Clock size={18} className="text-gray-400" />
                         Upcoming Meetings
                       </h3>
                       <div className="flex items-center gap-4">
@@ -1325,7 +1080,7 @@ export default function Dashboard() {
                             onClick={() => setShowPastInUpcoming(!showPastInUpcoming)}
                             className={cn(
                               "w-8 h-4 rounded-full relative transition-all",
-                              showPastInUpcoming ? "bg-accent-blue" : "bg-gray-200"
+                              showPastInUpcoming ? "bg-gray-800" : "bg-gray-200"
                             )}
                           >
                             <div className={cn(
@@ -1335,7 +1090,7 @@ export default function Dashboard() {
                           </div>
                           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider group-hover:text-gray-600 transition-colors">Past</span>
                         </label>
-                        <button onClick={() => setActiveSidebarTab('meetings')} className="text-sm font-bold text-accent-blue hover:underline">View all</button>
+                        <button onClick={() => setActiveSidebarTab('meetings')} className="text-sm font-medium text-gray-500 hover:text-gray-900">View all</button>
                       </div>
                     </div>
 
@@ -1352,12 +1107,12 @@ export default function Dashboard() {
                           
                           if (items.length === 0) {
                             return (
-                              <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center space-y-4">
+                              <div className="p-12 bg-white rounded-3xl shadow-sm text-center space-y-4">
                                 <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
                                   <Calendar className="text-gray-300" size={32} />
                                 </div>
                                 <p className="text-gray-500 font-medium">No meetings found.</p>
-                                <button onClick={() => setIsScheduling(true)} className="text-accent-blue font-bold hover:underline">Schedule one now</button>
+                                <button onClick={() => setIsScheduling(true)} className="text-gray-900 font-semibold text-sm hover:underline">Schedule one now</button>
                               </div>
                             );
                           }
@@ -1378,18 +1133,18 @@ export default function Dashboard() {
 
                   {/* Side Panel: Dynamic Recent Recordings Only */}
                   <div className="space-y-0">
-                    <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                    <div className="bg-white p-6 rounded-3xl shadow-sm">
                       <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Recordings</h3>
                       <div className="space-y-4">
                         {recordings.length === 0 ? (
-                          <div className="p-8 bg-gray-50 rounded-2xl border border-dashed border-gray-200 text-center">
+                          <div className="p-8 bg-gray-50 rounded-2xl text-center">
                             <Video className="text-gray-300 mx-auto mb-2" size={24} />
                             <p className="text-xs text-gray-500">No recordings yet.</p>
                           </div>
                         ) : (
                           recordings.slice(0, 3).map(rec => (
-                            <div key={rec.id} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 flex items-center gap-3 group cursor-pointer hover:bg-white hover:shadow-md transition-all">
-                              <div className="w-10 h-10 bg-accent-red/10 text-accent-red rounded-xl flex items-center justify-center">
+                            <div key={rec.id} className="p-4 bg-gray-50 rounded-2xl flex items-center gap-3 group cursor-pointer hover:bg-gray-100 transition-all">
+                              <div className="w-10 h-10 bg-gray-100 text-gray-500 rounded-xl flex items-center justify-center">
                                 <Video size={18} />
                               </div>
                               <div className="flex-1 min-w-0">
@@ -1407,7 +1162,7 @@ export default function Dashboard() {
                           setActiveSidebarTab('meetings');
                           setMeetingSubTab('recordings');
                         }}
-                        className="w-full mt-4 py-2 text-sm font-bold text-accent-blue hover:bg-accent-blue/5 rounded-xl transition-all"
+                        className="w-full mt-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-all"
                       >
                         View all recordings
                       </button>
@@ -1463,31 +1218,31 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between sm:justify-end gap-3">
-                    <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl px-1.5 py-1 shadow-sm">
+                    <div className="flex items-center gap-1 bg-white rounded-xl px-1.5 py-1 shadow-sm">
                       <button onClick={() => {
                         const d = new Date(selectedDate);
                         if (calendarView === 'month') d.setMonth(d.getMonth() - 1);
                         else d.setDate(d.getDate() - 7);
                         setSelectedDate(d);
-                      }} className="p-1.5 hover:bg-gray-50 rounded-lg"><ChevronLeft size={16} /></button>
-                      <span className="text-xs sm:text-sm font-bold px-1 sm:px-2 whitespace-nowrap min-w-[100px] text-center">{format(selectedDate, calendarView === 'month' ? 'MMMM yyyy' : 'MMM d')}</span>
+                      }} className="p-1.5 hover:bg-gray-50 rounded-lg text-gray-500"><ChevronLeft size={16} /></button>
+                      <span className="text-xs sm:text-sm font-semibold px-1 sm:px-2 whitespace-nowrap min-w-[100px] text-center text-gray-800">{format(selectedDate, calendarView === 'month' ? 'MMMM yyyy' : 'MMM d')}</span>
                       <button onClick={() => {
                         const d = new Date(selectedDate);
                         if (calendarView === 'month') d.setMonth(d.getMonth() + 1);
                         else d.setDate(d.getDate() + 7);
                         setSelectedDate(d);
-                      }} className="p-1.5 hover:bg-gray-50 rounded-lg"><ChevronRight size={16} /></button>
+                      }} className="p-1.5 hover:bg-gray-50 rounded-lg text-gray-500"><ChevronRight size={16} /></button>
                     </div>
                     <button 
                       onClick={() => setIsScheduling(true)}
-                      className="px-4 py-2.5 bg-accent-blue text-white rounded-xl font-bold text-xs sm:text-sm shadow-md transition-transform active:scale-95"
+                      className="px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium text-xs sm:text-sm shadow-sm transition-all active:scale-95"
                     >
                       New Event
                     </button>
                   </div>
                 </div>
                 
-                <div className="flex-1 bg-white rounded-[40px] border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                <div className="flex-1 bg-white rounded-3xl shadow-sm overflow-hidden flex flex-col">
                   {calendarView === 'month' ? (
                     <CalendarMonthView 
                       selectedDate={selectedDate} 
@@ -1516,8 +1271,8 @@ export default function Dashboard() {
                     <button 
                       onClick={() => { setMeetingSubTab('upcoming'); setMeetingsPage(1); }}
                       className={cn(
-                        "px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all shrink-0",
-                        meetingSubTab === 'upcoming' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
+                        "px-3 sm:px-4 py-2 rounded-lg font-medium text-xs sm:text-sm transition-all shrink-0",
+                        meetingSubTab === 'upcoming' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
                       Upcoming
@@ -1525,8 +1280,8 @@ export default function Dashboard() {
                     <button 
                       onClick={() => { setMeetingSubTab('previous'); setMeetingsPage(1); }}
                       className={cn(
-                        "px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all shrink-0",
-                        meetingSubTab === 'previous' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
+                        "px-3 sm:px-4 py-2 rounded-lg font-medium text-xs sm:text-sm transition-all shrink-0",
+                        meetingSubTab === 'previous' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
                       Previous
@@ -1534,8 +1289,8 @@ export default function Dashboard() {
                     <button 
                       onClick={() => { setMeetingSubTab('recordings'); setMeetingsPage(1); }}
                       className={cn(
-                        "px-3 sm:px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all shrink-0",
-                        meetingSubTab === 'recordings' ? "bg-white text-accent-blue shadow-sm" : "text-gray-500 hover:text-gray-700"
+                        "px-3 sm:px-4 py-2 rounded-lg font-medium text-xs sm:text-sm transition-all shrink-0",
+                        meetingSubTab === 'recordings' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
                       )}
                     >
                       Recordings
@@ -1555,9 +1310,9 @@ export default function Dashboard() {
                       const totalPages = isSearching ? 1 : Math.ceil(list.length / meetingsPerPage);
 
                       if (list.length === 0) return (
-                        <div className="p-12 text-center text-gray-500 bg-white rounded-3xl border border-gray-100">
+                        <div className="p-12 text-center text-gray-500 bg-white rounded-3xl shadow-sm">
                           {isSearching ? `No results for "${searchQuery}"` : "No upcoming meetings."}
-                          {isSearching && <button onClick={() => setSearchQuery('')} className="block mx-auto mt-2 text-accent-blue font-bold text-xs uppercase tracking-wider">Clear Search</button>}
+                          {isSearching && <button onClick={() => setSearchQuery('')} className="block mx-auto mt-2 text-gray-700 font-semibold text-xs uppercase tracking-wider hover:underline">Clear Search</button>}
                         </div>
                       );
 
@@ -1576,20 +1331,20 @@ export default function Dashboard() {
                           </div>
                           
                           {!isSearching && totalPages > 1 && (
-                            <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 mt-6 shadow-sm">
+                            <div className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-sm mt-6">
                               <button 
                                 disabled={meetingsPage === 1}
                                 onClick={() => setMeetingsPage(p => p - 1)}
-                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-500 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-500 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
                               >
                                 <ChevronLeft size={18} />
                                 Previous
                               </button>
-                              <span className="text-xs font-bold text-gray-400">Page {meetingsPage} of {totalPages}</span>
+                              <span className="text-xs font-medium text-gray-400">Page {meetingsPage} of {totalPages}</span>
                               <button 
                                 disabled={meetingsPage === totalPages}
                                 onClick={() => setMeetingsPage(p => p + 1)}
-                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-accent-blue disabled:opacity-30 hover:bg-blue-50 rounded-xl transition-all"
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
                               >
                                 Next Page
                                 <ChevronRight size={18} />
@@ -1615,9 +1370,9 @@ export default function Dashboard() {
                       const totalPages = isSearching ? 1 : Math.ceil(list.length / meetingsPerPage);
 
                       if (list.length === 0) return (
-                        <div className="p-12 text-center text-gray-500 bg-white rounded-3xl border border-gray-100">
+                        <div className="p-12 text-center text-gray-500 bg-white rounded-3xl shadow-sm">
                            {isSearching ? `No results for "${searchQuery}"` : "No previous meetings found in your history."}
-                           {isSearching && <button onClick={() => setSearchQuery('')} className="block mx-auto mt-2 text-accent-blue font-bold text-xs uppercase tracking-wider">Clear Search</button>}
+                           {isSearching && <button onClick={() => setSearchQuery('')} className="block mx-auto mt-2 text-gray-700 font-semibold text-xs uppercase tracking-wider hover:underline">Clear Search</button>}
                         </div>
                       );
 
@@ -1636,20 +1391,20 @@ export default function Dashboard() {
                           </div>
                           
                           {!isSearching && totalPages > 1 && (
-                            <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 mt-6 shadow-sm">
+                            <div className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-sm mt-6">
                               <button 
                                 disabled={meetingsPage === 1}
                                 onClick={() => setMeetingsPage(p => p - 1)}
-                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-gray-500 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-500 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
                               >
                                 <ChevronLeft size={18} />
                                 Previous
                               </button>
-                              <span className="text-xs font-bold text-gray-400">Page {meetingsPage} of {totalPages}</span>
+                              <span className="text-xs font-medium text-gray-400">Page {meetingsPage} of {totalPages}</span>
                               <button 
                                 disabled={meetingsPage === totalPages}
                                 onClick={() => setMeetingsPage(p => p + 1)}
-                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-accent-blue disabled:opacity-30 hover:bg-blue-50 rounded-xl transition-all"
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-30 hover:bg-gray-50 rounded-xl transition-all"
                               >
                                 Next Page
                                 <ChevronRight size={18} />
@@ -1665,20 +1420,15 @@ export default function Dashboard() {
                 {meetingSubTab === 'recordings' && (
                   <div className="space-y-4">
                     {recordings.length === 0 ? (
-                      <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center text-gray-500">
+                      <div className="p-12 bg-white rounded-3xl shadow-sm text-center text-gray-500">
                         Cloud recordings will appear here once available.
                       </div>
                     ) : (
                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {recordings.map(rec => (
-                          <div key={rec.id} className="bg-white p-6 rounded-3xl border border-gray-100 space-y-4 hover:shadow-md transition-all cursor-pointer group">
-                             <div className="aspect-video bg-gray-50 rounded-2xl flex items-center justify-center text-accent-red group-hover:bg-accent-red group-hover:text-white transition-all overflow-hidden relative">
+                          <div key={rec.id} className="bg-white p-6 rounded-3xl shadow-sm space-y-4 hover:shadow-md transition-all cursor-pointer group">
+                             <div className="aspect-video bg-gray-50 rounded-2xl flex items-center justify-center text-gray-400 group-hover:bg-gray-100 group-hover:text-gray-600 transition-all overflow-hidden relative">
                                 <Video size={32} />
-                                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                   <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-accent-blue shadow-lg">
-                                      <Video size={20} fill="currentColor" />
-                                   </div>
-                                </div>
                              </div>
                              <h4 className="font-bold text-gray-900 line-clamp-1">{rec.title || 'Meeting Recording'}</h4>
                              <p className="text-xs text-gray-500">
@@ -1699,18 +1449,18 @@ export default function Dashboard() {
                   <h2 className="text-2xl font-bold text-gray-900">Contacts</h2>
                   <div className="flex items-center gap-3">
                     <div className="relative group">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-accent-blue transition-colors" size={18} />
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-gray-700 transition-colors" size={18} />
                       <input 
                         type="text" 
                         placeholder="Search contacts..." 
                         value={contactSearchQuery}
                         onChange={(e) => setContactSearchQuery(e.target.value)}
-                        className="pl-10 pr-4 py-2 bg-white border border-gray-100 rounded-xl focus:ring-2 focus:ring-accent-blue/10 outline-none w-full sm:w-64 transition-all"
+                        className="pl-10 pr-4 py-2 bg-white rounded-xl shadow-sm focus:ring-2 focus:ring-gray-200 outline-none w-full sm:w-64 transition-all"
                       />
                     </div>
                     <button 
                       onClick={() => setIsAddContactModalOpen(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm hover:bg-blue-600 transition-all shrink-0 shadow-lg shadow-accent-blue/10"
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-xl font-medium text-sm hover:bg-gray-800 transition-all shrink-0 shadow-sm"
                     >
                       <Plus size={18} />
                       <span className="hidden sm:inline">Add Contact</span>
@@ -1719,7 +1469,7 @@ export default function Dashboard() {
                   </div>
                 </div>
                 {contacts.length === 0 ? (
-                  <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center space-y-4">
+                  <div className="p-12 bg-white rounded-3xl shadow-sm text-center space-y-4">
                     <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
                       <Users className="text-gray-300" size={32} />
                     </div>
@@ -1733,8 +1483,8 @@ export default function Dashboard() {
                         c.email.toLowerCase().includes(contactSearchQuery.toLowerCase())
                       )
                       .map(contact => (
-                      <div key={contact.id} className="bg-white p-4 rounded-2xl border border-gray-100 flex items-center gap-4 hover:shadow-md hover:border-accent-blue/20 transition-all cursor-pointer group">
-                        <div className="w-12 h-12 rounded-xl relative overflow-hidden bg-gray-50 border border-gray-100">
+                      <div key={contact.id} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 hover:shadow-md transition-all cursor-pointer group">
+                        <div className="w-12 h-12 rounded-xl relative overflow-hidden bg-gray-50">
                           <img 
                             src={contact.photoURL || `https://www.gravatar.com/avatar/${btoa(contact.email).substring(0, 10)}?d=identicon`} 
                             className="w-full h-full object-cover" 
@@ -1743,15 +1493,15 @@ export default function Dashboard() {
                           />
                         </div>
                         <div className="flex-1">
-                          <p className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{contact.displayName}</p>
+                          <p className="font-bold text-gray-900 group-hover:text-gray-700 transition-colors line-clamp-1">{contact.displayName}</p>
                           <p className="text-xs text-gray-500 line-clamp-1">{contact.email}</p>
                         </div>
                         <div className="flex items-center gap-1">
-                          <button className="p-2 text-gray-400 hover:text-accent-blue hover:bg-accent-blue/5 rounded-lg transition-all" title="Message">
+                          <button className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all" title="Message">
                             <MessageSquare size={18} />
                           </button>
                           <button 
-                            className="p-2 text-gray-400 hover:text-accent-red hover:bg-red-50 rounded-lg transition-all" 
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" 
                             title="Remove"
                             onClick={async (e) => {
                               e.stopPropagation();
@@ -1777,21 +1527,14 @@ export default function Dashboard() {
             {activeSidebarTab === 'notes' && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">Notes from Komu</h2>
-                  <button 
-                    onClick={() => window.open('https://komu-notes.web.app', '_blank')}
-                    className="flex items-center gap-2 px-4 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm hover:bg-blue-600 transition-all"
-                  >
-                    <Plus size={18} />
-                    Manage in Komu
-                  </button>
+                  <h2 className="text-2xl font-bold text-gray-900">Notes</h2>
                 </div>
                 {notes.length === 0 ? (
-                  <div className="p-12 bg-white rounded-3xl border border-dashed border-gray-200 text-center space-y-4">
+                  <div className="p-12 bg-white rounded-3xl shadow-sm text-center space-y-4">
                     <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
                       <FileText className="text-gray-300" size={32} />
                     </div>
-                    <p className="text-gray-500 font-medium">No notes found in your Komu account.</p>
+                    <p className="text-gray-500 font-medium">No notes found.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1799,9 +1542,9 @@ export default function Dashboard() {
                       <div 
                         key={note.id} 
                         onClick={() => setEditingNote(note)}
-                        className="bg-white p-6 rounded-3xl border border-gray-100 space-y-4 hover:shadow-md transition-all cursor-pointer group"
+                        className="bg-white p-6 rounded-3xl shadow-sm space-y-4 hover:shadow-md transition-all cursor-pointer group"
                       >
-                        <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center text-accent-blue group-hover:bg-accent-blue group-hover:text-white transition-all">
+                        <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 group-hover:bg-gray-200 group-hover:text-gray-700 transition-all">
                           <FileText size={20} />
                         </div>
                         <h4 className="font-bold text-gray-900 line-clamp-1">{note.title || 'Untitled'}</h4>
@@ -1816,211 +1559,6 @@ export default function Dashboard() {
               </div>
             )}
 
-            {activeSidebarTab === 'whiteboard' && (
-              <div className="h-full flex flex-col space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                      <Monitor className="text-[#0b57d0]" size={24} />
-                      <span>Joint Workspace & File Editor</span>
-                    </h2>
-                    <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-                      Collaborative file explorer, live multi-cursor code editor, and interactive team whiteboard.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => {
-                        const id = Math.random().toString(36).substring(2, 10);
-                        navigate(`/meeting/${id}?board=true`);
-                      }}
-                      className="px-5 py-2 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-full text-xs font-medium transition-colors flex items-center gap-2 shadow-xs"
-                    >
-                      <Plus size={16} />
-                      <span>Launch In Call</span>
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 min-h-[640px] h-[calc(100vh-230px)] bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
-                  <Whiteboard user={user} />
-                </div>
-              </div>
-            )}
-
-            {activeSidebarTab === 'files' && (
-              <div className="space-y-6 pb-12">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                      <Paperclip className="text-[#0b57d0]" size={24} />
-                      <span>Shared Files & Transfer Hub</span>
-                    </h2>
-                    <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-                      Peer-to-peer in-room file sharing and document exchange with end-to-end WebRTC security.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => {
-                        const id = Math.random().toString(36).substring(2, 10);
-                        navigate(`/meeting/${id}`);
-                      }}
-                      className="px-5 py-2 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-full text-xs font-medium transition-colors flex items-center gap-2"
-                    >
-                      <Plus size={16} />
-                      <span>Start Transfer Call</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Drag and drop upload zone */}
-                <div 
-                  onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
-                  onDragLeave={() => setIsDraggingFile(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDraggingFile(false);
-                    const files = Array.from(e.dataTransfer.files);
-                    if (files.length > 0) {
-                      const newItems = files.map(f => ({
-                        id: `f-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                        name: f.name,
-                        size: f.size,
-                        type: f.type || 'application/octet-stream',
-                        timestamp: Date.now()
-                      }));
-                      setDashboardFiles(prev => [...newItems, ...prev]);
-                    }
-                  }}
-                  className={cn(
-                    "p-8 border border-dashed rounded-3xl text-center transition-all bg-[#f8f9fa] flex flex-col items-center justify-center space-y-3 cursor-pointer",
-                    isDraggingFile 
-                      ? "border-[#0b57d0] bg-[#f1f3f4] scale-[1.01]" 
-                      : "border-gray-300 hover:border-[#0b57d0] hover:bg-white"
-                  )}
-                  onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.multiple = true;
-                    input.onchange = (e: any) => {
-                      const files = Array.from(e.target.files || []) as File[];
-                      if (files.length > 0) {
-                        const newItems = files.map(f => ({
-                          id: `f-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-                          name: f.name,
-                          size: f.size,
-                          type: f.type || 'application/octet-stream',
-                          timestamp: Date.now()
-                        }));
-                        setDashboardFiles(prev => [...newItems, ...prev]);
-                      }
-                    };
-                    input.click();
-                  }}
-                >
-                  <div className="w-12 h-12 bg-[#f1f3f4] text-gray-700 rounded-full flex items-center justify-center">
-                    <FolderUp size={22} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800">
-                      Drop files here to share, or <span className="text-[#0b57d0] underline font-medium">browse</span>
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      PDF, documents, images, archives, code & videos
-                    </p>
-                  </div>
-                </div>
-
-                {/* Transfer Hub Stats / Security info */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center gap-3">
-                    <div className="p-2.5 bg-[#f1f3f4] text-gray-700 rounded-xl">
-                      <ShieldCheck size={18} />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wider">Security</p>
-                      <p className="text-xs font-semibold text-gray-900">Direct WebRTC E2EE</p>
-                    </div>
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center gap-3">
-                    <div className="p-2.5 bg-[#f1f3f4] text-gray-700 rounded-xl">
-                      <HardDrive size={18} />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wider">Shared Items</p>
-                      <p className="text-xs font-semibold text-gray-900">{dashboardFiles.length} files available</p>
-                    </div>
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center gap-3">
-                    <div className="p-2.5 bg-[#f1f3f4] text-gray-700 rounded-xl">
-                      <Share2 size={18} />
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wider">Speed</p>
-                      <p className="text-xs font-semibold text-gray-900">Peer-to-Peer Direct</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Recent Shared Files Table */}
-                <div className="bg-white rounded-3xl border border-gray-200 shadow-xs overflow-hidden">
-                  <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-                    <h3 className="font-semibold text-gray-900 text-sm">Recent Shared Files</h3>
-                    <button 
-                      onClick={() => {
-                        const link = `${window.location.origin}/dashboard`;
-                        navigator.clipboard.writeText(link);
-                        setFileTransferCopied(true);
-                        setTimeout(() => setFileTransferCopied(false), 2000);
-                      }}
-                      className="px-3 py-1.5 bg-[#f1f3f4] hover:bg-[#e3e3e3] text-[#1f1f1f] rounded-full text-xs font-medium transition-colors flex items-center gap-1.5"
-                    >
-                      {fileTransferCopied ? <Check size={13} className="text-[#0b57d0]" /> : <Copy size={13} />}
-                      <span>{fileTransferCopied ? 'Link copied' : 'Copy link'}</span>
-                    </button>
-                  </div>
-
-                  <div className="divide-y divide-gray-100">
-                    {dashboardFiles.map(file => (
-                      <div key={file.id} className="p-3.5 hover:bg-[#f8f9fa] transition-colors flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 bg-[#f1f3f4] text-gray-700 rounded-xl flex items-center justify-center shrink-0">
-                            <FileCheck size={18} />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold text-gray-900 truncate">{file.name}</p>
-                            <p className="text-[11px] text-gray-500">
-                              {(file.size / (1024 * 1024)).toFixed(2)} MB • {format(new Date(file.timestamp), 'MMM d, yyyy h:mm a')}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button 
-                            onClick={() => {
-                              alert(`Ready to download ${file.name}`);
-                            }}
-                            className="p-2 hover:bg-[#f1f3f4] text-gray-600 hover:text-gray-900 rounded-full transition-colors"
-                            title="Download File"
-                          >
-                            <Download size={16} />
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setDashboardFiles(prev => prev.filter(f => f.id !== file.id));
-                            }}
-                            className="p-2 hover:bg-[#f1f3f4] text-gray-500 hover:text-gray-900 rounded-full transition-colors"
-                            title="Remove File"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
             {activeSidebarTab === 'settings' && (
               <div className="max-w-2xl space-y-8 h-full pb-20">
                 <div className="flex items-center justify-between sticky top-0 bg-gray-50/80 backdrop-blur-md z-10 py-2 -mx-2 px-2">
@@ -2030,16 +1568,16 @@ export default function Dashboard() {
                       saveSettings(settings);
                       alert('Settings saved!');
                     }}
-                    className="px-5 sm:px-8 py-2 bg-accent-blue text-white rounded-xl font-bold text-sm shadow-lg shadow-accent-blue/20 transition-all active:scale-95"
+                    className="px-5 sm:px-8 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium text-sm shadow-sm transition-all active:scale-95"
                   >
                     Save Changes
                   </button>
                 </div>
                 <div className="space-y-6">
-                  <div className="bg-white p-6 rounded-3xl border border-gray-100 space-y-4">
+                  <div className="bg-white p-6 rounded-3xl shadow-sm space-y-4">
                     <h3 className="font-bold text-gray-900">Profile Settings</h3>
                     <div className="flex items-center gap-4">
-                      <img src={user?.photoURL || ''} className="w-16 h-16 rounded-2xl object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                      <img src={user?.photoURL || ''} className="w-16 h-16 rounded-full object-cover shadow-sm ring-1 ring-gray-200" alt="Profile" referrerPolicy="no-referrer" />
                       <div className="space-y-1">
                         <p className="font-bold text-gray-900">{user?.displayName}</p>
                         <p className="text-sm text-gray-500">{user?.email}</p>
@@ -2056,7 +1594,7 @@ export default function Dashboard() {
                       <p className="text-[10px] text-gray-400 italic">Managed by Google Account</p>
                     </div>
                   </div>
-                  <div className="bg-white p-6 rounded-3xl border border-gray-100 space-y-4">
+                  <div className="bg-white p-6 rounded-3xl shadow-sm space-y-4">
                     <h3 className="font-bold text-gray-900">Meeting Experience</h3>
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
                       <div className="space-y-0.5">
@@ -2065,7 +1603,7 @@ export default function Dashboard() {
                       </div>
                       <button 
                         onClick={() => saveSettings({ ...settings, muteOnJoin: !settings.muteOnJoin })}
-                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.muteOnJoin ? "bg-accent-blue" : "bg-gray-200")}
+                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.muteOnJoin ? "bg-gray-900" : "bg-gray-200")}
                       >
                         <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", settings.muteOnJoin ? "right-1" : "left-1")} />
                       </button>
@@ -2077,7 +1615,7 @@ export default function Dashboard() {
                       </div>
                       <button 
                         onClick={() => saveSettings({ ...settings, videoOffOnJoin: !settings.videoOffOnJoin })}
-                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.videoOffOnJoin ? "bg-accent-blue" : "bg-gray-200")}
+                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.videoOffOnJoin ? "bg-gray-900" : "bg-gray-200")}
                       >
                         <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", settings.videoOffOnJoin ? "right-1" : "left-1")} />
                       </button>
@@ -2089,7 +1627,7 @@ export default function Dashboard() {
                       </div>
                       <button 
                         onClick={() => saveSettings({ ...settings, mirrorVideo: !settings.mirrorVideo })}
-                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.mirrorVideo ? "bg-accent-blue" : "bg-gray-200")}
+                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.mirrorVideo ? "bg-gray-900" : "bg-gray-200")}
                       >
                         <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", settings.mirrorVideo ? "right-1" : "left-1")} />
                       </button>
@@ -2605,30 +2143,30 @@ function MeetingCard({ meeting, onJoin, onEdit, onDelete }: { meeting: Meeting, 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <div id={`meeting-${meeting.id}`} className="bg-white p-4 sm:p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all group relative scroll-mt-24">
+    <div id={`meeting-${meeting.id}`} className="bg-white p-4 sm:p-6 rounded-3xl shadow-sm hover:shadow-md transition-all group relative scroll-mt-24">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center sm:items-start gap-3 sm:gap-4 truncate">
           <div className={cn(
             "w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 relative",
-            isNow ? "bg-accent-blue text-white" : "bg-gray-50 text-gray-400"
+            isNow ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600"
           )}>
             <span className="text-[8px] sm:text-[10px] font-bold uppercase leading-none">{format(meeting.startTime, 'MMM')}</span>
             <span className="text-lg sm:text-xl font-bold">{format(meeting.startTime, 'dd')}</span>
             {isMeetingToday && (
-              <div className="absolute -top-1 -right-1 px-1 py-0.5 bg-accent-red text-[7px] text-white font-black rounded-md shadow-sm">
+              <div className="absolute -top-1 -right-1 px-1 py-0.5 bg-gray-900 text-[7px] text-white font-bold rounded-md shadow-sm">
                 NOW
               </div>
             )}
           </div>
           <div className="space-y-0.5 min-w-0">
             <div className="flex items-center gap-2">
-              <h4 className="font-bold text-gray-900 group-hover:text-accent-blue transition-colors text-sm sm:text-base truncate">{meeting.title}</h4>
+              <h4 className="font-bold text-gray-900 text-sm sm:text-base truncate">{meeting.title}</h4>
               {meeting.isKomu && (
-                <span className="text-[9px] sm:text-[10px] font-black text-purple-600 uppercase tracking-wider shrink-0">KOMU</span>
+                <span className="text-[9px] sm:text-[10px] font-bold text-gray-500 uppercase tracking-wider shrink-0">KOMU</span>
               )}
             </div>
             <p className="text-xs text-gray-500 flex items-center gap-2">
-              <Clock size={12} className="shrink-0" />
+              <Clock size={12} className="shrink-0 text-gray-400" />
               <span className="truncate">{format(meeting.startTime, 'hh:mm a')} • {meeting.hostName}</span>
             </p>
           </div>
@@ -2637,10 +2175,10 @@ function MeetingCard({ meeting, onJoin, onEdit, onDelete }: { meeting: Meeting, 
           <button 
             onClick={onJoin}
             className={cn(
-              "flex-1 sm:flex-none px-6 py-2.5 rounded-xl font-bold transition-all active:scale-95 text-xs sm:text-sm",
+              "flex-1 sm:flex-none px-6 py-2.5 rounded-xl font-medium transition-all active:scale-95 text-xs sm:text-sm",
               isNow 
-                ? "bg-accent-blue text-white shadow-lg shadow-accent-blue/10 hover:bg-blue-600" 
-                : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                ? "bg-gray-900 text-white hover:bg-gray-800 shadow-sm" 
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
             )}
           >
             {isNow ? 'Join Now' : 'Join'}
@@ -2650,7 +2188,7 @@ function MeetingCard({ meeting, onJoin, onEdit, onDelete }: { meeting: Meeting, 
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="p-2.5 text-gray-400 hover:bg-gray-100 rounded-xl transition-all"
             >
-              <MoreVertical size={20} />
+              <MoreVertical size={18} />
             </button>
             <AnimatePresence>
               {isMenuOpen && (
@@ -2660,22 +2198,22 @@ function MeetingCard({ meeting, onJoin, onEdit, onDelete }: { meeting: Meeting, 
                     initial={{ opacity: 0, scale: 0.95, y: 10 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                    className="absolute right-0 bottom-full mb-2 w-40 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50"
+                    className="absolute right-0 bottom-full mb-2 w-40 bg-white rounded-2xl shadow-xl py-1.5 z-50 overflow-hidden"
                   >
                     {!meeting.isKomu && (
                       <button 
                         onClick={() => { onEdit(); setIsMenuOpen(false); }}
-                        className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
                       >
-                        <Edit2 size={16} className="text-gray-400" />
+                        <Edit2 size={14} className="text-gray-400" />
                         Edit
                       </button>
                     )}
                     <button 
                       onClick={() => { onDelete(); setIsMenuOpen(false); }}
-                      className="w-full flex items-center gap-3 px-4 py-2 text-sm text-accent-red hover:bg-red-50"
+                      className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={14} className="text-red-400" />
                       Delete
                     </button>
                   </motion.div>
@@ -2696,7 +2234,7 @@ function NoteItem({ title, date, onClick }: { title: string, date: string, onCli
       className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl transition-all cursor-pointer group"
     >
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-gray-100 rounded-lg text-gray-400 group-hover:bg-accent-blue/10 group-hover:text-accent-blue transition-all">
+        <div className="p-2 bg-gray-100 rounded-lg text-gray-400 group-hover:bg-gray-200 group-hover:text-gray-600 transition-all">
           <FileText size={16} />
         </div>
         <div>

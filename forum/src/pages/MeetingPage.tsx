@@ -2363,8 +2363,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 )}
 
                 {!localTranscript && transcriptions.length === 0 && (
-                  <div className="bg-black/70 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-xs text-white/80 shadow-lg flex items-center gap-2 animate-pulse">
-                    <Sparkles size={12} className="text-blue-400" />
+                  <div className="bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-xs text-white/80 shadow-lg flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
                     <span>Live captions active — speak to transcribe</span>
                   </div>
                 )}

@@ -15,10 +15,13 @@ interface AuthContextType {
   user: User | null;
   komuUser: User | null;
   loading: boolean;
+  isLoggingIn: boolean;
+  authError: string | null;
   preferences: UserPreferences | null;
   login: () => Promise<void>;
   komuLogin: () => Promise<void>;
   logout: () => Promise<void>;
+  clearAuthError: () => void;
   updatePreferences: (prefs: Partial<UserPreferences>) => Promise<void>;
 }
 
@@ -28,100 +31,98 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [komuUser, setKomuUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
 
   useEffect(() => {
+    // Safety timeout to ensure app never stays stuck in loading state in preview iframe
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 1200);
+
     // Listen for main app auth changes
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      clearTimeout(safetyTimeout);
       setUser(u);
+      setKomuUser(u);
+      setLoading(false);
       
       if (u) {
-        try {
-          // Sync user profile for contact lookups
-          await setDoc(doc(db, 'userProfiles', u.uid), {
-            displayName: u.displayName,
-            email: u.email,
-            photoURL: u.photoURL,
-            lastSeen: new Date().toISOString()
-          }, { merge: true });
+        setAuthError(null);
+        // Non-blocking background sync for profile and preferences
+        (async () => {
+          try {
+            await setDoc(doc(db, 'userProfiles', u.uid), {
+              displayName: u.displayName,
+              email: u.email,
+              photoURL: u.photoURL,
+              lastSeen: new Date().toISOString()
+            }, { merge: true });
 
-          // Fetch preferences from Firestore
-          const docRef = doc(db, 'users', u.uid);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            setPreferences(docSnap.data() as UserPreferences);
-          } else {
-            // Create default preferences
-            const defaultPrefs: UserPreferences = {
-              displayName: u.displayName || 'Guest',
-              theme: 'light',
-            };
-            await setDoc(docRef, defaultPrefs);
-            setPreferences(defaultPrefs);
+            const docRef = doc(db, 'users', u.uid);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+              setPreferences(docSnap.data() as UserPreferences);
+            } else {
+              const defaultPrefs: UserPreferences = {
+                displayName: u.displayName || 'Guest',
+                theme: 'light',
+              };
+              await setDoc(docRef, defaultPrefs);
+              setPreferences(defaultPrefs);
+            }
+          } catch (error) {
+            console.warn("Background preferences sync skipped:", error);
           }
-        } catch (error) {
-          console.error("Error fetching preferences:", error);
-        }
+        })();
       } else {
         setPreferences(null);
       }
-      setLoading(false);
-    });
-
-    // Listen for komu auth changes
-    const unsubscribeKomu = onAuthStateChanged(komuAuth, (u) => {
-      setKomuUser(u);
     });
 
     return () => {
+      clearTimeout(safetyTimeout);
       unsubscribe();
-      unsubscribeKomu();
     };
   }, []);
 
   const login = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      
-      if (credential) {
-        try {
-          // Sign in to secondary app as well using the same credential
-          await signInWithCredential(komuAuth, credential);
-          console.log("Successfully signed in to both apps");
-        } catch (komuError) {
-          console.warn("Could not sync with secondary app, continuing with main login:", komuError);
-        }
-      }
-    } catch (error) {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error: any) {
       console.error("Login failed:", error);
+      if (error?.code === 'auth/unauthorized-domain') {
+        setAuthError('This domain is not authorized in your Firebase Console. Please add the app domain to Authentication > Settings > Authorized domains.');
+      } else if (error?.code === 'auth/configuration-not-found' || error?.code === 'auth/operation-not-allowed') {
+        setAuthError('Google Sign-in provider is not enabled in your Firebase Console. Please enable Google under Authentication > Sign-in method.');
+      } else if (error?.code !== 'auth/popup-closed-by-user' && error?.code !== 'auth/cancelled-popup-request') {
+        setAuthError(error?.message || 'Google sign-in could not be completed.');
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
   const komuLogin = async () => {
-    try {
-      // If we don't have a main user, login to both
-      if (!user) {
-        await login();
-      } else if (!komuUser) {
-        // If we have main but no komu, try to sign in to komu specifically
-        await signInWithPopup(komuAuth, googleProvider);
-        console.log("Successfully synced with Komu Notes");
-      }
-    } catch (error) {
-      console.error("Komu login failed:", error);
+    if (!user) {
+      await login();
     }
   };
 
   const logout = async () => {
     try {
-      await Promise.all([
-        signOut(auth),
-        signOut(komuAuth)
-      ]);
+      await signOut(auth);
+      setAuthError(null);
     } catch (error) {
       console.error("Logout failed:", error);
     }
+  };
+
+  const clearAuthError = () => {
+    setAuthError(null);
   };
 
   const updatePreferences = async (newPrefs: Partial<UserPreferences>) => {
@@ -137,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, komuUser, loading, preferences, login, komuLogin, logout, updatePreferences }}>
+    <AuthContext.Provider value={{ user, komuUser, loading, isLoggingIn, authError, preferences, login, komuLogin, logout, clearAuthError, updatePreferences }}>
       {children}
     </AuthContext.Provider>
   );

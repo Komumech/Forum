@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Video, Keyboard, Plus, 
   Workflow, PenTool, FileText, Check, ChevronDown, 
-  ChevronUp, Lock, Monitor,
-  X, ArrowRight, Minus, ShieldCheck, Share2
+  ChevronUp, Lock, Monitor, LayoutDashboard,
+  X, ArrowRight, Minus, ShieldCheck, Share2, Sparkles, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -15,7 +15,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'video' | 'board' | 'notes'>('video');
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const navigate = useNavigate();
-  const { user, login, loading } = useAuth();
+  const { user, login, loading, isLoggingIn, authError, clearAuthError } = useAuth();
 
   // Guest Join / Create Modal State
   const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
@@ -109,14 +109,6 @@ export default function Home() {
     setOpenFaq(openFaq === index ? null : index);
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="w-10 h-10 border-3 border-accent-blue border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
   const features = {
     video: {
       title: "Crystal Clear HD Video & Audio",
@@ -190,34 +182,73 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => navigate('/dashboard')} 
-                className="bg-accent-blue hover:bg-blue-600 text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-accent-blue/20 transition-all active:scale-95"
+                className="bg-accent-blue hover:bg-blue-600 text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-accent-blue/20 transition-all active:scale-95 flex items-center gap-2"
               >
-                Dashboard
+                <LayoutDashboard size={15} />
+                <span>Dashboard</span>
               </button>
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl overflow-hidden border border-gray-200">
                 <img src={user.photoURL || `https://picsum.photos/seed/${user.uid}/36/36`} alt="User" referrerPolicy="no-referrer" />
               </div>
             </div>
           ) : (
-            <div className="hidden sm:flex items-center gap-2.5">
+            <div className="flex items-center gap-2 sm:gap-2.5">
+              <button 
+                onClick={() => navigate('/dashboard')}
+                className="text-gray-600 hover:text-gray-900 border border-gray-200/80 hover:bg-gray-50 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                title="Explore Dashboard"
+              >
+                <LayoutDashboard size={14} />
+                <span className="hidden sm:inline">Dashboard</span>
+              </button>
               <button 
                 onClick={() => openGuestModal('create')}
-                className="bg-accent-blue/10 hover:bg-accent-blue/20 text-accent-blue border border-accent-blue/20 flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+                className="hidden sm:flex bg-accent-blue/10 hover:bg-accent-blue/20 text-accent-blue border border-accent-blue/20 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
               >
                 <Plus size={15} />
                 <span>Instant Meeting</span>
               </button>
               <button 
                 onClick={login}
-                className="bg-white hover:bg-gray-50 text-gray-800 border border-gray-200/70 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-95"
+                disabled={isLoggingIn}
+                className="bg-white hover:bg-gray-50 text-gray-800 border border-gray-200 flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-60"
               >
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0" alt="Google" />
+                {isLoggingIn ? (
+                  <div className="w-3.5 h-3.5 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0" alt="Google" />
+                )}
                 <span>Sign in</span>
               </button>
             </div>
           )}
         </div>
       </header>
+
+      {/* Auth Error Notification Banner */}
+      <AnimatePresence>
+        {authError && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="max-w-4xl mx-auto px-4 pt-4"
+          >
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl flex items-center justify-between text-xs sm:text-sm">
+              <div className="flex items-center gap-2">
+                <AlertCircle size={16} className="text-red-500 shrink-0" />
+                <span>{authError}</span>
+              </div>
+              <button 
+                onClick={clearAuthError}
+                className="p-1 hover:bg-red-100 rounded-lg transition-colors text-red-600"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Hero Section */}
       <section className="relative overflow-hidden py-12 sm:py-16 lg:py-20 px-5 sm:px-8 lg:px-16 max-w-7xl mx-auto w-full flex flex-col lg:flex-row items-center gap-10 lg:gap-16">
@@ -293,15 +324,26 @@ export default function Home() {
                 </form>
               </div>
 
-              <div className="flex items-center gap-3 justify-center lg:justify-start pt-1">
-                <span className="text-xs text-gray-400 font-medium">No account required.</span>
-                <span className="text-gray-300">•</span>
+              {/* Sign in with Google Bar */}
+              <div className="flex flex-wrap items-center gap-3 justify-center lg:justify-start pt-2">
                 <button 
                   onClick={login}
-                  className="text-xs text-gray-600 hover:text-accent-blue font-semibold flex items-center gap-1.5 transition-colors group"
+                  disabled={isLoggingIn}
+                  className="px-4 py-2.5 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50/80 rounded-xl text-xs sm:text-sm font-semibold text-gray-800 shadow-sm transition-all flex items-center gap-2.5 active:scale-98 disabled:opacity-60"
                 >
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0" alt="Google" />
+                  {isLoggingIn ? (
+                    <div className="w-4 h-4 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 shrink-0" alt="Google" />
+                  )}
                   <span>Sign in with Google</span>
+                </button>
+                <button 
+                  onClick={() => navigate('/dashboard')}
+                  className="px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-600 hover:text-accent-blue transition-colors flex items-center gap-1.5 group"
+                >
+                  <LayoutDashboard size={14} className="text-gray-400 group-hover:text-accent-blue transition-colors" />
+                  <span>Explore Dashboard</span>
                   <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
                 </button>
               </div>

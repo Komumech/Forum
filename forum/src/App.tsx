@@ -10,8 +10,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#202124] flex items-center justify-center">
-        <div className="w-10 h-10 border-[3px] border-accent-blue border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
@@ -20,7 +20,7 @@ export default function App() {
     <div className="min-h-screen bg-white">
       <Routes>
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Home />} />
-        <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/meeting/:id" element={<MeetingPage />} />
         <Route path="/isolated-feed/:room/:identity" element={<IsolatedFeed />} />
         <Route path="/feed/:room/:identity" element={<IsolatedFeed />} />
