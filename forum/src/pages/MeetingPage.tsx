@@ -179,13 +179,11 @@ export default function MeetingPage() {
       localStorage.setItem('forum_guest_username', name.trim());
     } catch (e) {}
 
-    // Update presence to Busy if user is authenticated
+    // Update presence to Busy in background if user is authenticated
     if (user) {
-      try {
-        await setDoc(doc(db, 'userProfiles', user.uid), { status: 'busy' }, { merge: true });
-      } catch (err) {
+      setDoc(doc(db, 'userProfiles', user.uid), { status: 'busy' }, { merge: true }).catch(err => {
         console.warn("Could not update user profile status:", err);
-      }
+      });
     }
 
     console.log(`[MeetingPage] Attempting to join room: ${room} as ${name}`);
@@ -216,18 +214,26 @@ export default function MeetingPage() {
       // Resilient fetch with up to 3 attempts
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+
           // Try GET first
           const resp = await fetch(getUrl, {
+            signal: controller.signal,
             headers: { 'Accept': 'application/json' },
             cache: 'no-store'
           });
+          clearTimeout(timeoutId);
 
           if (resp.ok) {
             tokenData = await resp.json();
             if (tokenData?.token) break;
           } else {
             // Try POST fallback
+            const postController = new AbortController();
+            const postTimeoutId = setTimeout(() => postController.abort(), 6000);
             const postResp = await fetch('/api/get-participant-token', {
+              signal: postController.signal,
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
               body: JSON.stringify({
@@ -236,6 +242,7 @@ export default function MeetingPage() {
                 metadata
               })
             });
+            clearTimeout(postTimeoutId);
             if (postResp.ok) {
               tokenData = await postResp.json();
               if (tokenData?.token) break;
@@ -245,7 +252,7 @@ export default function MeetingPage() {
           lastFetchErr = fetchErr;
           console.warn(`[MeetingPage] Token fetch attempt ${attempt} failed:`, fetchErr);
           if (attempt < 3) {
-            await new Promise(res => setTimeout(res, 500 * attempt));
+            await new Promise(res => setTimeout(res, 400 * attempt));
           }
         }
       }
@@ -283,9 +290,15 @@ export default function MeetingPage() {
                 <video ref={videoRef} autoPlay muted playsInline className={cn("scale-x-[-1] w-full h-full object-cover", preJoinBg === 'blur' && "blur-md")} />
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#131416] p-6 text-center space-y-4">
-                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#202226] border border-white/10 flex items-center justify-center text-3xl sm:text-4xl font-bold text-white shadow-xl">
-                    {name.charAt(0).toUpperCase() || "?"}
-                  </div>
+                  {user?.photoURL ? (
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-white/20 shadow-xl">
+                      <img src={user.photoURL} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  ) : (
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#202226] border border-white/10 flex items-center justify-center text-3xl sm:text-4xl font-bold text-white shadow-xl">
+                      {name.charAt(0).toUpperCase() || "?"}
+                    </div>
+                  )}
                   {cameraPermissionError ? (
                     <div className="space-y-2 max-w-xs">
                       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-300 text-xs font-semibold border border-amber-500/25">
@@ -2057,9 +2070,19 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           >
             <div className="bg-slate-900/95 backdrop-blur-xl p-4 rounded-2xl border border-white/15 shadow-2xl flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold shrink-0">
-                  {pendingParticipants[0].identity.charAt(0).toUpperCase()}
-                </div>
+                {(() => {
+                  let pAvatar = "";
+                  try {
+                    pAvatar = JSON.parse(pendingParticipants[0]?.metadata || "{}").avatar;
+                  } catch (e) {}
+                  return pAvatar ? (
+                    <img src={pAvatar} alt="" className="w-10 h-10 rounded-full object-cover shrink-0 border border-white/20" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold shrink-0">
+                      {pendingParticipants[0].identity.charAt(0).toUpperCase()}
+                    </div>
+                  );
+                })()}
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-white truncate">
                     {pendingParticipants.length === 1 
@@ -2482,9 +2505,19 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                           {pendingParticipants.map(p => (
                             <div key={p.sid} className="flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl border border-gray-200/80 transition-all">
                               <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">
-                                  {p.identity.charAt(0).toUpperCase()}
-                                </div>
+                                {(() => {
+                                  let pAvatar = "";
+                                  try {
+                                    pAvatar = JSON.parse(p.metadata || "{}").avatar;
+                                  } catch (e) {}
+                                  return pAvatar ? (
+                                    <img src={pAvatar} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-200" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">
+                                      {p.identity.charAt(0).toUpperCase()}
+                                    </div>
+                                  );
+                                })()}
                                 <div className="min-w-0">
                                   <span className="text-xs font-semibold text-gray-900 block truncate">{p.identity.split('#')[0]}</span>
                                   <span className="text-[10px] text-amber-600 font-medium block">Waiting in lobby</span>
@@ -3515,6 +3548,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 }
 
 function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, mirror, aiVideoFilter, showName = true, isFocal, onSpotlight, onContextMenu, onCopyIsolatedFeed, onSendFile }: any) {
+  const { user } = useAuth();
   const isSpeaking = useIsSpeaking(trackRef?.participant);
   const isVideoOff = !trackRef?.publication || trackRef.publication.isMuted || !trackRef.publication.isEnabled;
   const isHandRaised = raisedHands?.[trackRef?.participant.identity];
@@ -3532,6 +3566,8 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
     }
   }, [trackRef?.participant.metadata]);
 
+  const userAvatar = (trackRef?.participant.isLocal && user?.photoURL) ? user.photoURL : metadata.avatar;
+
   return (
     <div 
       data-participant-identity={trackRef?.participant?.identity}
@@ -3548,12 +3584,12 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
     >
       {isVideoOff ? (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#18191b] to-[#222428]">
-          {metadata.avatar ? (
+          {userAvatar ? (
             <div className={cn(
               "w-24 h-24 rounded-full overflow-hidden border-4 border-accent-blue/20 shadow-2xl transition-all",
               isSpeaking ? "ring-4 ring-accent-blue/40 scale-110" : ""
             )}>
-              <img src={metadata.avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              <img src={userAvatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             </div>
           ) : (
             <div className={cn(
@@ -3644,7 +3680,7 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
                     onClick={(e) => { e.stopPropagation(); onTogglePin?.(); setIsMenuOpen(false); }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-white hover:bg-white/10 rounded-lg transition-colors text-left"
                   >
-                    {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    {isPinned ? <PinOff size={14} /> : <Pin size={16} />}
                     {isPinned ? 'Unpin' : 'Pin for me'}
                   </button>
                   {!trackRef?.participant.isLocal && onSendFile && (
@@ -3690,20 +3726,35 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
 
 function ParticipantItem(props: any) {
   const { participant, isLocal, onSendFile } = props;
+  const { user } = useAuth();
+  const metadata = useMemo(() => {
+    try {
+      return JSON.parse(participant?.metadata || "{}");
+    } catch {
+      return {};
+    }
+  }, [participant?.metadata]);
+
+  const avatarUrl = (isLocal && user?.photoURL) ? user.photoURL : metadata.avatar;
+
   return (
     <div className="flex items-center justify-between py-2.5 px-3 border-b border-gray-100 bg-white hover:bg-gray-50/80 transition-colors">
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold border border-blue-200 shrink-0">
-          {participant.identity.charAt(0).toUpperCase()}
-        </div>
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-200" referrerPolicy="no-referrer" />
+        ) : (
+          <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold border border-blue-200 shrink-0">
+            {participant?.identity ? participant.identity.charAt(0).toUpperCase() : "?"}
+          </div>
+        )}
         <div className="flex flex-col min-w-0">
           <span className="text-sm font-medium text-gray-900 truncate">
-            {participant.identity.split('#')[0]} {isLocal && "(You)"}
+            {participant?.identity?.split('#')[0] || "User"} {isLocal && "(You)"}
           </span>
         </div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
-        {!isLocal && onSendFile && (
+        {!isLocal && onSendFile && participant?.identity && (
           <button
             onClick={() => onSendFile(participant.identity)}
             title={`Send file to ${participant.identity.split('#')[0]}`}
@@ -3712,7 +3763,7 @@ function ParticipantItem(props: any) {
             <Paperclip size={14} />
           </button>
         )}
-        {!participant.isMicrophoneEnabled ? <MicOff size={14} className="text-accent-red" /> : <Mic size={14} className="text-gray-500" />}
+        {!participant?.isMicrophoneEnabled ? <MicOff size={14} className="text-accent-red" /> : <Mic size={14} className="text-gray-500" />}
       </div>
     </div>
   );
@@ -4104,3 +4155,6 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
     </div>
   );
 });
+
+
+

@@ -537,6 +537,11 @@ export default function Dashboard() {
 
   const joinMeeting = async (roomId: string, isInstant = false) => {
     // Instant meetings are strictly temporary and don't pollute the calendar
+    if (isInstant || typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`forum_room_host_${roomId}`, 'true');
+      } catch (e) {}
+    }
     navigate(`/meeting/${roomId}`);
   };
 
