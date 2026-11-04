@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import { AccessToken } from "livekit-server-sdk";
+import { createParticipantToken } from "./livekit-token";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -322,30 +322,14 @@ Return ONLY the processed text replacement without introductory greetings or met
       return res.status(400).json({ error: "Missing room or username parameter" });
     }
 
-    const apiKey = process.env.LIVEKIT_API_KEY || "APIKKz48zYgzLs5";
-    const apiSecret = process.env.LIVEKIT_API_SECRET || "xxFMWxVfAtzMUJf1WXGHZj2Kp7plcChVagiQJAfYNzcB";
-
-    if (!apiKey || !apiSecret) {
-      console.error("[Token API] Missing API Key or Secret");
-      return res.status(500).json({ error: "LiveKit server configuration missing" });
-    }
-
     try {
-      const at = new AccessToken(apiKey, apiSecret, {
-        identity: username,
-        metadata: typeof metadata === "object" ? JSON.stringify(metadata) : metadata,
+      const token = await createParticipantToken({
+        room,
+        username,
+        metadata,
+        subscriberOnly,
       });
 
-      at.addGrant({
-        roomJoin: true,
-        room: room,
-        canPublish: !subscriberOnly,
-        canSubscribe: true,
-        canPublishData: !subscriberOnly,
-        canUpdateOwnMetadata: !subscriberOnly,
-      });
-
-      const token = await at.toJwt();
       console.log(`[Token API] Successfully generated token for ${username} (room: ${room})`);
       res.json({ token, room, username });
     } catch (error: any) {
