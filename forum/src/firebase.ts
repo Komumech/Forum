@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInWithCredential } from 'firebase/auth';
-import { initializeFirestore } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import appletConfig from '../firebase-applet-config.json';
 
 // Clear any stale local configuration from prior experiments
 if (typeof window !== 'undefined') {
@@ -11,25 +12,14 @@ if (typeof window !== 'undefined') {
   }
 }
 
-// Direct Firebase configuration for forum-8f34e
-export const firebaseConfig = {
-  apiKey: "AIzaSyAjdaGsN05HXjBP9zPKsHhMkH7qaGCpGPc",
-  authDomain: "forum-8f34e.firebaseapp.com",
-  projectId: "forum-8f34e",
-  storageBucket: "forum-8f34e.firebasestorage.app",
-  messagingSenderId: "61945874515",
-  appId: "1:61945874515:web:47e665a5cc834558f75ea6",
-  measurementId: "G-1ETEYSQRRB",
-};
+export const firebaseConfig = appletConfig;
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 
-export const db = initializeFirestore(app, {
-  experimentalAutoDetectLongPolling: true,
-  ignoreUndefinedProperties: true,
-});
+const dbId = (firebaseConfig as any).firestoreDatabaseId;
+export const db = (!dbId || dbId === '(default)') ? getFirestore(app) : getFirestore(app, dbId);
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
@@ -41,6 +31,18 @@ export const komuDb = db;
 export const komuAuth = auth;
 
 export { signInWithPopup, signOut, signInWithCredential };
+
+// Connection verification as recommended by Firebase skill
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn("Firestore client offline, retrying...");
+    }
+  }
+}
+testConnection();
 
 
 

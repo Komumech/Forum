@@ -1,11 +1,12 @@
 {
-  "name": "Forum",
+  "name": "Remix Forum",
   "description": "A comprehensive communication platform for meetings, scheduling, and collaboration.",
   "requestFramePermissions": [
     "camera",
     "microphone"
   ],
   "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API",
     "video_conferencing",
     "real_time_collaboration"
   ]

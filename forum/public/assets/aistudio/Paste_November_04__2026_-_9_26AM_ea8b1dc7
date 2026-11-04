@@ -1,0 +1,404 @@
+
+/meeting/rlpaas5ydh
+
+Types:
+Sources:
+29
+10
+12
+09:24:46.534
+System
+Build
+ Render Start 
+09:24:46.867
+App
+Warning
+ Background preferences sync skipped:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:47.197
+Backend
+Log
+ Server restarting... 
+09:24:47.197
+Backend
+Log
+ Server stopped. 
+09:24:47.197
+Backend
+Log
+ Server started on port 3000. 
+09:24:47.197
+Backend
+Log
+ Pre-warming 1 paths...
+  
+  > react-example@0.0.0 dev
+  > tsx server.ts --port 3000 --host 0.0.0.0
+  
+  ◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+  Server running on http://localhost:3000 
+09:24:47.197
+Backend
+Log
+ Pre-warming completed. 
+09:24:47.199
+Backend
+Log
+ CONNECTED 
+09:24:48.518
+App
+Warning
+ Instant meeting Firestore setup:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:49.029
+App
+Error
+ Failed to fetch meeting details:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:49.098
+App
+Error
+ Failed to fetch meeting details:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:49.397
+System
+Build
+ Render End 
+09:24:49.543
+App
+Debug
+ [vite] connecting... 
+09:24:51.618
+App
+Error
+ [2026-11-04T16:24:51.617Z]  @firebase/firestore:
+  Firestore (12.12.0): Uncaught Error in snapshot listener:
+  FirebaseError: [code=permission-denied]: Missing or insufficient permissions. 
+09:24:51.724
+App
+Error
+ [2026-11-04T16:24:51.644Z]  @firebase/firestore:
+  Firestore (12.12.0): Uncaught Error in snapshot listener:
+  FirebaseError: [code=permission-denied]: Missing or insufficient permissions. 
+09:24:51.893
+App
+Error
+ [2026-11-04T16:24:51.648Z]  @firebase/firestore:
+  Firestore (12.12.0): Uncaught Error in snapshot listener:
+  FirebaseError: [code=permission-denied]: Missing or insufficient permissions. 
+09:24:51.896
+App
+Warning
+ [Dashboard] Komu Sync Permissions Restricted. 
+09:24:51.900
+App
+Error
+ Firestore Error [list] on [meetings]:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:52.126
+App
+Warning
+ Background preferences sync skipped:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:56.089
+App
+Warning
+ Instant meeting Firestore setup:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:56.506
+App
+Error
+ Failed to fetch meeting details:
+  FirebaseError: Missing or insufficient permissions. 
+09:24:56.547
+App
+Error
+ Failed to fetch meeting details:
+  FirebaseError: Missing or insufficient permissions. 
+09:25:16.381
+App
+Log
+ [MeetingPage] Attempting to join room: rlpaas5ydh as Munachi Godson 
+09:25:16.389
+App
+Log
+ [MeetingPage] Fetching token from: /api/get-participant-token?room=rlpaas5ydh&username=Munachi%20Godson%232394&metadata=%7B%22pending%22%3Afalse%2C%22avatar%22%3A%22https%3A%2F%2Flh3.googleusercontent.com%2Fa%2FACg8ocKDNFVoKErEve1HMnk0RmDBJMKP28JrKTxZqFfpvv3zc1MNwuA%3Ds96-c%22%2C%22isHost%22%3Atrue%7D 
+09:25:16.621
+App
+Log
+ [MeetingPage] Token received successfully, connecting to LiveKit... 
+09:25:16.851
+Backend
+Log
+ [Token API] Request for room: rlpaas5ydh, user: Munachi Godson#2394, subscriberOnly: false 
+09:25:16.855
+Backend
+Log
+ [Token API] Successfully generated token for Munachi Godson#2394 (room: rlpaas5ydh) 
+09:25:18.094
+App
+Error
+ [2026-11-04T16:25:18.093Z]  @firebase/firestore:
+  Firestore (12.12.0): Uncaught Error in snapshot listener:
+  FirebaseError: [code=permission-denied]: Missing or insufficient permissions. 
+09:25:18.714
+App
+Error
+ [2026-11-04T16:25:18.714Z]  @firebase/firestore:
+  Firestore (12.12.0): FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {"ve":-1} 
+09:25:18.773
+App
+Error
+ [2026-11-04T16:25:18.716Z]  @firebase/firestore:
+  Firestore (12.12.0): INTERNAL UNHANDLED ERROR: 
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {"ve":-1}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)
+    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13
+    at Array.forEach (<anonymous>)
+    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)
+    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)
+    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)
+    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52 
+09:25:18.829
+App
+Unhandled Rejection
+ Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {"ve":-1}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)
+    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13
+    at Array.forEach (<anonymous>)
+    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)
+    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)
+    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)
+    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52 
+09:25:18.832
+App
+Unhandled Rejection
+ Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {"ve":-1}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)
+    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13
+    at Array.forEach (<anonymous>)
+    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)
+    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)
+    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)
+    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52 
+09:25:18.833
+App
+Unhandled Rejection
+ Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {"ve":-1}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)
+    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13
+    at Array.forEach (<anonymous>)
+    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)
+    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)
+    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)
+    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52 
+09:25:18.836
+App
+Error
+ [2026-11-04T16:25:18.729Z]  @firebase/firestore:
+  Firestore (12.12.0): FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:18.839
+App
+Error
+ Uncaught Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:19.807
+App
+Error
+ [2026-11-04T16:25:19.805Z]  @firebase/firestore:
+  Firestore (12.12.0): FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:19.926
+App
+Error
+ [2026-11-04T16:25:19.924Z]  @firebase/firestore:
+  Firestore (12.12.0): FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:19.930
+App
+Error
+ Room initialization error (fallback to admitted):
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2584:41)
+    at __PRIVATE_AsyncQueueImpl.uc (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16112:16)
+    at __PRIVATE_AsyncQueueImpl.enqueue (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16064:14)
+    at __PRIVATE_AsyncQueueImpl.enqueueAndForget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16050:10)
+    at __PRIVATE_firestoreClientGetDocumentsViaSnapshotListener (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:15556:23)
+    at getDocs (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:18208:72)
+    at initializeRoom (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:966:37)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1035:5
+    at Object.react_stack_bottom_frame (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:18567:20) 
+09:25:19.936
+App
+Error
+ [2026-11-04T16:25:19.927Z]  @firebase/firestore:
+  Firestore (12.12.0): FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:19.949
+App
+Error
+ %o
+
+%s
+
+%s
+
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2584:41)
+    at __PRIVATE_AsyncQueueImpl.uc (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16112:16)
+    at __PRIVATE_AsyncQueueImpl.enqueue (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16064:14)
+    at __PRIVATE_AsyncQueueImpl.enqueueAndForget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16050:10)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:15489:26
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1080:7
+    at Object.react_stack_bottom_frame (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:18573:13)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:997:72)
+    at commitHookEffectListUnmount (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:9449:160)
+  The above error occurred in the <MeetingRoomContent> component.
+  React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary. 
+09:25:19.980
+App
+Error
+ Uncaught error:
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2584:41)
+    at __PRIVATE_AsyncQueueImpl.uc (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16112:16)
+    at __PRIVATE_AsyncQueueImpl.enqueue (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16064:14)
+    at __PRIVATE_AsyncQueueImpl.enqueueAndForget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16050:10)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:15489:26
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1080:7
+    at Object.react_stack_bottom_frame (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:18573:13)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:997:72)
+    at commitHookEffectListUnmount (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:9449:160)
+  {
+  "componentStack": "\n    at MeetingRoomContent (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:825:31)\n    at div (<anonymous>)\n    at div (<anonymous>)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=9dabeb44:4211:37\n    at main (<anonymous>)\n    at MeetingPage (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:88:24)\n    at RenderedRoute (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:6422:26)\n    at Routes (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:7299:3)\n    at div (<anonymous>)\n    at App (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/App.tsx:9:29)\n    at AuthProvider (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/context/AuthContext.tsx:8:32)\n    at Router (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:7229:13)\n    at BrowserRouter (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:10524:3)\n    at ErrorBoundary (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/ErrorBoundary.tsx:6:5)"
+} 
+09:25:19.997
+App
+Error
+ %o
+
+%s
+
+%s
+
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2584:41)
+    at __PRIVATE_AsyncQueueImpl.uc (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16112:16)
+    at __PRIVATE_AsyncQueueImpl.enqueue (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16064:14)
+    at __PRIVATE_AsyncQueueImpl.enqueueAndForget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16050:10)
+    at __PRIVATE_firestoreClientListen (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:15488:23)
+    at onSnapshot (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:18280:10)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1037:23
+    at Object.react_stack_bottom_frame (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:18567:20)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:997:72)
+  The above error occurred in the <MeetingRoomContent> component.
+  React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary. 
+09:25:19.999
+App
+Error
+ Uncaught error:
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2584:41)
+    at __PRIVATE_AsyncQueueImpl.uc (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16112:16)
+    at __PRIVATE_AsyncQueueImpl.enqueue (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16064:14)
+    at __PRIVATE_AsyncQueueImpl.enqueueAndForget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16050:10)
+    at __PRIVATE_firestoreClientListen (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:15488:23)
+    at onSnapshot (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:18280:10)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1037:23
+    at Object.react_stack_bottom_frame (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:18567:20)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:997:72)
+  {
+  "componentStack": "\n    at MeetingRoomContent (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:825:31)\n    at div (<anonymous>)\n    at div (<anonymous>)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=9dabeb44:4211:37\n    at main (<anonymous>)\n    at MeetingPage (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:88:24)\n    at RenderedRoute (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:6422:26)\n    at Routes (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:7299:3)\n    at div (<anonymous>)\n    at App (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/App.tsx:9:29)\n    at AuthProvider (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/context/AuthContext.tsx:8:32)\n    at Router (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:7229:13)\n    at BrowserRouter (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:10524:3)\n    at ErrorBoundary (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/ErrorBoundary.tsx:6:5)"
+} 
+09:25:19.999
+App
+Error
+ [2026-11-04T16:25:19.958Z]  @firebase/firestore:
+  Firestore (12.12.0): FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:20.006
+App
+Error
+ %o
+
+%s
+
+%s
+
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2584:41)
+    at __PRIVATE_AsyncQueueImpl.uc (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16112:16)
+    at __PRIVATE_AsyncQueueImpl.enqueue (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16064:14)
+    at __PRIVATE_AsyncQueueImpl.enqueueAndForget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16050:10)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:15489:26
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1492:18
+    at Object.react_stack_bottom_frame (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:18573:13)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:997:72)
+    at commitHookEffectListUnmount (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:9449:160)
+  The above error occurred in the <MeetingRoomContent> component.
+  React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary. 
+09:25:20.008
+App
+Error
+ Uncaught error:
+  Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"}
+    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)
+    at fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2584:41)
+    at __PRIVATE_AsyncQueueImpl.uc (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16112:16)
+    at __PRIVATE_AsyncQueueImpl.enqueue (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16064:14)
+    at __PRIVATE_AsyncQueueImpl.enqueueAndForget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:16050:10)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:15489:26
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1492:18
+    at Object.react_stack_bottom_frame (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:18573:13)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:997:72)
+    at commitHookEffectListUnmount (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=9dabeb44:9449:160)
+  {
+  "componentStack": "\n    at MeetingRoomContent (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:825:31)\n    at div (<anonymous>)\n    at div (<anonymous>)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=9dabeb44:4211:37\n    at main (<anonymous>)\n    at MeetingPage (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:88:24)\n    at RenderedRoute (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:6422:26)\n    at Routes (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:7299:3)\n    at div (<anonymous>)\n    at App (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/App.tsx:9:29)\n    at AuthProvider (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/context/AuthContext.tsx:8:32)\n    at Router (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:7229:13)\n    at BrowserRouter (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-router-dom.js?v=9dabeb44:10524:3)"
+} 
+09:25:26.463
+App
+Error
+ [2026-11-04T16:25:26.458Z]  @firebase/firestore:
+  Firestore (12.12.0): FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:26.497
+App
+Error
+ Uncaught Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815) CONTEXT: {"Pc":"Error: FIRESTORE (12.12.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: ca9) CONTEXT: {\"ve\":-1}\n    at __PRIVATE__fail (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2593:32)\n    at __PRIVATE_hardAssert (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:2597:46)\n    at __PRIVATE_TargetState.We (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6718:19)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6754:13\n    at Array.forEach (<anonymous>)\n    at __PRIVATE_WatchChangeAggregator.forEachTarget (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6784:42)\n    at __PRIVATE_WatchChangeAggregator.tt (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:6747:10)\n    at __PRIVATE_onWatchStreamChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:13327:135)\n    at __PRIVATE_PersistentListenStream.onNext (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12978:26)\n    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/firebase_firestore.js?v=9dabeb44:12937:52"} 
+09:25:40.745
+App
+Warning
+ Could not apply audio device/filter settings:
+  publishing rejected as engine not connected within timeout 
+09:25:40.753
+App
+Warning
+ Could not enable microphone on join:
+  publishing rejected as engine not connected within timeout 
+09:25:40.756
+App
+Warning
+ PublishTrackError: publishing rejected as engine not connected within timeout
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/chunk-ZZYO6FKA.js?v=9dabeb44:23985:24 
+09:25:40.757
+App
+Warning
+ Could not apply audio device/filter settings:
+  publishing rejected as engine not connected within timeout 
+09:25:44.954
+App
+Warning
+ Could not enable camera on join:
+  publishing rejected as engine not connected within timeout 

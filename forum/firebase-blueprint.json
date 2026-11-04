@@ -29,11 +29,13 @@
         "startTime": { "type": "string", "format": "date-time" },
         "roomId": { "type": "string" },
         "hostId": { "type": "string" },
+        "hostEmail": { "type": "string" },
         "hostName": { "type": "string" },
+        "createdBy": { "type": "string" },
         "participants": { "type": "array", "items": { "type": "string" } },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["title", "startTime", "roomId", "hostId", "participants"]
+      "required": ["roomId", "hostId"]
     }
   },
   "firestore": {

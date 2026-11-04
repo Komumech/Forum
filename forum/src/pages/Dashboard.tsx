@@ -238,6 +238,8 @@ export default function Dashboard() {
     const q = query(collection(db, 'contacts'), where('ownerId', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setContacts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("[Dashboard] Contacts snapshot notice:", err);
     });
     return () => unsubscribe();
   }, [user, activeSidebarTab]);
@@ -248,6 +250,8 @@ export default function Dashboard() {
     const q = query(collection(komuDb, 'notes'), where('uid', '==', user.uid), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setNotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("[Dashboard] Notes snapshot notice:", err);
     });
     return () => unsubscribe();
   }, [user, activeSidebarTab]);
@@ -260,6 +264,8 @@ export default function Dashboard() {
     const q = query(collection(db, 'recordings'), where('participants', 'array-contains', user.uid), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setRecordings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("[Dashboard] Recordings snapshot notice:", err);
     });
     return () => unsubscribe();
   }, [user]);
@@ -515,19 +521,34 @@ export default function Dashboard() {
     const roomId = Math.random().toString(36).substring(2, 12);
 
     try {
-      await addDoc(collection(db, 'meetings'), {
-        title: newMeeting.title,
+      const hostEmail = user.email || "";
+      const hostName = user.displayName || user.email?.split('@')[0] || 'Host';
+
+      await setDoc(doc(db, 'meetings', roomId), {
+        title: newMeeting.title || `Meeting ${roomId}`,
         description: newMeeting.description,
         notes: newMeeting.description,
         startTime: Timestamp.fromDate(startTime),
         recurrence: newMeeting.recurrence,
         roomId,
         hostId: user.uid,
-        hostName: user.displayName || 'Anonymous',
+        hostEmail,
+        hostName,
+        createdBy: hostEmail || hostName,
         participants: [user.uid],
         isMeeting: true,
         createdAt: Timestamp.now()
       });
+
+      await setDoc(doc(db, 'rooms', roomId), {
+        hostId: user.uid,
+        hostEmail,
+        hostName,
+        createdAt: Date.now(),
+        lobby: false,
+        admittedList: [user.uid, hostEmail, hostName].filter(Boolean)
+      }, { merge: true });
+
       setIsScheduling(false);
       setNewMeeting({ title: '', description: '', date: format(new Date(), 'yyyy-MM-dd'), time: format(new Date(), 'HH:mm'), recurrence: 'none' });
     } catch (err) {
@@ -536,7 +557,37 @@ export default function Dashboard() {
   };
 
   const joinMeeting = async (roomId: string, isInstant = false) => {
-    // Instant meetings are strictly temporary and don't pollute the calendar
+    if (isInstant && user) {
+      const hostEmail = user.email || "";
+      const hostName = user.displayName || user.email?.split('@')[0] || 'Host';
+
+      try {
+        await setDoc(doc(db, 'meetings', roomId), {
+          title: `Instant Meeting ${roomId}`,
+          roomId,
+          hostId: user.uid,
+          hostEmail,
+          hostName,
+          createdBy: hostEmail || hostName,
+          participants: [user.uid],
+          isMeeting: true,
+          isInstant: true,
+          createdAt: Timestamp.now()
+        }, { merge: true });
+
+        await setDoc(doc(db, 'rooms', roomId), {
+          hostId: user.uid,
+          hostEmail,
+          hostName,
+          createdAt: Date.now(),
+          lobby: false,
+          admittedList: [user.uid, hostEmail, hostName].filter(Boolean)
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Instant meeting Firestore setup:", err);
+      }
+    }
+
     if (isInstant || typeof window !== 'undefined') {
       try {
         localStorage.setItem(`forum_room_host_${roomId}`, 'true');
@@ -994,7 +1045,7 @@ export default function Dashboard() {
                 <button 
                   onClick={login}
                   disabled={isLoggingIn}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-accent-blue hover:bg-blue-600 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-accent-blue/15 flex items-center justify-center gap-2 shrink-0 active:scale-95 disabled:opacity-60"
+                  className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-all shadow-xs flex items-center justify-center gap-2 shrink-0 active:scale-95 disabled:opacity-60 cursor-pointer"
                 >
                   {isLoggingIn ? (
                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />

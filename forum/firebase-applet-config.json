@@ -1,9 +1,10 @@
 {
-  "projectId": "komu-notes",
-  "appId": "1:530718193944:web:e2dbc1bcff25314808466d",
-  "apiKey": "AIzaSyC3DVgiYwYbueH4Xyv5WkSUnUqbHzDWriQ",
-  "authDomain": "komu-notes.firebaseapp.com",
-  "storageBucket": "komu-notes.firebasestorage.app",
-  "messagingSenderId": "530718193944",
-  "measurementId": ""
+  "projectId": "forum-8f34e",
+  "appId": "1:61945874515:web:47e665a5cc834558f75ea6",
+  "apiKey": "AIzaSyAjdaGsN05HXjBP9zPKsHhMkH7qaGCpGPc",
+  "authDomain": "forum-8f34e.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "forum-8f34e.firebasestorage.app",
+  "messagingSenderId": "61945874515",
+  "measurementId": "G-1ETEYSQRRB"
 }

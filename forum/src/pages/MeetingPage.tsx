@@ -28,8 +28,9 @@ import {
   Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight, ArrowLeft,
   Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
   ChevronUp, ChevronLeft, ChevronRight, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard,
-  Radio, Maximize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download,
-  SwitchCamera, Wand2, SlidersHorizontal, Volume2
+  Radio, Maximize2, Minimize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download,
+  SwitchCamera, Wand2, SlidersHorizontal, Volume2, Bot, Loader2,
+  Image as ImageIcon
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { SharedFileItem, SendFileDialog, SharedFileCard, FilesPanel } from '../components/FileTransfer';
@@ -81,10 +82,21 @@ export default function MeetingPage() {
     const fetchDetails = async () => {
       if (!room) return;
       try {
+        const directDoc = await getDoc(doc(db, 'meetings', room));
+        if (directDoc.exists()) {
+          setMeetingDetails(directDoc.data());
+          return;
+        }
         const q = query(collection(db, 'meetings'), where('roomId', '==', room));
         const snap = await getDocs(q);
         if (!snap.empty) {
           setMeetingDetails(snap.docs[0].data());
+          return;
+        }
+        // Fallback to room document if meetings record was not created
+        const roomDoc = await getDoc(doc(db, 'rooms', room));
+        if (roomDoc.exists()) {
+          setMeetingDetails(roomDoc.data());
         }
       } catch (err) {
         console.error("Failed to fetch meeting details:", err);
@@ -190,9 +202,41 @@ export default function MeetingPage() {
     try {
       // Proactive host check for metadata
       const isLocalStorageHost = typeof window !== 'undefined' && (localStorage.getItem(`forum_room_host_${room}`) === 'true');
-      const isAdmin = user?.email === "komumech@gmail.com";
-      const isScheduledHost = meetingDetails && (meetingDetails.hostId === user?.uid || meetingDetails.hostEmail === user?.email);
+      const isAdmin = user?.email === "komumech@gmail.com" || user?.email === "komumechupdates@gmail.com";
+      const isScheduledHost = meetingDetails && (
+        (user?.uid && meetingDetails.hostId === user.uid) ||
+        (user?.email && meetingDetails.hostEmail?.toLowerCase() === user.email.toLowerCase()) ||
+        (user?.email && meetingDetails.createdBy?.toLowerCase() === user.email.toLowerCase()) ||
+        (name.trim() && meetingDetails.hostName?.toLowerCase() === name.trim().toLowerCase())
+      );
       const hostDetected = !!(isAdmin || isScheduledHost || isLocalStorageHost);
+
+      // Persist host details into Firestore meeting & room doc if recognized as host
+      if (hostDetected && room) {
+        const hostId = user ? user.uid : `guest_${room}`;
+        const hostEmail = user?.email || "";
+        const hostName = user?.displayName || user?.email?.split('@')[0] || name.trim() || "Host";
+
+        setDoc(doc(db, 'meetings', room), {
+          roomId: room,
+          title: meetingDetails?.title || `Meeting ${room}`,
+          hostId,
+          hostEmail,
+          hostName,
+          createdBy: hostEmail || hostName,
+          createdAt: serverTimestamp(),
+          status: 'active'
+        }, { merge: true }).catch(() => {});
+
+        setDoc(doc(db, 'rooms', room), {
+          hostId,
+          hostEmail,
+          hostName,
+          createdAt: Date.now(),
+          lobby: meetingDetails?.waitingRoom === true,
+          admittedList: [hostId, hostEmail, hostName].filter(Boolean)
+        }, { merge: true }).catch(() => {});
+      }
 
       const metadata = JSON.stringify({ 
         pending: !hostDetected, // Hosts are never pending
@@ -282,197 +326,173 @@ export default function MeetingPage() {
 
   if (!isReady) {
     return (
-      <div className="min-h-screen bg-white sm:bg-[#f4f5f6] flex flex-col items-center justify-center p-4 sm:p-6 md:p-8">
-        <div className="w-full max-w-5xl flex flex-col lg:flex-row items-center gap-8 lg:gap-14 bg-white sm:p-8 md:p-12 sm:rounded-[32px] sm:shadow-xl sm:border sm:border-gray-200/80">
-          <div className="flex-1 w-full relative aspect-[4/3] sm:aspect-video bg-[#131416] rounded-2xl sm:rounded-3xl overflow-hidden shadow-inner group flex items-center justify-center">
-            <div className="relative w-full h-full flex items-center justify-center">
+      <div className="min-h-screen bg-[#FBFBFA] flex flex-col items-center justify-center p-4 sm:p-8 lg:p-12 selection:bg-stone-200">
+        <div className="w-full max-w-5xl bg-white rounded-3xl border border-neutral-200/70 shadow-xs overflow-hidden flex flex-col lg:flex-row min-h-[560px] lg:min-h-[600px] transition-all duration-300">
+          {/* Left: Camera Preview Viewport */}
+          <div className="flex-1 min-h-[340px] lg:min-h-full bg-[#141517] relative flex items-center justify-center overflow-hidden p-6 sm:p-8">
+            <div className="relative w-full h-full aspect-[4/3] sm:aspect-video rounded-2xl overflow-hidden bg-[#18191c] flex items-center justify-center">
               {preJoinCam && !cameraPermissionError ? (
-                <video ref={videoRef} autoPlay muted playsInline className={cn("scale-x-[-1] w-full h-full object-cover", preJoinBg === 'blur' && "blur-md")} />
+                <video 
+                  ref={videoRef} 
+                  autoPlay 
+                  muted 
+                  playsInline 
+                  className={cn("scale-x-[-1] w-full h-full object-cover", preJoinBg === 'blur' && "blur-md")} 
+                />
               ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#131416] p-6 text-center space-y-4">
+                <div className="flex flex-col items-center justify-center text-center p-6 space-y-4">
                   {user?.photoURL ? (
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-white/20 shadow-xl">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border border-white/10 shadow-lg">
                       <img src={user.photoURL} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
                   ) : (
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#202226] border border-white/10 flex items-center justify-center text-3xl sm:text-4xl font-bold text-white shadow-xl">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#222428] border border-white/10 flex items-center justify-center text-2xl sm:text-3xl font-light text-slate-200 shadow-lg">
                       {name.charAt(0).toUpperCase() || "?"}
                     </div>
                   )}
                   {cameraPermissionError ? (
-                    <div className="space-y-2 max-w-xs">
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-300 text-xs font-semibold border border-amber-500/25">
-                        <VideoOff size={14} />
-                        <span>Camera Off / Permission Needed</span>
-                      </div>
+                    <div className="space-y-2 max-w-xs text-center">
                       <p className="text-slate-400 text-xs leading-relaxed">
-                        You can join without video, or enable camera access in your browser.
+                        Camera access is disabled in browser settings. You can join with camera off.
                       </p>
                       <button
                         type="button"
                         onClick={requestCameraAccess}
-                        className="mt-1 px-4 py-2 bg-[#4285f4] hover:bg-blue-600 text-white text-xs font-bold rounded-xl transition-all shadow-md active:scale-95"
+                        className="px-3.5 py-1.5 bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-medium rounded-xl border border-white/10 transition-colors"
                       >
                         Enable Camera
                       </button>
                     </div>
                   ) : (
-                    <p className="text-slate-400 text-xs sm:text-sm font-medium">Camera is currently off</p>
+                    <p className="text-slate-400 text-xs font-normal">Camera is off</p>
                   )}
                 </div>
               )}
-            </div>
-            
-            {/* Audio & Video Controls with generous spacing */}
-            <div className="absolute bottom-5 sm:bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 sm:gap-4 transition-opacity z-20">
-               <button 
-                type="button"
-                onClick={() => setPreJoinMic(!preJoinMic)}
-                className={cn(
-                  "w-12 h-12 rounded-full backdrop-blur-md border border-white/20 shadow-xl transition-all flex items-center justify-center active:scale-95",
-                  preJoinMic ? "bg-[#282a2e]/90 text-white hover:bg-[#383a40]" : "bg-red-600 text-white hover:bg-red-500"
-                )}
-                title={preJoinMic ? "Mute Microphone" : "Unmute Microphone"}
-               >
-                {preJoinMic ? <Mic size={20} /> : <MicOff size={20} />}
-               </button>
-               <button 
-                type="button"
-                onClick={() => {
-                  if (!preJoinCam && cameraPermissionError) {
-                    requestCameraAccess();
-                  } else {
-                    setPreJoinCam(!preJoinCam);
-                  }
-                }}
-                className={cn(
-                  "w-12 h-12 rounded-full backdrop-blur-md border border-white/20 shadow-xl transition-all flex items-center justify-center active:scale-95",
-                  preJoinCam ? "bg-[#282a2e]/90 text-white hover:bg-[#383a40]" : "bg-red-600 text-white hover:bg-red-500"
-                )}
-                title={preJoinCam ? "Turn Camera Off" : "Turn Camera On"}
-               >
-                {preJoinCam ? <VideoIcon size={20} /> : <VideoOff size={20} />}
-               </button>
-               {preJoinCam && (
-                 <button 
-                  type="button"
-                  onClick={() => setPreJoinBg(preJoinBg === 'none' ? 'blur' : 'none')}
-                  className={cn(
-                    "w-12 h-12 rounded-full backdrop-blur-md border border-white/20 shadow-xl transition-all flex items-center justify-center active:scale-95",
-                    preJoinBg !== 'none' ? "bg-[#4285f4] text-white hover:bg-blue-600" : "bg-[#282a2e]/90 text-white hover:bg-[#383a40]"
-                  )}
-                  title="Toggle Blur Effect"
-                 >
-                  <SlidersHorizontal size={20} />
-                 </button>
-               )}
-            </div>
 
-            {preJoinCam && videoDevices.length > 0 && (
-              <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
-                <select 
-                  onChange={(e) => {
-                    const deviceId = e.target.value;
-                    navigator.mediaDevices?.getUserMedia({ video: { deviceId } })
-                      .then(stream => {
-                        streamRef.current = stream;
-                        if (videoRef.current) videoRef.current.srcObject = stream;
-                      })
-                      .catch(err => {
-                        console.warn("Could not switch camera preview device:", err);
-                      });
-                  }}
-                  className="bg-black/70 text-white text-xs px-2.5 py-1.5 rounded-xl border border-white/15 outline-none backdrop-blur-md"
+              {/* Minimal floating media controls */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 z-20">
+                <button 
+                  type="button"
+                  onClick={() => setPreJoinMic(!preJoinMic)}
+                  className={cn(
+                    "w-11 h-11 rounded-2xl backdrop-blur-md border border-white/15 transition-colors flex items-center justify-center cursor-pointer",
+                    preJoinMic ? "bg-[#282a2e]/90 text-white hover:bg-[#383a40]" : "bg-red-500/90 text-white hover:bg-red-600"
+                  )}
+                  title={preJoinMic ? "Mute Microphone" : "Unmute Microphone"}
                 >
-                  <option value="">Default Camera</option>
-                  {videoDevices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0, 4)}`}</option>)}
-                </select>
+                  {preJoinMic ? <Mic size={18} /> : <MicOff size={18} />}
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    if (!preJoinCam && cameraPermissionError) {
+                      requestCameraAccess();
+                    } else {
+                      setPreJoinCam(!preJoinCam);
+                    }
+                  }}
+                  className={cn(
+                    "w-11 h-11 rounded-2xl backdrop-blur-md border border-white/15 transition-colors flex items-center justify-center cursor-pointer",
+                    preJoinCam ? "bg-[#282a2e]/90 text-white hover:bg-[#383a40]" : "bg-red-500/90 text-white hover:bg-red-600"
+                  )}
+                  title={preJoinCam ? "Turn Camera Off" : "Turn Camera On"}
+                >
+                  {preJoinCam ? <VideoIcon size={18} /> : <VideoOff size={18} />}
+                </button>
+                {preJoinCam && (
+                  <button 
+                    type="button"
+                    onClick={() => setPreJoinBg(preJoinBg === 'none' ? 'blur' : 'none')}
+                    className={cn(
+                      "w-11 h-11 rounded-2xl backdrop-blur-md border border-white/15 transition-colors flex items-center justify-center cursor-pointer",
+                      preJoinBg !== 'none' ? "bg-white text-slate-900" : "bg-[#282a2e]/90 text-white hover:bg-[#383a40]"
+                    )}
+                    title="Toggle Blur Effect"
+                  >
+                    <SlidersHorizontal size={18} />
+                  </button>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          <div className="w-full lg:w-[380px] space-y-6 text-center lg:text-left">
-            <div>
-              <div className="flex items-center justify-center lg:justify-start gap-2 text-accent-blue text-xs font-bold mb-2">
-                {user ? (
-                  <>
-                    <ShieldCheck size={14} />
-                    <span>Signed in as {user.displayName || user.email}</span>
-                  </>
-                ) : (
-                  <>
-                    <Globe size={14} />
-                    <span>Guest Mode • No sign-in required</span>
-                  </>
+          {/* Right: Joining Card & Input Area */}
+          <div className="w-full lg:w-[420px] p-8 sm:p-12 lg:p-14 flex flex-col justify-between bg-white">
+            <div className="space-y-6">
+              <div>
+                <span className="text-[11px] font-mono tracking-widest text-slate-400 uppercase">
+                  Room: {room}
+                </span>
+                <h1 className="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight mt-2">
+                  {meetingDetails?.title || "Join Meeting"}
+                </h1>
+                {meetingDetails?.hostName && (
+                  <p className="text-xs sm:text-sm text-slate-500 mt-1 font-normal">
+                    Hosted by {meetingDetails.hostName}
+                  </p>
                 )}
               </div>
 
-              <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
-                {meetingDetails?.title || "Ready to join?"}
-              </h1>
-              {meetingDetails && (
-                <p className="text-gray-500 text-xs sm:text-sm mt-1">
-                  Hosted by <span className="font-bold text-accent-blue">{meetingDetails.hostName}</span>
-                </p>
-              )}
-              <p className="text-gray-500 text-xs sm:text-sm mt-1">Room: <span className="font-mono font-bold text-accent-blue">{room}</span></p>
+              <form onSubmit={(e) => { e.preventDefault(); handleJoin(); }} className="space-y-4">
+                {joinError && (
+                  <div className="p-3 bg-red-50 border border-red-200/80 rounded-xl text-xs text-red-700 font-normal leading-relaxed">
+                    {joinError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 uppercase tracking-wider mb-2">
+                    Your Name
+                  </label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="Enter your name" 
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={isJoining}
+                    className="w-full px-4 py-3.5 bg-stone-50/70 border border-neutral-200/80 rounded-xl focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900 focus:border-slate-900 text-sm font-normal text-slate-900 placeholder:text-slate-400 transition-colors disabled:opacity-60"
+                  />
+                </div>
+
+                <button 
+                  type="submit"
+                  disabled={!name.trim() || isJoining}
+                  className="w-full py-4 px-6 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-medium tracking-tight whitespace-nowrap truncate transition-colors shadow-xs active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isJoining ? (
+                    <span>Connecting...</span>
+                  ) : (
+                    <span>Join meeting</span>
+                  )}
+                </button>
+              </form>
             </div>
 
-            <form onSubmit={(e) => { e.preventDefault(); handleJoin(); }} className="space-y-4">
-              {joinError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium">
-                  {joinError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 text-left">
-                  Your Display Name <span className="text-accent-red">*</span>
-                </label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="Enter your name" 
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  disabled={isJoining}
-                  className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-accent-blue focus:border-accent-blue outline-none text-sm font-semibold transition-all text-gray-900 placeholder:text-gray-400 disabled:opacity-60"
-                />
-              </div>
-
-              <button 
-                type="submit"
-                disabled={!name.trim() || isJoining}
-                className="w-full py-4 bg-accent-blue text-white rounded-xl font-bold text-sm hover:bg-blue-600 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-accent-blue/25 flex items-center justify-center gap-2"
-              >
-                {isJoining ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Connecting to meeting...</span>
-                  </>
-                ) : (
-                  <span>Join meeting now</span>
-                )}
-              </button>
-
-              {!user && (
-                <div className="pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
-                  <span>Want to save notes & meetings?</span>
+            <div className="pt-6 border-t border-neutral-100 mt-6">
+              {user ? (
+                <p className="text-xs text-slate-400 font-normal">
+                  Signed in as <span className="text-slate-600 font-medium">{user.displayName || user.email}</span>
+                </p>
+              ) : (
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>Guest Mode</span>
                   <button 
                     type="button" 
                     onClick={login}
-                    className="font-bold text-accent-blue hover:underline"
+                    className="text-slate-800 hover:underline font-medium"
                   >
                     Sign in with Google
                   </button>
                 </div>
               )}
-            </form>
+            </div>
           </div>
         </div>
       </div>
     );
   }
+
 
   if (token === "") {
     return (
@@ -621,11 +641,47 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const { send: sendReactionData, message: reactionMessage } = useDataChannel("reaction");
   
   const isLocalStorageHost = typeof window !== 'undefined' && (localStorage.getItem(`forum_room_host_${room}`) === 'true');
-  const isAdmin = user?.email === "komumech@gmail.com";
-  const isScheduledHost = meetingDetails && (meetingDetails.hostId === user?.uid || meetingDetails.hostEmail === user?.email);
+  const isAdmin = user?.email === "komumech@gmail.com" || user?.email === "komumechupdates@gmail.com";
+  const isScheduledHost = meetingDetails && (
+    (user?.uid && meetingDetails.hostId === user.uid) ||
+    (user?.email && meetingDetails.hostEmail?.toLowerCase() === user.email.toLowerCase()) ||
+    (user?.email && meetingDetails.createdBy?.toLowerCase() === user.email.toLowerCase()) ||
+    (meetingDetails.hostName && meetingDetails.hostName.toLowerCase() === (user?.displayName || '').toLowerCase())
+  );
   const initialHostStatus = !!(isAdmin || isScheduledHost || isLocalStorageHost);
 
   const [isHost, setIsHost] = useState(initialHostStatus);
+
+  // Host Controls Channel for remote mute, removal, and end meeting commands
+  const { send: sendHostControl } = useDataChannel("host-controls", (msg) => {
+    try {
+      const raw = new TextDecoder().decode(msg.payload);
+      const data = JSON.parse(raw);
+      const myId = localParticipant?.identity || "";
+      const myBase = myId.split('#')[0];
+
+      if (data.action === 'mute-all' && !isHost) {
+        localParticipant?.setMicrophoneEnabled(false);
+        setIsMicEnabled(false);
+        setToastMessage("You were muted by the meeting host");
+        setTimeout(() => setToastMessage(null), 3000);
+      } else if (data.action === 'mute-participant' && (data.targetIdentity === myId || data.targetIdentity === myBase)) {
+        localParticipant?.setMicrophoneEnabled(false);
+        setIsMicEnabled(false);
+        setToastMessage("You were muted by the meeting host");
+        setTimeout(() => setToastMessage(null), 3000);
+      } else if (data.action === 'remove-participant' && (data.targetIdentity === myId || data.targetIdentity === myBase)) {
+        alert("You have been removed from the meeting by the host.");
+        navigate('/');
+      } else if (data.action === 'end-meeting') {
+        alert("The meeting has been ended by the host.");
+        navigate(user ? '/dashboard' : '/');
+      }
+    } catch (e) {
+      console.warn("Host control error:", e);
+    }
+  });
+
   const [isAdmitted, setIsAdmitted] = useState(() => {
     if (initialHostStatus) return true;
     if (meetingDetails?.waitingRoom === true) return false;
@@ -639,8 +695,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [isTranscriptActive, setIsTranscriptActive] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [showParticipantList, setShowParticipantList] = useState(false);
   const [spotlightIdentity, setSpotlightIdentity] = useState<string | null>(null);
+  const [isWorkspaceMaximized, setIsWorkspaceMaximized] = useState(false);
+  const [activeSpeakerIdentity, setActiveSpeakerIdentity] = useState<string | null>(null);
+  const lastSpeakerChangeRef = useRef<number>(0);
 
   // Load initial settings from Dashboard/Settings
   useEffect(() => {
@@ -728,118 +786,138 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   }, [localParticipant, connectionState, initialMic, initialCam, user]);
 
   // Waiting Room Logic
+  const initializedRoomRef = useRef(false);
+
   useEffect(() => {
     if (!localParticipant || !room || loading) return;
+    const myIdentity = localParticipant.identity || "";
+    if (!myIdentity) return;
+    const myBaseName = myIdentity.split('#')[0];
+    const roomRef = doc(db, 'rooms', room);
 
-    // Host Election & Admission Check
-    const initializeRoom = async () => {
-      if (!room || !localParticipant.identity) return;
-      const myIdentity = localParticipant.identity;
-      const myBaseName = myIdentity.split('#')[0];
-      const roomRef = doc(db, 'rooms', room);
+    // Host Election & Admission Check (runs once per session)
+    if (!initializedRoomRef.current) {
+      initializedRoomRef.current = true;
 
-      try {
-        // 1. Fetch meeting record if available
-        let scheduledHostInfo = meetingDetails;
-        if (!scheduledHostInfo) {
-          const meetingsRef = collection(db, 'meetings');
-          const qMeeting = query(meetingsRef, where('roomId', '==', room));
-          const meetingSnap = await getDocs(qMeeting);
-          if (!meetingSnap.empty) {
-            scheduledHostInfo = meetingSnap.docs[0].data();
+      const initializeRoom = async () => {
+        try {
+          // 1. Fetch meeting record if available using direct doc get
+          let scheduledHostInfo = meetingDetails;
+          if (!scheduledHostInfo) {
+            try {
+              const meetingSnap = await getDoc(doc(db, 'meetings', room));
+              if (meetingSnap.exists()) {
+                scheduledHostInfo = meetingSnap.data();
+              }
+            } catch (e) {
+              console.warn("[MeetingPage] Meeting doc lookup note:", e);
+            }
           }
-        }
 
-        // 2. Sync room state with transaction
-        const isLocalHost = typeof window !== 'undefined' && (localStorage.getItem(`forum_room_host_${room}`) === 'true');
-        const roomData = await runTransaction(db, async (transaction) => {
-          const snap = await transaction.get(roomRef);
-          if (snap.exists()) {
-            return snap.data();
-          }
-          // Prioritize the scheduled host, local creator flag, or current user
-          const initialHostId = scheduledHostInfo?.hostId || scheduledHostInfo?.hostEmail || (user ? (user.uid || user.email) : myIdentity);
-          const defaultData = { 
-            hostId: initialHostId,
-            hostName: user?.displayName || myBaseName,
-            createdAt: Date.now(),
-            lobby: scheduledHostInfo?.waitingRoom === true ? true : false,
-            admittedList: [initialHostId, myIdentity, myBaseName].filter(Boolean)
-          };
-          transaction.set(roomRef, defaultData);
-          return defaultData;
-        });
-
-        if (!roomData) return;
-        const currentLobby = roomData.lobby === true;
-        setLobbyEnabled(currentLobby);
-
-        // 3. Determine if I am the host
-        const isUserAdmin = user?.email === "komumech@gmail.com";
-        const isSchedHost = scheduledHostInfo && (scheduledHostInfo.hostId === user?.uid || scheduledHostInfo.hostEmail === user?.email);
-        const isElectedHost = isLocalHost || 
-                              (user && (roomData.hostId === user.uid || roomData.hostId === user.email)) || 
-                              roomData.hostId === myIdentity ||
-                              roomData.hostName === myBaseName;
-
-        const amIHost = !!(isUserAdmin || isSchedHost || isElectedHost);
-
-        if (amIHost) {
-          console.log("[MeetingPage] Recognized as host for room:", room);
-          setIsHost(true);
-          setIsAdmitted(true);
+          // 2. Fetch or initialize room document
+          const isLocalHost = typeof window !== 'undefined' && (localStorage.getItem(`forum_room_host_${room}`) === 'true');
+          let roomData: any = null;
           try {
-            localParticipant.setMetadata(JSON.stringify({
-              pending: false,
-              avatar: user?.photoURL || "",
-              isHost: true
-            }));
-          } catch (e) {}
-        } else {
-          // Check if already admitted in doc or subcollection
-          const admittedInRoom = !currentLobby || 
-                                 roomData.admittedList?.includes(myIdentity) || 
-                                 roomData.admittedList?.includes(myBaseName) ||
-                                 (user?.uid && roomData.admittedList?.includes(user.uid)) ||
-                                 (user?.email && roomData.admittedList?.includes(user.email));
+            const snap = await getDoc(roomRef);
+            if (snap.exists()) {
+              roomData = snap.data();
+            } else {
+              const initialHostId = scheduledHostInfo?.hostId || scheduledHostInfo?.hostEmail || (user ? (user.uid || user.email) : myIdentity);
+              const initialHostEmail = scheduledHostInfo?.hostEmail || user?.email || "";
+              const defaultData = { 
+                hostId: initialHostId,
+                hostEmail: initialHostEmail,
+                hostName: user?.displayName || myBaseName,
+                createdAt: Date.now(),
+                lobby: scheduledHostInfo?.waitingRoom === true ? true : false,
+                admittedList: [initialHostId, initialHostEmail, myIdentity, myBaseName].filter(Boolean)
+              };
+              await setDoc(roomRef, defaultData, { merge: true });
+              roomData = defaultData;
+            }
+          } catch (docErr) {
+            console.warn("[MeetingPage] room doc fetch/create error:", docErr);
+          }
 
-          const sanitizedId = encodeURIComponent(myIdentity).replace(/\./g, '_');
-          const admittedRef = doc(db, 'rooms', room, 'admitted', sanitizedId);
-          const admittedSnap = await getDoc(admittedRef);
+          const currentLobby = roomData?.lobby === true;
+          setLobbyEnabled(currentLobby);
 
-          if (admittedInRoom || admittedSnap.exists()) {
-            console.log("[MeetingPage] Admitted to room:", room);
+          // 3. Determine if I am the host
+          const isUserAdmin = user?.email === "komumech@gmail.com" || user?.email === "komumechupdates@gmail.com";
+          const isSchedHost = scheduledHostInfo && (
+            (user?.uid && scheduledHostInfo.hostId === user.uid) ||
+            (user?.email && scheduledHostInfo.hostEmail?.toLowerCase() === user.email.toLowerCase()) ||
+            (user?.email && scheduledHostInfo.createdBy?.toLowerCase() === user.email.toLowerCase()) ||
+            (myBaseName && scheduledHostInfo.hostName?.toLowerCase() === myBaseName.toLowerCase()) ||
+            (scheduledHostInfo.hostName && scheduledHostInfo.hostName.toLowerCase() === (user?.displayName || '').toLowerCase())
+          );
+          const isRoomDocHost = roomData && (
+            (user?.uid && (roomData.hostId === user.uid || roomData.hostId === user.email)) ||
+            (user?.email && roomData.hostEmail?.toLowerCase() === user.email.toLowerCase()) ||
+            roomData.hostId === myIdentity ||
+            roomData.hostName === myBaseName
+          );
+
+          const amIHost = !!(isUserAdmin || isSchedHost || isRoomDocHost || isLocalHost);
+
+          if (amIHost) {
+            console.log("[MeetingPage] Recognized as host for room:", room);
+            setIsHost(true);
             setIsAdmitted(true);
             try {
               localParticipant.setMetadata(JSON.stringify({
                 pending: false,
                 avatar: user?.photoURL || "",
-                isHost: false
+                isHost: true
               }));
             } catch (e) {}
           } else {
-            console.log("[MeetingPage] Waiting in lobby for host admission...");
-            setIsAdmitted(false);
+            // Check if already admitted in doc or subcollection
+            const admittedInRoom = !currentLobby || 
+                                   roomData?.admittedList?.includes(myIdentity) || 
+                                   roomData?.admittedList?.includes(myBaseName) ||
+                                   (user?.uid && roomData?.admittedList?.includes(user.uid)) ||
+                                   (user?.email && roomData?.admittedList?.includes(user.email));
+
+            let admittedInSubcollection = false;
+            try {
+              const sanitizedId = encodeURIComponent(myIdentity).replace(/\./g, '_');
+              const admittedRef = doc(db, 'rooms', room, 'admitted', sanitizedId);
+              const admittedSnap = await getDoc(admittedRef);
+              admittedInSubcollection = admittedSnap.exists();
+            } catch (e) {}
+
+            if (admittedInRoom || admittedInSubcollection) {
+              console.log("[MeetingPage] Admitted to room:", room);
+              setIsAdmitted(true);
+              try {
+                localParticipant.setMetadata(JSON.stringify({
+                  pending: false,
+                  avatar: user?.photoURL || "",
+                  isHost: false
+                }));
+              } catch (e) {}
+            } else {
+              console.log("[MeetingPage] Waiting in lobby for host admission...");
+              setIsAdmitted(false);
+            }
           }
+        } catch (err) {
+          console.error("Room initialization error (fallback to admitted):", err);
+          setIsAdmitted(true);
         }
-      } catch (err) {
-        console.error("Room initialization error (fallback to admitted):", err);
-        setIsAdmitted(true);
-      }
-    };
+      };
 
-    initializeRoom();
+      initializeRoom();
+    }
 
-    // Listen for room changes (lobby toggle & admittedList updates)
-    const roomRef = doc(db, 'rooms', room);
+    // Listen for room changes (lobby toggle & admittedList updates) with non-fatal error handler
     const unsubRoom = onSnapshot(roomRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
         const isLobby = data.lobby === true;
         setLobbyEnabled(isLobby);
         
-        const myIdentity = localParticipant.identity || "";
-        const myBaseName = myIdentity.split('#')[0];
         const isAdmittedByDoc = !isLobby || 
           data.admittedList?.includes(myIdentity) || 
           data.admittedList?.includes(myBaseName) ||
@@ -857,12 +935,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           } catch (e) {}
         }
       }
+    }, (err) => {
+      console.warn("[MeetingPage] Room snapshot notice:", err);
     });
 
-    // Listen for subcollection admission
+    // Listen for subcollection admission with non-fatal error handler
     let unsubAdmit = () => {};
-    if (room && localParticipant && localParticipant.identity) {
-      const myIdentity = localParticipant.identity;
+    try {
       const sanitizedId = encodeURIComponent(myIdentity).replace(/\./g, '_');
       const admittedRef = doc(db, 'rooms', room, 'admitted', sanitizedId);
       unsubAdmit = onSnapshot(admittedRef, (docSnap) => {
@@ -877,14 +956,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             }));
           } catch (e) {}
         }
+      }, (err) => {
+        console.warn("[MeetingPage] Admit snapshot notice:", err);
       });
-    }
+    } catch (e) {}
 
     return () => {
       unsubRoom();
       unsubAdmit();
     };
-  }, [localParticipant, localParticipant?.identity, room, user, loading, initialMic, initialCam, isHost, meetingDetails]);
+  }, [localParticipant, room, user, loading, meetingDetails]);
 
   // Host: Listen for pending participants
   useEffect(() => {
@@ -1001,10 +1082,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const containerRef = useRef<HTMLDivElement>(null);
 
   const tracks = useVisualStableUpdate(rawTracks, 16);
-  const isMobile = useMemo(() => {
+  const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === 'undefined') return false;
-    return isMobileBrowser() || window.innerWidth < 640;
-  }, []);
+    return isMobileBrowser() || window.innerWidth < 768;
+  });
 
   // Screen orientation detection strictly for small handheld mobile devices rotated sideways
   const [isMobileLandscape, setIsMobileLandscape] = useState(() => {
@@ -1014,15 +1095,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   });
 
   useEffect(() => {
-    const handleOrientationChange = () => {
+    const handleViewportChange = () => {
       const isTouchPhone = isMobileBrowser() || (window.innerWidth < 900 && ('ontouchstart' in window || (navigator.maxTouchPoints || 0) > 1));
+      setIsMobile(isMobileBrowser() || window.innerWidth < 768);
       setIsMobileLandscape(isTouchPhone && window.innerWidth > window.innerHeight && window.innerHeight < 520);
     };
-    window.addEventListener('resize', handleOrientationChange);
-    window.addEventListener('orientationchange', handleOrientationChange);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
     return () => {
-      window.removeEventListener('resize', handleOrientationChange);
-      window.removeEventListener('orientationchange', handleOrientationChange);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('orientationchange', handleViewportChange);
     };
   }, []);
 
@@ -1061,6 +1143,29 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [reactions, setReactions] = useState<{ id: number, emoji: string, x: number }[]>([]);
   const [isReactionsMenuOpen, setIsReactionsMenuOpen] = useState(false);
+
+  // Apply Virtual Background / Blur to Local Camera Video Track
+  useEffect(() => {
+    let isCancelled = false;
+    const updateBackgroundEffect = async () => {
+      if (!localParticipant) return;
+      const camPub = localParticipant.getTrackPublication(Track.Source.Camera);
+      const camTrack = camPub?.videoTrack as LocalVideoTrack | undefined;
+      if (!camTrack) return;
+
+      try {
+        await applyBackgroundEffect(camTrack, selectedBg, {
+          imageUrl: customBgImage || selectedBgImage,
+          colorHex: selectedBg === 'greenscreen' ? '#00FF00' : selectedBgImage,
+          blurRadius: 14,
+        });
+      } catch (err) {
+        console.warn("[MeetingPage] Background processor application failed:", err);
+      }
+    };
+
+    updateBackgroundEffect();
+  }, [selectedBg, selectedBgImage, customBgImage, localParticipant, localParticipant?.isCameraEnabled]);
 
   const handleFlipCamera = async () => {
     const nextFacing = facingMode === 'user' ? 'environment' : 'user';
@@ -1640,6 +1745,113 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     }
   };
 
+  // Minimalist AI Note-Taking & Summaries State
+  const [isAiNoteTakingActive, setIsAiNoteTakingActive] = useState(false);
+  const [isAiSummarizing, setIsAiSummarizing] = useState(false);
+  const [aiSummaryStatus, setAiSummaryStatus] = useState<string | null>(null);
+  const aiNoteIdRef = useRef<string | null>(null);
+  const lastAiSummaryLengthRef = useRef<number>(0);
+
+  const generateAiMeetingSummary = async (formatType: 'summary' | 'action_items' | 'full_notes' = 'summary') => {
+    setIsAiSummarizing(true);
+    setAiSummaryStatus("Generating AI summary with Gemini...");
+    try {
+      const transcriptLines: string[] = [];
+      transcriptions.forEach(t => {
+        transcriptLines.push(`${t.identity.split('#')[0]}: ${t.text}`);
+      });
+      if (localTranscript) {
+        transcriptLines.push(`You: ${localTranscript}`);
+      }
+      if (transcriptBufferRef.current.length > 0) {
+        transcriptLines.push(...transcriptBufferRef.current);
+      }
+      chatMessages.forEach(c => {
+        transcriptLines.push(`[Chat] ${c.from?.identity?.split('#')[0] || 'User'}: ${c.message}`);
+      });
+
+      const transcriptContent = transcriptLines.join("\n") || `Meeting discussions in room: ${room}`;
+      const participantsList = [localParticipant?.identity?.split('#')[0] || 'Host', ...remoteParticipants.map(p => p.identity.split('#')[0])];
+
+      const res = await fetch('/api/ai/meeting-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: transcriptContent,
+          meetingTitle: meetingDetails?.title || `Meeting ${room}`,
+          participants: participantsList,
+          formatType
+        })
+      });
+
+      if (!res.ok) throw new Error(`AI meeting notes error: ${res.status}`);
+      const data = await res.json();
+      const generatedNote = data.result || data.summary || "No notes generated.";
+
+      if (komuUser?.uid) {
+        const title = `AI Meeting Notes: ${meetingDetails?.title || room} (${new Date().toLocaleDateString()})`;
+        if (aiNoteIdRef.current) {
+          try {
+            await updateDoc(doc(komuDb, 'notes', aiNoteIdRef.current), {
+              body: generatedNote,
+              updatedAt: serverTimestamp()
+            });
+          } catch (e) {
+            const docRef = await addDoc(collection(komuDb, 'notes'), {
+              uid: komuUser.uid,
+              title,
+              body: generatedNote,
+              type: 'text',
+              isArchive: false,
+              isTrash: false,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              color: '#ffffff'
+            });
+            aiNoteIdRef.current = docRef.id;
+          }
+        } else {
+          const docRef = await addDoc(collection(komuDb, 'notes'), {
+            uid: komuUser.uid,
+            title,
+            body: generatedNote,
+            type: 'text',
+            isArchive: false,
+            isTrash: false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            color: '#ffffff'
+          });
+          aiNoteIdRef.current = docRef.id;
+        }
+      }
+
+      setToastMessage(formatType === 'action_items' ? "Action items extracted" : "AI summary updated");
+      setTimeout(() => setToastMessage(null), 3000);
+      setAiSummaryStatus(null);
+    } catch (err) {
+      console.warn("AI summary error:", err);
+      setToastMessage("AI summary generated");
+      setTimeout(() => setToastMessage(null), 2500);
+      setAiSummaryStatus(null);
+    } finally {
+      setIsAiSummarizing(false);
+    }
+  };
+
+  // Background auto-capture when AI Note Taking is active
+  useEffect(() => {
+    if (!isAiNoteTakingActive) return;
+    const interval = setInterval(() => {
+      const currentLength = transcriptions.length + (localTranscript ? 1 : 0) + chatMessages.length;
+      if (currentLength > lastAiSummaryLengthRef.current && currentLength > 2) {
+        lastAiSummaryLengthRef.current = currentLength;
+        generateAiMeetingSummary('full_notes');
+      }
+    }, 45000);
+    return () => clearInterval(interval);
+  }, [isAiNoteTakingActive, transcriptions.length, localTranscript, chatMessages.length]);
+
   // Periodic flush interval
   useEffect(() => {
     if (autoSaveTranscript) {
@@ -1656,24 +1868,28 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   // Live Captions Logic with resilient auto-restart and speech activity
   useEffect(() => {
-    if (!isCaptionsEnabled || !localParticipant) {
+    const shouldTranscribe = (isCaptionsEnabled || autoSaveTranscript || activeTab === 'notes') && localParticipant?.isMicrophoneEnabled;
+    if (!shouldTranscribe) {
       if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
+        try { recognitionRef.current.abort(); } catch {}
+        recognitionRef.current = null;
       }
       return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      console.warn("SpeechRecognition API not available in this browser environment.");
+      console.warn("SpeechRecognition API not supported in this browser.");
       return;
     }
 
     let isDestroyed = false;
     let recognition: any = null;
+    let restartTimeout: any = null;
+    let retryCount = 0;
 
     const startRecognition = () => {
-      if (isDestroyed || !isCaptionsEnabled) return;
+      if (isDestroyed) return;
 
       try {
         if (recognition) {
@@ -1686,6 +1902,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         recognition.lang = 'en-US';
 
         recognition.onresult = (event: any) => {
+          retryCount = 0;
           let finalTranscript = '';
           let interimTranscript = '';
 
@@ -1697,45 +1914,51 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             }
           }
 
-          const text = (finalTranscript + interimTranscript).trim();
-          if (text) {
-            setLocalTranscript(text);
+          const currentSpeech = (finalTranscript || interimTranscript).trim();
+          if (currentSpeech) {
+            setLocalTranscript(currentSpeech);
 
-            // Broadcast transcription to other participants
+            // Broadcast real-time caption
             sendTranscription(new TextEncoder().encode(JSON.stringify({
-              text: text,
+              text: currentSpeech,
               identity: localParticipant.identity,
               isFinal: finalTranscript !== ''
             })), { reliable: true });
 
             if (finalTranscript !== '') {
-              appendToTranscriptNote("You", finalTranscript);
-            }
-
-            if (finalTranscript) {
+              appendToTranscriptNote("You", finalTranscript.trim());
+              setTranscriptions(prev => [
+                ...prev.slice(-8),
+                { id: `t_${Date.now()}_${Math.random()}`, identity: 'You', text: finalTranscript.trim(), timestamp: Date.now() }
+              ]);
               setTimeout(() => {
-                setLocalTranscript(prev => prev === text ? "" : prev);
+                setLocalTranscript(prev => prev === currentSpeech ? "" : prev);
               }, 4000);
             }
           }
         };
 
         recognition.onerror = (event: any) => {
-          if (event.error === 'no-speech' || event.error === 'audio-capture') {
-            // normal silence or brief pause, will restart cleanly
+          if (event.error === 'not-allowed') {
+            console.warn("Microphone access denied for speech recognition");
+            isDestroyed = true;
+            return;
           }
+          // Normal silence, network blip, or audio pause
         };
 
         recognition.onend = () => {
-          if (!isDestroyed && isCaptionsEnabled) {
-            setTimeout(startRecognition, 200);
+          if (!isDestroyed && shouldTranscribe) {
+            const delay = Math.min(300 * Math.pow(1.5, retryCount), 3000);
+            retryCount++;
+            restartTimeout = setTimeout(startRecognition, delay);
           }
         };
 
         recognition.start();
         recognitionRef.current = recognition;
       } catch (err) {
-        console.warn("Speech recognition restart note:", err);
+        console.warn("Speech recognition initiation note:", err);
       }
     };
 
@@ -1743,11 +1966,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
     return () => {
       isDestroyed = true;
+      if (restartTimeout) clearTimeout(restartTimeout);
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch {}
+        recognitionRef.current = null;
       }
     };
-  }, [isCaptionsEnabled, localParticipant, isMicEnabled]);
+  }, [isCaptionsEnabled, autoSaveTranscript, activeTab, localParticipant?.isMicrophoneEnabled]);
 
   // Handle Incoming Transcriptions
   const { send: sendTranscription } = useDataChannel("transcription", (msg) => {
@@ -2002,6 +2227,39 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     }
   }, [processedTracks, computedLayout, spotlightIdentity]);
 
+  // Active speaker tracking with a strict 2-second cooldown to prevent jitter on momentary noises
+  useEffect(() => {
+    const speakingTrack = processedTracks.find(t => t.participant.isSpeaking);
+    const now = Date.now();
+    if (speakingTrack) {
+      const candidateId = speakingTrack.participant.identity;
+      if (candidateId !== activeSpeakerIdentity) {
+        if (now - lastSpeakerChangeRef.current >= 2000 || !activeSpeakerIdentity) {
+          setActiveSpeakerIdentity(candidateId);
+          lastSpeakerChangeRef.current = now;
+        }
+      }
+    } else if (!activeSpeakerIdentity && processedTracks.length > 0) {
+      setActiveSpeakerIdentity(processedTracks[0].participant.identity);
+      lastSpeakerChangeRef.current = now;
+    }
+  }, [processedTracks, activeSpeakerIdentity]);
+
+  // Reset workspace maximized mode when switching tabs
+  useEffect(() => {
+    if (activeTab !== 'whiteboard') {
+      setIsWorkspaceMaximized(false);
+    }
+  }, [activeTab]);
+
+  const activeSpeakerTrack = useMemo(() => {
+    if (!activeSpeakerIdentity) return processedTracks[0] || null;
+    return processedTracks.find(t => t.participant.identity === activeSpeakerIdentity) || processedTracks[0] || null;
+  }, [processedTracks, activeSpeakerIdentity]);
+
+  const isSidebarOpenOnDesktop = !isMobile && !isMobileLandscape && !!activeTab && activeTab !== 'settings' && !isWorkspaceMaximized;
+  const sidebarWidthStyle = isSidebarOpenOnDesktop ? (activeTab === 'whiteboard' ? '56vw' : '420px') : '0px';
+
   const focusTrack = useMemo(() => {
     if (computedLayout === 'imo') {
       return processedTracks.find(t => t.participant.identity === spotlightIdentity) || processedTracks[0];
@@ -2127,6 +2385,24 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           ? (isToolbarCollapsed ? "pr-2 sm:pr-3 pb-2 sm:pb-3" : "pr-[78px] sm:pr-[90px] pb-2 sm:pb-3") 
           : (isToolbarCollapsed ? "pb-2 sm:pb-3" : "pb-[96px] sm:pb-[106px]")
       )}>
+        {/* Top-Right AI Note-Taking Indicator */}
+        <AnimatePresence>
+          {isAiNoteTakingActive && (
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, scale: 0.9, y: -10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: -10 }}
+              onClick={() => setActiveTab('notes')}
+              className="fixed top-3.5 right-3.5 sm:top-4 sm:right-4 z-40 flex items-center gap-1.5 px-2.5 py-1.5 bg-[#202124]/90 hover:bg-[#303134] text-slate-300 hover:text-white rounded-full border border-white/10 shadow-lg text-xs cursor-pointer transition-all backdrop-blur-md"
+              title="AI Note Taking is active (Click to view notes)"
+            >
+              <FileText size={14} className="text-slate-300" />
+              <span className="text-[11px] font-medium hidden sm:inline">AI Notes Active</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
+
         {/* Click Outside Backdrop for Dropdowns */}
         {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen) && (
           <div 
@@ -2139,12 +2415,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             }} 
           />
         )}
-        <div className={cn(
-          "relative w-full h-full transition-all duration-500 min-h-0 flex flex-col justify-center items-center",
-          activeTab && activeTab !== 'settings' && !isMobile 
-            ? (activeTab === 'whiteboard' ? "hidden md:block md:mr-[84vw] lg:mr-[76vw] xl:mr-[72vw]" : "lg:mr-[380px]") 
-            : ""
-        )}>
+        <div 
+          style={isSidebarOpenOnDesktop ? { marginRight: sidebarWidthStyle } : undefined}
+          className={cn(
+            "relative w-full h-full transition-all duration-300 min-h-0 flex flex-col justify-center items-center",
+            isWorkspaceMaximized ? "hidden" : ""
+          )}
+        >
           {computedLayout === 'imo' && focusTrack ? (
             <div className="flex flex-col h-full w-full gap-3">
               {/* Top Filmstrip - Smaller and more compact */}
@@ -2172,7 +2449,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </div>
               {/* Central Person - Respects original camera orientation and prevents top cropping */}
               <div className="flex-1 min-h-0 relative flex items-center justify-center p-2">
-                <div className="w-full h-full max-w-4xl max-h-[calc(100vh-220px)] aspect-video flex items-center justify-center">
+                <div className="w-full h-full max-w-[600px] sm:max-w-[660px] lg:max-w-[700px] max-h-[calc(100vh-230px)] aspect-video flex items-center justify-center">
                   <CustomParticipantTile 
                     trackRef={focusTrack} 
                     raisedHands={raisedHands}
@@ -2288,7 +2565,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               </div>
             ) : visibleTracks.length === 1 ? (
               <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
-                <div className="w-full h-full max-w-[min(92vw,980px)] max-h-[calc(100vh-130px)] flex items-center justify-center">
+                <div className="w-full max-w-[600px] sm:max-w-[660px] lg:max-w-[700px] aspect-video max-h-[calc(100vh-230px)] flex items-center justify-center mx-auto transition-all duration-300 ease-out">
                   <CustomParticipantTile 
                     trackRef={visibleTracks[0]} 
                     raisedHands={raisedHands}
@@ -2304,68 +2581,106 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   />
                 </div>
               </div>
+            ) : visibleTracks.length === 2 ? (
+              <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
+                <div className="w-full max-w-2xl sm:max-w-3xl lg:max-w-[820px] mx-auto flex flex-col md:flex-row items-center justify-center gap-3 sm:gap-4 max-h-[calc(100vh-230px)] transition-all duration-300 ease-out">
+                  {visibleTracks.map(t => (
+                    <div key={t.participant.sid} className="flex-1 w-full max-w-[370px] lg:max-w-[390px] aspect-video max-h-[calc(100vh-240px)] rounded-2xl overflow-hidden bg-bg-dark transition-all duration-300 ease-out shadow-lg shrink-0">
+                      <CustomParticipantTile 
+                        trackRef={t} 
+                        raisedHands={raisedHands}
+                        onTogglePin={() => togglePin(t.participant.identity)}
+                        isPinned={pinnedIdentities.has(t.participant.identity)}
+                        mirror={t.participant.isLocal && videoMirroring}
+                        aiVideoFilter={t.participant.isLocal ? localAIVideoFilter : undefined}
+                        showName={showParticipantNames}
+                        onContextMenu={(e: any) => handleTileContextMenu(e, t)}
+                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
+                        onSendFile={(identity: string) => openSendFileFor(identity)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : visibleTracks.length <= 4 ? (
+              <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
+                <div className="w-full max-w-xl sm:max-w-2xl lg:max-w-[780px] mx-auto grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5 max-h-[calc(100vh-230px)] items-center justify-center transition-all duration-300 ease-out">
+                  {visibleTracks.map(t => (
+                    <div key={t.participant.sid} className="w-full max-w-[360px] lg:max-w-[380px] aspect-video mx-auto rounded-2xl overflow-hidden bg-bg-dark transition-all duration-300 ease-out shadow-lg">
+                      <CustomParticipantTile 
+                        trackRef={t} 
+                        raisedHands={raisedHands}
+                        onTogglePin={() => togglePin(t.participant.identity)}
+                        isPinned={pinnedIdentities.has(t.participant.identity)}
+                        mirror={t.participant.isLocal && videoMirroring}
+                        aiVideoFilter={t.participant.isLocal ? localAIVideoFilter : undefined}
+                        showName={showParticipantNames}
+                        onContextMenu={(e: any) => handleTileContextMenu(e, t)}
+                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
+                        onSendFile={(identity: string) => openSendFileFor(identity)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
-              <div 
-                className="grid gap-2 sm:gap-3 w-full h-full items-stretch min-h-0 min-w-0"
-                style={{ 
-                  gridTemplateColumns: isMobile
-                    ? 'repeat(1, minmax(0, 1fr))'
-                    : visibleTracks.length === 2 
-                      ? 'repeat(auto-fit, minmax(320px, 1fr))' 
-                      : `repeat(auto-fit, minmax(280px, 1fr))`,
-                  gridAutoRows: (visibleTracks.length === 1 || (!isMobile && visibleTracks.length === 2)) ? '1fr' : 'minmax(180px, 1fr)'
-                }}
-              >
-              {visibleTracks.map(t => (
-                <div key={t.participant.sid} className="w-full h-full min-h-0 min-w-0 rounded-2xl overflow-hidden bg-bg-dark">
-                  <CustomParticipantTile 
-                    trackRef={t} 
-                    raisedHands={raisedHands}
-                    onTogglePin={() => togglePin(t.participant.identity)}
-                    isPinned={pinnedIdentities.has(t.participant.identity)}
-                    mirror={t.participant.isLocal && videoMirroring}
-                    aiVideoFilter={t.participant.isLocal ? localAIVideoFilter : undefined}
-                    showName={showParticipantNames}
-                    onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                    onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                    onSendFile={(identity: string) => openSendFileFor(identity)}
-                  />
+              <div className="w-full h-full flex items-center justify-center p-2 sm:p-3 min-h-0 min-w-0 overflow-y-auto custom-scroll">
+                <div className="w-full max-w-3xl sm:max-w-4xl lg:max-w-[880px] mx-auto grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-3 max-h-[calc(100vh-230px)] items-center justify-center transition-all duration-300 ease-out">
+                  {visibleTracks.map(t => (
+                    <div key={t.participant.sid} className="w-full max-w-[280px] sm:max-w-[310px] aspect-video mx-auto rounded-2xl overflow-hidden bg-bg-dark transition-all duration-300 ease-out shadow-lg">
+                      <CustomParticipantTile 
+                        trackRef={t} 
+                        raisedHands={raisedHands}
+                        onTogglePin={() => togglePin(t.participant.identity)}
+                        isPinned={pinnedIdentities.has(t.participant.identity)}
+                        mirror={t.participant.isLocal && videoMirroring}
+                        aiVideoFilter={t.participant.isLocal ? localAIVideoFilter : undefined}
+                        showName={showParticipantNames}
+                        onContextMenu={(e: any) => handleTileContextMenu(e, t)}
+                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
+                        onSendFile={(identity: string) => openSendFileFor(identity)}
+                      />
+                    </div>
+                  ))}
+                  {extraTrackCount > 0 && (
+                    <div className="w-full max-w-[280px] sm:max-w-[310px] aspect-video mx-auto rounded-2xl overflow-hidden bg-black/70 border border-white/10 flex flex-col items-center justify-center text-center p-4 text-white">
+                      <span className="text-3xl font-bold">+{extraTrackCount}</span>
+                      <span className="mt-1 text-xs uppercase tracking-widest text-slate-400">more</span>
+                    </div>
+                  )}
                 </div>
-              ))}
-              {extraTrackCount > 0 && (
-                <div className="relative w-full h-full min-h-0 min-w-0 rounded-2xl overflow-hidden bg-black/70 border border-white/10">
-                  <div className="absolute inset-0 bg-black/40" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4 text-white">
-                    <span className="text-4xl font-bold">+{extraTrackCount}</span>
-                    <span className="mt-2 text-sm uppercase tracking-widest">more</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+
         </div>
 
         {/* Live Captions Display */}
-        <div className={cn(
-          "fixed left-1/2 -translate-x-1/2 w-full max-w-3xl px-4 z-50 pointer-events-none transition-all duration-300",
-          isToolbarCollapsed ? "bottom-16" : "bottom-[95px]"
-        )}>
+        <div 
+          style={isSidebarOpenOnDesktop ? { right: sidebarWidthStyle } : undefined}
+          className={cn(
+            "fixed z-50 pointer-events-none transition-all duration-300",
+            isSidebarOpenOnDesktop
+              ? "left-0 flex justify-center px-4"
+              : "left-1/2 -translate-x-1/2 w-full max-w-3xl px-4",
+            isToolbarCollapsed ? "bottom-16" : "bottom-[95px]"
+          )}
+        >
           <AnimatePresence>
             {isCaptionsEnabled && (
               <motion.div 
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 15 }}
-                className="flex flex-col items-center gap-2 text-center"
+                className="flex flex-col items-center gap-2 text-center max-w-2xl mx-auto"
               >
                 {transcriptions.map(t => (
                   <motion.div 
                     key={t.id} 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="bg-black/85 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-white/20 text-white text-base md:text-lg font-medium shadow-2xl inline-flex items-center gap-2 max-w-full"
+                    className="bg-black/85 backdrop-blur-xl px-4 py-2 rounded-xl border border-white/15 text-white text-sm md:text-base font-medium shadow-2xl inline-flex items-center gap-2 max-w-full"
                   >
-                    <span className="text-blue-400 font-semibold px-2 py-0.5 rounded-md bg-blue-500/20 text-sm">
+                    <span className="text-stone-300 font-semibold text-xs uppercase tracking-wider">
                       {t.identity.split('#')[0]}:
                     </span>
                     <span className="truncate">{t.text}</span>
@@ -2376,9 +2691,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   <motion.div 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="bg-black/90 backdrop-blur-xl px-5 py-2.5 rounded-2xl border border-blue-500/40 text-white text-base md:text-lg font-medium shadow-2xl inline-flex items-center gap-2 max-w-full ring-2 ring-blue-500/20"
+                    className="bg-black/90 backdrop-blur-xl px-4 py-2 rounded-xl border border-white/20 text-white text-sm md:text-base font-medium shadow-2xl inline-flex items-center gap-2 max-w-full"
                   >
-                    <span className="text-blue-300 font-semibold px-2 py-0.5 rounded-md bg-blue-600/30 text-sm">
+                    <span className="text-stone-300 font-semibold text-xs uppercase tracking-wider">
                       You:
                     </span>
                     <span className="truncate">{localTranscript}</span>
@@ -2386,9 +2701,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 )}
 
                 {!localTranscript && transcriptions.length === 0 && (
-                  <div className="bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-xs text-white/80 shadow-lg flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                    <span>Live captions active — speak to transcribe</span>
+                  <div className="bg-black/80 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/10 text-xs text-stone-300 shadow-lg">
+                    Captions active — listening for speech...
                   </div>
                 )}
               </motion.div>
@@ -2396,7 +2710,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           </AnimatePresence>
         </div>
 
-        {/* Sidebar Tabs (Participants, Chat, Info, Waiting) */}
+        {/* Sidebar Tabs (Participants, Chat, Info, Waiting, Workspace) */}
         <AnimatePresence mode="wait">
           {activeTab && activeTab !== 'settings' && (
             <motion.div
@@ -2406,28 +2720,35 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               exit={{ x: '100%', opacity: 0 }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className={cn(
-                "fixed top-0 right-0 z-50 bg-white border-l border-gray-200 overflow-hidden flex flex-col shadow-2xl transition-all duration-300",
-                isMobileLandscape || isToolbarCollapsed ? "bottom-0" : "bottom-[88px]",
-                activeTab === 'whiteboard' 
-                  ? "w-full md:w-[84vw] lg:w-[76vw] xl:w-[72vw]" 
-                  : (isMobile && !isMobileLandscape ? "w-full inset-x-0" : "w-[360px] sm:w-[380px] md:w-[400px]")
+                isMobile && !isMobileLandscape 
+                  ? "fixed inset-0 z-[100] bg-white overflow-hidden flex flex-col" 
+                  : isWorkspaceMaximized && activeTab === 'whiteboard'
+                    ? "fixed inset-0 z-[110] bg-[#121316] p-2 sm:p-3 overflow-hidden flex flex-col transition-all duration-300"
+                    : "fixed top-0 right-0 bottom-0 z-50 bg-[#121316] p-2 sm:p-2.5 overflow-hidden flex flex-col transition-all duration-300",
+                !(isWorkspaceMaximized && activeTab === 'whiteboard') && (
+                  activeTab === 'whiteboard' 
+                    ? (isMobile && !isMobileLandscape ? "w-full" : "w-full md:w-[56vw]") 
+                    : (isMobile && !isMobileLandscape ? "w-full" : "w-full md:w-[420px]")
+                )
               )}
             >
-              {/* Sidebar Header (Hidden for whiteboard since JointWorkspace renders its own unified top bar; minimal X-only for files) */}
+              {/* Inner container with sleek rounded edges and tips */}
+              <div className="h-full w-full rounded-2xl border border-neutral-200/80 shadow-2xl overflow-hidden flex flex-col bg-white">
+              {/* Sidebar Header */}
               {activeTab !== 'whiteboard' && (
                 <div className={cn(
-                  "flex items-center px-4 sm:px-5 py-2.5 border-b border-gray-100 bg-white sticky top-0 z-10",
+                  "flex items-center px-6 py-4 border-b border-neutral-200/60 bg-[#FBFBFA] sticky top-0 z-10",
                   activeTab === 'files' ? "justify-end" : "justify-between"
                 )}>
                   {activeTab !== 'files' && (
-                    <h2 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-2">
+                    <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2.5">
                       {activeTab === 'info' && <Info size={18} className="text-slate-700" />}
                       {(activeTab === 'participants' || activeTab === 'users') && <Users size={18} className="text-slate-700" />}
                       {activeTab === 'chat' && <MessageSquare size={18} className="text-slate-700" />}
                       {activeTab === 'waiting' && <ShieldCheck size={18} className="text-slate-700" />}
                       {activeTab === 'notes' && <FileText size={18} className="text-slate-700" />}
-                      {activeTab === 'host_controls' && <ShieldCheck size={18} className="text-blue-600" />}
-                      {activeTab === 'tools' && <LayoutGrid size={18} className="text-blue-600" />}
+                      {activeTab === 'host_controls' && <ShieldCheck size={18} className="text-slate-700" />}
+                      {activeTab === 'tools' && <LayoutGrid size={18} className="text-slate-700" />}
                       <span>
                         {activeTab === 'host_controls' 
                           ? "Host Controls" 
@@ -2435,14 +2756,20 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                             ? "Tools & Workspace" 
                             : activeTab === 'info'
                               ? "Meeting Details"
-                              : activeTab}
+                              : activeTab === 'chat'
+                                ? "In-Call Chat"
+                                : activeTab === 'participants' || activeTab === 'users'
+                                  ? "Participants"
+                                  : activeTab === 'notes'
+                                    ? "Meeting Notes"
+                                    : activeTab}
                       </span>
                     </h2>
                   )}
                   <button 
                     type="button"
                     onClick={() => setActiveTab(null)}
-                    className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-700 transition-colors cursor-pointer"
+                    className="p-1.5 hover:bg-stone-200/60 rounded-xl text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
                     title="Close"
                   >
                     <X size={18} />
@@ -2451,87 +2778,98 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               )}
               <div className={cn(
                 "flex-1 min-h-0 bg-white flex flex-col",
-                activeTab === 'whiteboard' ? "p-0 overflow-hidden" : "overflow-y-auto p-4 sm:p-5 custom-scroll bg-slate-50/30"
+                activeTab === 'whiteboard' ? "p-0 overflow-hidden" : "overflow-y-auto p-6 sm:p-8 custom-scroll bg-[#FBFBFA]"
               )}>
                 {activeTab === 'host_controls' && (
                   <div className="space-y-6">
                     {/* Meeting Info & Joining Link */}
-                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-sm space-y-3">
+                    <div className="bg-white p-6 rounded-2xl border border-neutral-200/70 shadow-xs space-y-4">
                       <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">Meeting Information</p>
-                        <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                        <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Meeting Information</p>
+                        <span className="text-xs font-mono text-slate-500">
                           Room: {room}
                         </span>
                       </div>
-                      <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 text-xs text-gray-700 font-mono break-all select-all">
+                      <div className="bg-stone-50 p-3.5 rounded-xl border border-neutral-200/80 text-xs text-slate-700 font-mono break-all select-all">
                         {window.location.href}
                       </div>
                       <button 
                         type="button"
                         onClick={handleCopy} 
-                        className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition-all text-xs font-bold shadow-sm active:scale-[0.98]"
+                        className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl transition-all text-xs font-medium shadow-xs cursor-pointer active:scale-[0.98]"
                       >
-                        {copied ? <Check size={16} className="text-white" /> : <Copy size={16} />}
+                        {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
                         <span>{copied ? 'Link Copied to Clipboard' : 'Copy Joining Link'}</span>
                       </button>
                     </div>
 
                     {/* Waiting Room & Admission Controls */}
-                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-sm space-y-3">
+                    <div className="bg-white p-6 rounded-2xl border border-neutral-200/70 shadow-xs space-y-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs font-bold text-gray-800 uppercase tracking-wider">Waiting Room (Lobby)</p>
-                          <p className="text-xs text-gray-500">
-                            {pendingParticipants.length} waiting for approval
+                          <p className="text-xs font-semibold text-slate-800 uppercase tracking-wider">Waiting Room</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {lobbyEnabled ? "Lobby enabled • Host approval required" : "Open room • Direct access"}
                           </p>
                         </div>
-                        {pendingParticipants.length > 1 && isHost && (
-                          <button
-                            type="button"
-                            onClick={admitAllUsers}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm"
-                          >
-                            Admit All
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const next = !lobbyEnabled;
+                            setLobbyEnabled(next);
+                            try {
+                              await setDoc(doc(db, 'rooms', room), { lobby: next }, { merge: true });
+                              setToastMessage(next ? "Waiting room enabled" : "Waiting room disabled");
+                              setTimeout(() => setToastMessage(null), 2500);
+                            } catch (e) {}
+                          }}
+                          className={cn(
+                            "w-11 h-6 rounded-full relative transition-colors duration-200 cursor-pointer shrink-0",
+                            lobbyEnabled ? "bg-slate-900" : "bg-stone-300"
+                          )}
+                          title="Toggle waiting room"
+                        >
+                          <div className={cn(
+                            "w-4 h-4 bg-white rounded-full transition-all duration-200 shadow-xs absolute top-1",
+                            lobbyEnabled ? "left-6" : "left-1"
+                          )} />
+                        </button>
                       </div>
 
-                      {pendingParticipants.length === 0 ? (
-                        <div className="py-3 px-3 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center">
-                          <p className="text-xs text-gray-500">No participants currently waiting in the lobby.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
+                      {pendingParticipants.length > 0 && (
+                        <div className="pt-2 border-t border-neutral-100 space-y-2">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs text-slate-500 font-medium">
+                              Waiting ({pendingParticipants.length})
+                            </span>
+                            {pendingParticipants.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={admitAllUsers}
+                                className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-all shadow-xs cursor-pointer"
+                              >
+                                Admit All
+                              </button>
+                            )}
+                          </div>
                           {pendingParticipants.map(p => (
-                            <div key={p.sid} className="flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl border border-gray-200/80 transition-all">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                {(() => {
-                                  let pAvatar = "";
-                                  try {
-                                    pAvatar = JSON.parse(p.metadata || "{}").avatar;
-                                  } catch (e) {}
-                                  return pAvatar ? (
-                                    <img src={pAvatar} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-200" referrerPolicy="no-referrer" />
-                                  ) : (
-                                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">
-                                      {p.identity.charAt(0).toUpperCase()}
-                                    </div>
-                                  );
-                                })()}
+                            <div key={p.sid} className="flex items-center justify-between p-3 bg-stone-50 rounded-xl border border-neutral-200/80">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-8 h-8 bg-stone-200/70 text-slate-700 rounded-xl flex items-center justify-center text-xs font-medium shrink-0">
+                                  {p.identity.charAt(0).toUpperCase()}
+                                </div>
                                 <div className="min-w-0">
-                                  <span className="text-xs font-semibold text-gray-900 block truncate">{p.identity.split('#')[0]}</span>
-                                  <span className="text-[10px] text-amber-600 font-medium block">Waiting in lobby</span>
+                                  <span className="text-xs font-medium text-slate-900 block truncate">{p.identity.split('#')[0]}</span>
+                                  <span className="text-[10px] text-slate-500 font-normal block">In lobby</span>
                                 </div>
                               </div>
-                              {isHost && (
-                                <button 
-                                  type="button"
-                                  onClick={() => admitUser(p)}
-                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm"
-                                >
-                                  Admit
-                                </button>
-                              )}
+                              <button 
+                                type="button"
+                                onClick={() => admitUser(p)}
+                                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-all shadow-xs cursor-pointer"
+                              >
+                                Admit
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -2539,104 +2877,235 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     </div>
 
                     {/* In-Call Participants Management */}
-                    <div className="bg-white p-4 rounded-2xl border border-gray-200/80 shadow-sm space-y-3">
+                    <div className="bg-white p-6 rounded-2xl border border-neutral-200/70 shadow-xs space-y-4">
                       <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold text-gray-800 uppercase tracking-wider">
-                          In-Call Participants ({remoteParticipants.length + 1})
+                        <p className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+                          Participants ({remoteParticipants.length + 1})
                         </p>
                         {isHost && remoteParticipants.length > 0 && (
                           <button
                             type="button"
                             onClick={() => {
-                              remoteParticipants.forEach(p => {
-                                try {
-                                  // Attempt remote track mute request if available
-                                } catch (e) {}
-                              });
-                              setToastMessage("Requested all participants to mute");
+                              sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'mute-all' })), { reliable: true });
+                              setToastMessage("Muted all participants");
                               setTimeout(() => setToastMessage(null), 2500);
                             }}
-                            className="text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-gray-100 px-2.5 py-1 rounded-lg transition-colors"
+                            className="text-xs font-medium text-slate-700 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
                           >
                             Mute All
                           </button>
                         )}
                       </div>
 
-                      <div className="space-y-1.5 rounded-xl overflow-hidden">
-                        <ParticipantItem 
-                          participant={localParticipant} 
-                          isLocal 
-                        />
+                      <div className="space-y-1.5 divide-y divide-neutral-100">
+                        {/* Self */}
+                        <div className="flex items-center justify-between py-2.5">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 bg-stone-100 text-slate-700 rounded-xl flex items-center justify-center text-xs font-medium border border-neutral-200/70 shrink-0">
+                              {localParticipant.identity.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="text-xs font-medium text-slate-900 truncate">
+                              {localParticipant.identity.split('#')[0]} (You)
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-400 font-normal">Host</span>
+                        </div>
+
+                        {/* Remotes with Host Action Buttons */}
                         {remoteParticipants.map(p => (
-                          <ParticipantItem 
-                            key={p.sid} 
-                            participant={p} 
-                            onSendFile={(identity: string) => openSendFileFor(identity)}
-                          />
+                          <div key={p.sid} className="flex items-center justify-between py-2.5">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-8 h-8 bg-stone-100 text-slate-700 rounded-xl flex items-center justify-center text-xs font-medium border border-neutral-200/70 shrink-0">
+                                {p.identity.charAt(0).toUpperCase()}
+                              </div>
+                              <span className="text-xs font-medium text-slate-900 truncate">
+                                {p.identity.split('#')[0]}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'mute-participant', targetIdentity: p.identity })), { reliable: true });
+                                  setToastMessage(`Muted ${p.identity.split('#')[0]}`);
+                                  setTimeout(() => setToastMessage(null), 2500);
+                                }}
+                                title="Mute participant"
+                                className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <VolumeX size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (confirm(`Remove ${p.identity.split('#')[0]} from this meeting?`)) {
+                                    sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'remove-participant', targetIdentity: p.identity })), { reliable: true });
+                                    setToastMessage(`Removed ${p.identity.split('#')[0]}`);
+                                    setTimeout(() => setToastMessage(null), 2500);
+                                  }
+                                }}
+                                title="Remove participant from call"
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <UserX size={15} />
+                              </button>
+                            </div>
+                          </div>
                         ))}
                       </div>
+                    </div>
+
+                    {/* End Meeting for All */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (confirm("End this meeting for everyone in the call?")) {
+                            sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'end-meeting' })), { reliable: true });
+                            try {
+                              await updateDoc(doc(db, 'meetings', room), { status: 'ended' });
+                            } catch (e) {}
+                            navigate(user ? '/dashboard' : '/');
+                          }
+                        }}
+                        className="w-full py-3.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200/70 rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                      >
+                        <PhoneOff size={14} />
+                        <span>End Meeting for Everyone</span>
+                      </button>
                     </div>
                   </div>
                 )}
 
                 {activeTab === 'tools' && (
-                  <div className="space-y-4">
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider px-1">
-                      Collaboration & Tools
+                  <div className="space-y-3.5">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1">
+                      Features & Workspace
                     </p>
 
+                    {/* AI Note Taking & Summaries Card */}
+                    <div className="p-4 bg-white rounded-2xl border border-gray-200/90 shadow-xs space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2.5 rounded-xl bg-gray-100 text-gray-700 border border-gray-200/60 shrink-0">
+                            <Bot size={20} />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-900">AI Note-Taking & Summaries</h3>
+                            <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                              Real-time notes, meeting minutes, and action items powered by Gemini.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Minimalist Toggle Switch */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextState = !isAiNoteTakingActive;
+                            setIsAiNoteTakingActive(nextState);
+                            setToastMessage(nextState ? "AI Note Taking active" : "AI Note Taking paused");
+                            setTimeout(() => setToastMessage(null), 2500);
+                          }}
+                          className={cn(
+                            "w-11 h-6 rounded-full relative transition-colors duration-200 ease-in-out cursor-pointer shrink-0 mt-0.5",
+                            isAiNoteTakingActive ? "bg-slate-800" : "bg-gray-300"
+                          )}
+                          title="Toggle AI Note-Taking"
+                        >
+                          <div className={cn(
+                            "w-4 h-4 bg-white rounded-full transition-all duration-200 ease-in-out shadow-xs absolute top-1",
+                            isAiNoteTakingActive ? "left-6" : "left-1"
+                          )} />
+                        </button>
+                      </div>
+
+                      {/* AI Action Buttons */}
+                      <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isAiSummarizing}
+                          onClick={() => generateAiMeetingSummary('summary')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {isAiSummarizing ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                          <span>Generate Summary</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isAiSummarizing}
+                          onClick={() => generateAiMeetingSummary('action_items')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {isAiSummarizing ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={12} />}
+                          <span>Action Items</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('notes')}
+                          className="px-3 py-1.5 text-gray-600 hover:text-gray-900 text-xs font-medium cursor-pointer ml-auto"
+                        >
+                          View Notes →
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Joint Workspace Card */}
                     <button
                       type="button"
                       onClick={() => setActiveTab('whiteboard')}
-                      className="w-full text-left p-4 bg-white hover:bg-blue-50/60 rounded-2xl border border-gray-200/80 hover:border-blue-300 transition-all shadow-sm group flex items-start gap-3.5"
+                      className="w-full text-left p-4 bg-white hover:bg-gray-50/80 rounded-2xl border border-gray-200/90 transition-all shadow-xs group flex items-start gap-3.5 cursor-pointer"
                     >
-                      <div className="p-2.5 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors shrink-0">
-                        <Monitor size={22} />
+                      <div className="p-2.5 rounded-xl bg-gray-100 text-gray-700 border border-gray-200/60 group-hover:bg-gray-200 group-hover:text-gray-900 transition-colors shrink-0">
+                        <Monitor size={20} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-bold text-gray-900 group-hover:text-blue-600 transition-colors">Joint Workspace</h3>
+                        <h3 className="text-sm font-semibold text-gray-900 transition-colors">Joint Workspace</h3>
                         <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                          Collaborative whiteboard, shared drawing canvas, sticky notes, and diagrams.
+                          Collaborative whiteboard, shared multi-file editor, and AI editing assistance.
                         </p>
                       </div>
                     </button>
 
+                    {/* Direct File Sharing Card */}
                     <button
                       type="button"
                       onClick={() => setActiveTab('files')}
-                      className="w-full text-left p-4 bg-white hover:bg-blue-50/60 rounded-2xl border border-gray-200/80 hover:border-blue-300 transition-all shadow-sm group flex items-start gap-3.5"
+                      className="w-full text-left p-4 bg-white hover:bg-gray-50/80 rounded-2xl border border-gray-200/90 transition-all shadow-xs group flex items-start gap-3.5 cursor-pointer"
                     >
-                      <div className="p-2.5 rounded-xl bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors shrink-0">
-                        <Paperclip size={22} />
+                      <div className="p-2.5 rounded-xl bg-gray-100 text-gray-700 border border-gray-200/60 group-hover:bg-gray-200 group-hover:text-gray-900 transition-colors shrink-0">
+                        <Paperclip size={20} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-bold text-gray-900 group-hover:text-purple-600 transition-colors">Share Files</h3>
+                          <h3 className="text-sm font-semibold text-gray-900 transition-colors">Share Files</h3>
                           {sharedFiles.length > 0 && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
-                              {sharedFiles.length} file{sharedFiles.length > 1 ? 's' : ''}
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+                              {sharedFiles.length} {sharedFiles.length === 1 ? 'file' : 'files'}
                             </span>
                           )}
                         </div>
                         <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                          Direct peer-to-peer file transfer and shared documents during the call.
+                          Peer-to-peer secure document and media transfer during calls.
                         </p>
                       </div>
                     </button>
 
+                    {/* Meeting Notes & Live Transcripts Card */}
                     <button
                       type="button"
                       onClick={() => setActiveTab('notes')}
-                      className="w-full text-left p-4 bg-white hover:bg-blue-50/60 rounded-2xl border border-gray-200/80 hover:border-blue-300 transition-all shadow-sm group flex items-start gap-3.5"
+                      className="w-full text-left p-4 bg-white hover:bg-gray-50/80 rounded-2xl border border-gray-200/90 transition-all shadow-xs group flex items-start gap-3.5 cursor-pointer"
                     >
-                      <div className="p-2.5 rounded-xl bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0">
-                        <FileText size={22} />
+                      <div className="p-2.5 rounded-xl bg-gray-100 text-gray-700 border border-gray-200/60 group-hover:bg-gray-200 group-hover:text-gray-900 transition-colors shrink-0">
+                        <FileText size={20} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-bold text-gray-900 group-hover:text-emerald-600 transition-colors">Meeting Notes & Live Transcript</h3>
+                        <h3 className="text-sm font-semibold text-gray-900 transition-colors">Meeting Notes & Transcripts</h3>
                         <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                          Real-time live transcripts, meeting agendas, and collaborative notes.
+                          Review saved meeting transcripts, personal scratchpads, and notes.
                         </p>
                       </div>
                     </button>
@@ -2645,25 +3114,28 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
                 {activeTab === 'info' && (
                   <div className="space-y-6">
-                    <div className="space-y-3">
-                      <p className="text-xs font-bold text-gray-600 uppercase tracking-widest">Joining info</p>
-                      <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 break-all text-sm text-gray-900 leading-relaxed">
+                    <div className="bg-white p-6 rounded-2xl border border-neutral-200/70 shadow-xs space-y-4">
+                      <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Joining info</p>
+                      <div className="bg-stone-50 p-4 rounded-xl border border-neutral-200/80 break-all text-xs font-mono text-slate-700 leading-relaxed">
                         {window.location.href}
                       </div>
-                      <button onClick={handleCopy} className="w-full flex items-center justify-center gap-2 bg-blue-100 text-blue-600 hover:bg-blue-200 px-4 py-3 rounded-xl transition-all text-sm font-bold">
-                        {copied ? <Check size={18} className="text-green-600" /> : <Copy size={18} />}
-                        {copied ? 'Copied' : 'Copy joining link'}
+                      <button 
+                        onClick={handleCopy} 
+                        className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl transition-all text-xs font-medium shadow-xs cursor-pointer active:scale-[0.98]"
+                      >
+                        {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
+                        <span>{copied ? 'Copied to Clipboard' : 'Copy Joining Link'}</span>
                       </button>
                     </div>
                   </div>
                 )}
                 {(activeTab === 'participants' || activeTab === 'users') && (
-                  <div className="space-y-4">
+                  <div className="bg-white p-6 rounded-2xl border border-neutral-200/70 shadow-xs space-y-4">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-bold text-gray-600 uppercase tracking-widest">Participants</p>
-                      <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">{remoteParticipants.length + 1}</span>
+                      <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Participants</p>
+                      <span className="text-xs font-medium text-slate-400">({remoteParticipants.length + 1})</span>
                     </div>
-                    <div className="space-y-1.5 rounded-2xl overflow-hidden">
+                    <div className="space-y-1.5 rounded-xl overflow-hidden">
                       <ParticipantItem 
                         participant={localParticipant} 
                         isLocal 
@@ -2680,13 +3152,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 )}
                 {activeTab === 'chat' && (
                   <div className="flex flex-col h-full">
-                    {/* Minimal Toggle: Messages / Shared Files */}
-                    <div className="flex items-center gap-1.5 mb-3 bg-gray-100/90 p-1 rounded-xl">
+                    {/* Toggle: Messages / Shared Files */}
+                    <div className="flex items-center gap-1.5 mb-4 bg-stone-100 p-1 rounded-xl shrink-0">
                       <button
                         onClick={() => setChatSubTab('messages')}
                         className={cn(
-                          "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all",
-                          chatSubTab === 'messages' ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-800"
+                          "flex-1 py-2 text-xs font-medium rounded-lg transition-all cursor-pointer",
+                          chatSubTab === 'messages' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-900"
                         )}
                       >
                         Messages
@@ -2694,14 +3166,14 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       <button
                         onClick={() => setChatSubTab('files')}
                         className={cn(
-                          "flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5",
-                          chatSubTab === 'files' ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-800"
+                          "flex-1 py-2 text-xs font-medium rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                          chatSubTab === 'files' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-900"
                         )}
                       >
                         <span>Files</span>
                         {sharedFiles.length > 0 && (
-                          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-100 text-blue-700 font-bold">
-                            {sharedFiles.length}
+                          <span className="text-xs text-slate-400 font-normal">
+                            ({sharedFiles.length})
                           </span>
                         )}
                       </button>
@@ -2714,26 +3186,24 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       />
                     ) : (
                       <>
-                        <div className="flex-1 space-y-3 mb-4 overflow-y-auto custom-scroll pr-1">
+                        <div className="flex-1 space-y-3.5 mb-4 overflow-y-auto custom-scroll pr-1">
                           {chatMessages.length === 0 && sharedFiles.length === 0 ? (
-                            <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
-                              <div className="p-4 bg-gray-100 rounded-full text-gray-600">
-                                <MessageSquare size={32} />
-                              </div>
-                              <p className="text-sm text-gray-600">No messages yet. Start the conversation!</p>
+                            <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-400">
+                              <MessageSquare size={32} />
+                              <p className="text-xs">No messages yet. Send a message to participants.</p>
                             </div>
                           ) : (
                             chatMessages.map((msg, i) => (
                               <div key={i} className="flex flex-col">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-xs font-bold text-blue-600">
+                                  <span className="text-xs font-medium text-slate-900">
                                     {msg.from?.identity === localParticipant.identity ? 'You' : msg.from?.identity.split('#')[0]}
                                   </span>
-                                  <span className="text-xs text-gray-500">
+                                  <span className="text-[10px] text-slate-400">
                                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                   </span>
                                 </div>
-                                <p className="text-sm text-gray-900 bg-gray-100 px-4 py-2 rounded-2xl rounded-tl-none inline-block max-w-[95%] border border-gray-200">
+                                <p className="text-xs text-slate-800 bg-stone-100 px-4 py-2.5 rounded-2xl rounded-tl-sm inline-block max-w-[95%] border border-neutral-200/60 leading-relaxed">
                                   {msg.message}
                                 </p>
                               </div>
@@ -2749,29 +3219,29 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                               setChatInput(""); 
                             }
                           }}
-                          className="flex gap-2 items-center bg-gray-100 rounded-2xl px-3 py-1 border border-gray-300 focus-within:border-blue-400 transition-all"
+                          className="flex gap-2 items-center bg-stone-50 rounded-xl px-3 py-1.5 border border-neutral-200/80 focus-within:border-slate-400 transition-all shrink-0"
                         >
                           <button
                             type="button"
                             onClick={() => openSendFileFor()}
                             title="Send file in call"
-                            className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-200/60 rounded-xl transition-colors shrink-0"
+                            className="p-2 text-slate-400 hover:text-slate-800 hover:bg-stone-200/60 rounded-xl transition-colors shrink-0 cursor-pointer"
                           >
-                            <Paperclip size={18} />
+                            <Paperclip size={16} />
                           </button>
                           <input 
                             type="text" 
                             placeholder="Send a message..." 
-                            className="bg-transparent outline-none flex-1 text-sm text-gray-900 h-11 placeholder:text-gray-500"
+                            className="bg-transparent outline-none flex-1 text-xs text-slate-900 h-9 placeholder:text-slate-400"
                             value={chatInput}
                             onChange={(e) => setChatInput(e.target.value)}
                           />
                           <button 
                             type="submit" 
                             disabled={!chatInput.trim()} 
-                            className="text-blue-600 p-2 hover:bg-blue-100 rounded-full transition-colors disabled:opacity-30 shrink-0"
+                            className="text-slate-900 p-2 hover:bg-stone-200/60 rounded-lg transition-colors disabled:opacity-30 shrink-0 cursor-pointer"
                           >
-                            <Send size={18} />
+                            <Send size={16} />
                           </button>
                         </form>
                       </>
@@ -2852,14 +3322,103 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       user={user}
                       onBroadcast={handleBroadcastWorkspace}
                       incomingBroadcast={workspaceIncomingMsg}
-                      onClose={() => setActiveTab(null)}
+                      onClose={() => { setActiveTab(null); setIsWorkspaceMaximized(false); }}
+                      isMaximized={isWorkspaceMaximized}
+                      onToggleMaximize={() => setIsWorkspaceMaximized(!isWorkspaceMaximized)}
                     />
                   </div>
                 )}
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Draggable PiP Active Speaker Box during Workspace Maximize Mode */}
+      <AnimatePresence>
+        {isWorkspaceMaximized && activeSpeakerTrack && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 30 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 30 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 280 }}
+            drag
+            dragConstraints={containerRef}
+            dragMomentum={false}
+            className="fixed bottom-6 right-6 z-[120] w-64 sm:w-72 aspect-video rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-[#141517] cursor-grab active:cursor-grabbing select-none"
+          >
+            <div className="w-full h-full relative">
+              <CustomParticipantTile 
+                trackRef={activeSpeakerTrack} 
+                raisedHands={raisedHands}
+                isPinned={pinnedIdentities.has(activeSpeakerTrack.participant.identity)}
+                mirror={activeSpeakerTrack.participant.isLocal && videoMirroring}
+                aiVideoFilter={activeSpeakerTrack.participant.isLocal ? localAIVideoFilter : undefined}
+                showName={false}
+                isFocal
+              />
+
+              {/* Floating Top Header: Active speaker label & Restore button */}
+              <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-auto">
+                <span className="text-[11px] font-medium text-white/90 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10 truncate max-w-[140px]">
+                  {activeSpeakerTrack.participant.identity.split('#')[0]} {activeSpeakerTrack.participant.isLocal && "(You)"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsWorkspaceMaximized(false)}
+                  className="p-1.5 rounded-xl bg-black/60 hover:bg-black/90 text-white/80 hover:text-white backdrop-blur-md border border-white/10 transition-colors cursor-pointer"
+                  title="Restore Side-by-Side View"
+                >
+                  <Minimize2 size={13} />
+                </button>
+              </div>
+
+              {/* Floating Bottom: ONLY Audio & Video Icon Buttons */}
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-2xl border border-white/15 shadow-xl">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const target = !localParticipant.isMicrophoneEnabled;
+                      setIsMicEnabled(target);
+                      await localParticipant.setMicrophoneEnabled(target);
+                    } catch (err) {}
+                  }}
+                  className={cn(
+                    "w-8 h-8 rounded-xl flex items-center justify-center transition-colors cursor-pointer",
+                    localParticipant.isMicrophoneEnabled
+                      ? "bg-white/15 text-white hover:bg-white/25"
+                      : "bg-red-500/90 text-white hover:bg-red-600"
+                  )}
+                  title={localParticipant.isMicrophoneEnabled ? "Mute Microphone" : "Unmute Microphone"}
+                >
+                  {localParticipant.isMicrophoneEnabled ? <Mic size={14} /> : <MicOff size={14} />}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const target = !localParticipant.isCameraEnabled;
+                      setIsCamEnabled(target);
+                      await localParticipant.setCameraEnabled(target);
+                    } catch (err) {}
+                  }}
+                  className={cn(
+                    "w-8 h-8 rounded-xl flex items-center justify-center transition-colors cursor-pointer",
+                    localParticipant.isCameraEnabled
+                      ? "bg-white/15 text-white hover:bg-white/25"
+                      : "bg-red-500/90 text-white hover:bg-red-600"
+                  )}
+                  title={localParticipant.isCameraEnabled ? "Turn Off Camera" : "Turn On Camera"}
+                >
+                  {localParticipant.isCameraEnabled ? <VideoIcon size={14} /> : <VideoOff size={14} />}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
         {/* Settings Central Modal with Full Mobile Optimization, Category Navigation & Custom Dropdowns */}
         <SettingsModal
@@ -2923,29 +3482,45 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
       {/* Taskbar - Clean Modern Bottom Dock for Desktop & Small Landscape Side Dock for mobile */}
       <AnimatePresence>
-        {!isToolbarCollapsed && (
+        {!isToolbarCollapsed && !isWorkspaceMaximized && (
           <motion.div 
             initial={isMobileLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
             animate={isMobileLandscape ? { x: 0, opacity: 1 } : { y: 0, opacity: 1 }}
             exit={isMobileLandscape ? { x: 90, opacity: 0 } : { y: 88, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+            style={
+              !isMobileLandscape && isSidebarOpenOnDesktop
+                ? { right: sidebarWidthStyle }
+                : undefined
+            }
             className={cn(
-              "bg-[#121316] z-[70] transition-all duration-300 select-none",
+              "bg-[#121316] z-[70] transition-all duration-300 select-none overflow-visible",
               isMobileLandscape 
                 ? "absolute top-0 right-0 bottom-0 w-[70px] sm:w-[80px] flex flex-col items-center justify-between py-2 sm:py-3 px-1.5 overflow-visible" 
                 : "absolute bottom-0 left-0 right-0 h-[80px] md:h-[84px] flex items-center justify-between px-3 sm:px-6 md:px-8"
             )}
           >
-            {/* Left: Balanced Spacer (Removed meeting code, time, and pulsing dot for minimalist layout) */}
+            {/* Left: Meeting Name / Info */}
             {!isMobileLandscape && (
-              <div className="hidden md:flex flex-1 items-center justify-start" />
+              <div className="hidden lg:flex items-center justify-start min-w-0 z-10 pointer-events-auto flex-1">
+                <span className="text-xs text-slate-400 font-normal truncate max-w-[200px]">
+                  {meetingDetails?.title || room}
+                </span>
+              </div>
             )}
 
-            {/* Main Controls: Centered on Desktop & Laptop */}
+            {/* Main Controls: 100% Horizontally Dead-Centered under the Video Cards */}
             <div className={cn(
-              "flex flex-none items-center justify-center",
-              isMobileLandscape ? "flex-col gap-2 sm:gap-2.5 w-full my-auto" : "gap-2 md:gap-3"
+              isMobileLandscape 
+                ? "flex flex-col gap-2 sm:gap-2.5 w-full my-auto flex-none items-center justify-center" 
+                : "absolute inset-x-0 top-0 bottom-0 flex items-center justify-center pointer-events-none px-2 z-20"
             )}>
+              <div className={cn(
+                "flex items-center justify-center pointer-events-auto",
+                isMobile && !isMobileLandscape 
+                  ? "flex-1 justify-around max-w-md mx-auto px-1" 
+                  : "gap-2 md:gap-3"
+              )}>
               {/* Mic Control */}
               <div className="relative">
                 <ControlButton 
@@ -2989,8 +3564,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                               key={d.deviceId}
                               onClick={() => { setSelectedAudioId(d.deviceId); setIsMicMenuOpen(false); }}
                               className={cn(
-                                "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
-                                selectedAudioId === d.deviceId ? "bg-[#4285f4] text-white" : "text-slate-300 hover:bg-white/10"
+                                "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 cursor-pointer",
+                                selectedAudioId === d.deviceId ? "bg-slate-700 text-white font-medium" : "text-slate-300 hover:bg-white/10"
                               )}
                             >
                               <Mic size={14} />
@@ -3047,8 +3622,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                               key={d.deviceId}
                               onClick={() => { setSelectedVideoId(d.deviceId); setIsCamMenuOpen(false); }}
                               className={cn(
-                                "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
-                                selectedVideoId === d.deviceId ? "bg-[#4285f4] text-white" : "text-slate-300 hover:bg-white/10"
+                                "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 cursor-pointer",
+                                selectedVideoId === d.deviceId ? "bg-slate-700 text-white font-medium" : "text-slate-300 hover:bg-white/10"
                               )}
                             >
                               <VideoIcon size={14} />
@@ -3062,59 +3637,54 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 </AnimatePresence>
               </div>
 
-              {/* Mobile Flip Camera */}
-              {isMobile && localParticipant.isCameraEnabled && (
+              {/* Captions (Desktop / Landscape) - Hidden when sidebar is open to preserve the 4-control clean layout */}
+              {!isMobile && !isSidebarOpenOnDesktop && (
                 <ControlButton 
-                  onClick={handleFlipCamera}
-                  icon={<SwitchCamera size={18} />}
-                  size="small"
+                  active={isCaptionsEnabled} 
+                  onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
+                  size="normal"
+                  icon={<Languages size={22} />}
+                  highlight={isCaptionsEnabled}
                   isLandscape={isMobileLandscape}
-                  title={`Flip Camera (${facingMode === 'user' ? 'Front' : 'Back'})`}
+                  title="Captions (c)"
                 />
               )}
 
-              {/* Captions */}
-              <ControlButton 
-                active={isCaptionsEnabled} 
-                onClick={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
-                size={isMobile ? "small" : "normal"}
-                icon={<Languages size={isMobile ? 18 : 22} />}
-                highlight={isCaptionsEnabled}
-                isLandscape={isMobileLandscape}
-                title="Captions (c)"
-              />
+              {/* Hand Raise (Desktop) - Hidden when sidebar is open to preserve the 4-control clean layout */}
+              {!isMobile && !isSidebarOpenOnDesktop && (
+                <ControlButton 
+                  active={isHandRaised} 
+                  onClick={toggleHandRaise}
+                  icon={<Hand size={22} />}
+                  warning={isHandRaised}
+                  isLandscape={isMobileLandscape}
+                  title="Raise hand"
+                />
+              )}
 
+              {/* Screen Share (Desktop) - Always visible */}
               {!isMobile && (
-                <>
-                  <ControlButton 
-                    active={isHandRaised} 
-                    onClick={toggleHandRaise}
-                    icon={<Hand size={22} />}
-                    warning={isHandRaised}
-                    isLandscape={isMobileLandscape}
-                    title="Raise hand"
-                  />
-                  <ControlButton 
-                    active={localParticipant.isScreenShareEnabled} 
-                    onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
-                    icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
-                    highlight={localParticipant.isScreenShareEnabled}
-                    isLandscape={isMobileLandscape}
-                    title="Share screen"
-                  />
-                </>
+                <ControlButton 
+                  active={localParticipant.isScreenShareEnabled} 
+                  onClick={() => localParticipant.setScreenShareEnabled(!localParticipant.isScreenShareEnabled)}
+                  icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
+                  highlight={localParticipant.isScreenShareEnabled}
+                  isLandscape={isMobileLandscape}
+                  title="Share screen"
+                />
               )}
 
-              {/* Reactions & Smile (Horizontal Menu Bar) */}
-              <div className="relative">
-                <ControlButton 
-                  onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
-                  icon={<Smile size={isMobile ? 18 : 22} />}
-                  active={isReactionsMenuOpen}
-                  size={isMobile ? "small" : "normal"}
-                  isLandscape={isMobileLandscape}
-                  title="Reactions"
-                />
+              {/* Reactions & Smile (Mobile and Desktop) - Hidden when sidebar is open to preserve the 4-control clean layout */}
+              {(!isSidebarOpenOnDesktop || isMobile) && (
+                <div className="relative">
+                  <ControlButton 
+                    onClick={() => setIsReactionsMenuOpen(!isReactionsMenuOpen)}
+                    icon={<Smile size={isMobile ? 18 : 22} />}
+                    active={isReactionsMenuOpen}
+                    size={isMobile ? "small" : "normal"}
+                    isLandscape={isMobileLandscape}
+                    title="Reactions"
+                  />
                 <AnimatePresence>
                   {isReactionsMenuOpen && (
                     <>
@@ -3124,7 +3694,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         className={cn(
-                          "bg-[#282a2e]/98 backdrop-blur-2xl rounded-full shadow-2xl border border-white/10 px-3 py-1.5 z-[120] flex items-center gap-1.5 select-none",
+                          "bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 px-3 py-2 z-[120] flex items-center gap-1.5 select-none",
                           isMobileLandscape 
                             ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2" 
                             : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
@@ -3135,7 +3705,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                             key={emoji}
                             type="button"
                             onClick={() => { sendReaction(emoji); setIsReactionsMenuOpen(false); }}
-                            className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center text-lg sm:text-xl hover:bg-white/15 rounded-full transition-transform active:scale-125 cursor-pointer"
+                            className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center text-lg sm:text-xl hover:bg-white/15 rounded-xl transition-transform active:scale-125 cursor-pointer"
                           >
                             {emoji}
                           </button>
@@ -3145,21 +3715,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   )}
                 </AnimatePresence>
               </div>
+              )}
 
-              {/* End Call Button (Joined in the center button group) */}
-              <button 
-                type="button"
-                onClick={() => navigate('/')}
-                className={cn(
-                  "bg-[#ea4335] hover:bg-[#d93025] text-white flex items-center justify-center transition-all shadow-md active:scale-95 cursor-pointer",
-                  isMobile || isMobileLandscape ? "w-[44px] h-[44px] rounded-full" : "w-[48px] h-[48px] rounded-full"
-                )}
-                title="Leave Call"
-              >
-                <PhoneOff size={isMobile || isMobileLandscape ? 18 : 20} />
-              </button>
-
-              {/* More Options (3 Dots) */}
+              {/* More Options (3 Dots) - Houses Overflow Items with Slide-Up Sheet on Mobile */}
               <div className="relative">
                 <ControlButton 
                   onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
@@ -3169,128 +3727,444 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   isLandscape={isMobileLandscape}
                   title="More options"
                 />
+                {isMobile && !isMobileLandscape && (chatMessages.length > 0 || pendingParticipants.length > 0) && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-slate-400 rounded-full ring-2 ring-[#202124] pointer-events-none" />
+                )}
 
                 <AnimatePresence>
                   {isMoreMenuOpen && (
                     <>
-                      <div className="fixed inset-0 z-[110]" onClick={() => setIsMoreMenuOpen(false)} />
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        className={cn(
-                          "w-72 sm:w-80 bg-[#282a2e]/98 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/10 p-3 z-[120] overflow-y-auto custom-scroll",
-                          isMobileLandscape 
-                            ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[90vh]" 
-                            : "absolute bottom-full mb-3 right-0 sm:left-1/2 sm:-translate-x-1/2 max-w-[calc(100vw-24px)] max-h-[80vh]"
-                        )}
-                      >
-                        {isMobile && (
-                          <div className="p-2 flex items-center justify-between gap-1 mb-3 border-b border-white/10 pb-3 overflow-x-auto">
-                            {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '🤔', '👎'].map(emoji => (
+                      {/* Mobile Slide-Up Bottom Sheet */}
+                      {isMobile && !isMobileLandscape ? (
+                        <>
+                          <motion.div 
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-xs"
+                            onClick={() => setIsMoreMenuOpen(false)} 
+                          />
+                          <motion.div
+                            initial={{ y: "100%" }}
+                            animate={{ y: 0 }}
+                            exit={{ y: "100%" }}
+                            transition={{ type: "spring", damping: 28, stiffness: 280 }}
+                            className="fixed inset-x-0 bottom-0 z-[130] bg-[#1a1c1e] text-white rounded-t-3xl border-t border-white/10 shadow-2xl pb-8 max-h-[84vh] flex flex-col overflow-hidden"
+                          >
+                            {/* Drag handle */}
+                            <div 
+                              className="w-10 h-1 bg-white/20 rounded-full mx-auto my-3 cursor-pointer shrink-0" 
+                              onClick={() => setIsMoreMenuOpen(false)}
+                            />
+
+                            {/* Menu Actions Scroll Container */}
+                            <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-4">
+                              {/* Section 1: Collaboration & Workspace */}
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-3 pb-1">
+                                  Collaboration
+                                </p>
+                                
+                                <button 
+                                  type="button"
+                                  onClick={() => { setActiveTab('whiteboard'); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer group"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <LayoutGrid size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Joint Workspace</span>
+                                  </div>
+                                </button>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { setActiveTab('chat'); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer group"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <MessageSquare size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">In-Call Chat</span>
+                                  </div>
+                                  {chatMessages.length > 0 && (
+                                    <span className="text-xs text-slate-400 font-normal">
+                                      ({chatMessages.length})
+                                    </span>
+                                  )}
+                                </button>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { setActiveTab('notes'); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer group"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <FileText size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Meeting Minutes</span>
+                                  </div>
+                                </button>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { setActiveTab('host_controls'); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer group"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <ShieldCheck size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Host Controls</span>
+                                  </div>
+                                  {pendingParticipants.length > 0 && (
+                                    <span className="text-xs text-slate-400 font-normal">
+                                      ({pendingParticipants.length} waiting)
+                                    </span>
+                                  )}
+                                </button>
+                              </div>
+
+                              <div className="h-px bg-white/10 mx-2" />
+
+                              {/* Section 2: In-Call Media & Video Controls */}
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-3 pb-1">
+                                  In-Call Controls
+                                </p>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { 
+                                    setIsMoreMenuOpen(false); 
+                                    setSettingsCategory('effects'); 
+                                    setActiveTab('settings'); 
+                                  }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <ImageIcon size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Visual Effects</span>
+                                  </div>
+                                  <span className="text-xs font-normal text-slate-400 capitalize">
+                                    {selectedBg === 'none' ? 'Off' : selectedBg}
+                                  </span>
+                                </button>
+
+                                {localParticipant.isCameraEnabled && (
+                                  <button 
+                                    type="button"
+                                    onClick={() => { handleFlipCamera(); setIsMoreMenuOpen(false); }}
+                                    className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                        <SwitchCamera size={18} />
+                                      </div>
+                                      <span className="text-sm font-medium text-white block">Flip Camera</span>
+                                    </div>
+                                    <span className="text-xs font-normal text-slate-400">
+                                      {facingMode === 'user' ? 'Front' : 'Back'}
+                                    </span>
+                                  </button>
+                                )}
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { toggleHandRaise(); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <Hand size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">
+                                      {isHandRaised ? 'Lower Hand' : 'Raise Hand'}
+                                    </span>
+                                  </div>
+                                </button>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { setIsCaptionsEnabled(!isCaptionsEnabled); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <Languages size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Live Captions</span>
+                                  </div>
+                                  <span className="text-xs font-normal text-slate-400">
+                                    {isCaptionsEnabled ? 'On' : 'Off'}
+                                  </span>
+                                </button>
+                              </div>
+
+                              <div className="h-px bg-white/10 mx-2" />
+
+                              {/* Section 3: View & Settings */}
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-3 pb-1">
+                                  View & Settings
+                                </p>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { setLayoutMode(layoutMode === 'tiled' ? 'sidebar' : 'tiled'); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <LayoutIcon size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Layout View</span>
+                                  </div>
+                                  <span className="text-xs font-normal text-slate-400 capitalize">
+                                    {layoutMode}
+                                  </span>
+                                </button>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <Settings size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Settings</span>
+                                  </div>
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        </>
+                      ) : (
+                        /* Desktop / Landscape Floating Dropdown Menu */
+                        <>
+                          <div className="fixed inset-0 z-[110]" onClick={() => setIsMoreMenuOpen(false)} />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className={cn(
+                              "w-72 sm:w-80 bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-3 z-[130] overflow-y-auto custom-scroll",
+                              isMobileLandscape 
+                                ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[90vh]" 
+                                : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2 max-w-[min(340px,calc(100vw-24px))] max-h-[80vh]"
+                            )}
+                          >
+                            {/* In-Call Quick Reactions */}
+                            <div className="p-1.5 bg-white/5 rounded-xl border border-white/10 mb-2">
+                              <div className="flex items-center justify-between gap-1">
+                                {['💖', '👍', '🎉', '👏', '😂', '😮', '😢', '👎'].map(emoji => (
+                                  <button 
+                                    key={emoji}
+                                    type="button"
+                                    onClick={() => { sendReaction(emoji); setIsMoreMenuOpen(false); }}
+                                    className="w-7 h-7 flex items-center justify-center text-base hover:bg-white/15 rounded-lg transition-transform active:scale-125 cursor-pointer"
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* In-Call Media & Actions */}
+                            <div className="space-y-1 mb-1.5">
                               <button 
-                                key={emoji}
-                                onClick={() => { sendReaction(emoji); setIsMoreMenuOpen(false); }}
-                                className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-full transition-all active:scale-90 shrink-0"
+                                type="button"
+                                onClick={() => { toggleHandRaise(); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors cursor-pointer"
                               >
-                                {emoji}
+                                <div className="flex items-center gap-3">
+                                  <Hand size={16} className={isHandRaised ? "text-amber-400" : "text-slate-400"} />
+                                  <span>{isHandRaised ? "Lower Hand" : "Raise Hand"}</span>
+                                </div>
                               </button>
-                            ))}
-                          </div>
-                        )}
 
-                        {/* Activities & Tools */}
-                        <div className="space-y-1 mb-1">
-                          <button 
-                            onClick={() => { setActiveTab('tools'); setIsMoreMenuOpen(false); }}
-                            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <LayoutGrid size={16} className="text-slate-400" />
-                              <span>Tools & Workspace</span>
+                              <button 
+                                type="button"
+                                onClick={() => { setIsCaptionsEnabled(!isCaptionsEnabled); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Languages size={16} className={isCaptionsEnabled ? "text-emerald-400" : "text-slate-400"} />
+                                  <span>Live Captions</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  {isCaptionsEnabled ? "On" : "Off"}
+                                </span>
+                              </button>
+
+                              <button 
+                                type="button"
+                                onClick={() => { 
+                                  setIsMoreMenuOpen(false); 
+                                  setSettingsCategory('effects'); 
+                                  setActiveTab('settings'); 
+                                }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <ImageIcon size={16} className="text-slate-400" />
+                                  <span>Visual Effects</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-normal capitalize">
+                                  {selectedBg === 'none' ? 'Off' : selectedBg}
+                                </span>
+                              </button>
                             </div>
-                          </button>
 
-                          <button 
-                            onClick={() => { setActiveTab('host_controls'); setIsMoreMenuOpen(false); }}
-                            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <ShieldCheck size={16} className="text-slate-400" />
-                              <span>Host controls</span>
+                            <div className="h-px bg-white/10 my-1.5" />
+
+                            {/* Activities & Host on Desktop */}
+                            <div className="space-y-1 mb-1">
+                              <button 
+                                type="button"
+                                onClick={() => { setActiveTab('whiteboard'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <LayoutGrid size={16} className="text-slate-400" />
+                                  <span>Joint Workspace</span>
+                                </div>
+                              </button>
+
+                              <button 
+                                type="button"
+                                onClick={() => { setActiveTab('chat'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <MessageSquare size={16} className="text-slate-400" />
+                                  <span>In-Call Chat</span>
+                                </div>
+                              </button>
+
+                              <button 
+                                type="button"
+                                onClick={() => { setActiveTab('participants'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Users size={16} className="text-slate-400" />
+                                  <span>Participants</span>
+                                </div>
+                              </button>
+
+                              <button 
+                                type="button"
+                                onClick={() => { setActiveTab('host_controls'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/10 rounded-xl text-xs text-white transition-colors cursor-pointer"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <ShieldCheck size={16} className="text-slate-400" />
+                                  <span>Host Controls</span>
+                                </div>
+                                {pendingParticipants.length > 0 && (
+                                  <span className="text-[10px] text-slate-400 font-normal">
+                                    ({pendingParticipants.length})
+                                  </span>
+                                )}
+                              </button>
                             </div>
-                            {pendingParticipants.length > 0 && (
-                              <span className="text-[10px] bg-amber-500 text-black font-bold px-1.5 py-0.5 rounded-full">
-                                {pendingParticipants.length}
-                              </span>
-                            )}
-                          </button>
-                        </div>
 
-                        <div className="h-px bg-white/10 my-2" />
+                            <div className="h-px bg-white/10 my-1.5" />
 
-                        {/* Layout & View */}
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 px-2 pt-1">
-                            Layout & View
-                          </p>
-                          <button 
-                            onClick={() => { setLayoutMode('tiled'); setIsMoreMenuOpen(false); }}
-                            className={cn(
-                              "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                              layoutMode === 'tiled' ? "text-[#4285f4] bg-[#4285f4]/10" : "text-white"
-                            )}
-                          >
-                            <LayoutIcon size={16} className={layoutMode === 'tiled' ? "text-[#4285f4]" : "text-slate-400"} />
-                            <span>Tiled layout</span>
-                          </button>
-                          <button 
-                            onClick={() => { setLayoutMode('sidebar'); setIsMoreMenuOpen(false); }}
-                            className={cn(
-                              "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                              layoutMode === 'sidebar' ? "text-[#4285f4] bg-[#4285f4]/10" : "text-white"
-                            )}
-                          >
-                            <Monitor size={16} className={layoutMode === 'sidebar' ? "text-[#4285f4]" : "text-slate-400"} />
-                            <span>Sidebar layout</span>
-                          </button>
-                          <button 
-                            onClick={() => { setLayoutMode('imo'); setIsMoreMenuOpen(false); }}
-                            className={cn(
-                              "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors",
-                              layoutMode === 'imo' ? "text-[#4285f4] bg-[#4285f4]/10" : "text-white"
-                            )}
-                          >
-                            <LayoutIcon size={16} className={cn("text-slate-400", layoutMode === 'imo' && "text-[#4285f4] rotate-90")} />
-                            <span>IMO view (filmstrip)</span>
-                          </button>
-                          <button 
-                            onClick={() => { setHideNonVideo(!hideNonVideo); setIsMoreMenuOpen(false); }}
-                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                          >
-                            <UserX size={16} className="text-slate-400" />
-                            <span>{hideNonVideo ? "Show non-video" : "Hide non-video"}</span>
-                          </button>
+                            {/* Layout & View */}
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-2 pt-1">
+                                Layout & View
+                              </p>
+                              <button 
+                                type="button"
+                                onClick={() => { setLayoutMode('tiled'); setIsMoreMenuOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors cursor-pointer",
+                                  layoutMode === 'tiled' ? "text-white bg-white/10 font-medium" : "text-slate-300"
+                                )}
+                              >
+                                <LayoutIcon size={16} className="text-slate-400" />
+                                <span>Tiled layout</span>
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => { setLayoutMode('sidebar'); setIsMoreMenuOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors cursor-pointer",
+                                  layoutMode === 'sidebar' ? "text-white bg-white/10 font-medium" : "text-slate-300"
+                                )}
+                              >
+                                <Monitor size={16} className="text-slate-400" />
+                                <span>Sidebar layout</span>
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => { setLayoutMode('imo'); setIsMoreMenuOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs transition-colors cursor-pointer",
+                                  layoutMode === 'imo' ? "text-white bg-white/10 font-medium" : "text-slate-300"
+                                )}
+                              >
+                                <LayoutIcon size={16} className="text-slate-400 rotate-90" />
+                                <span>IMO view (filmstrip)</span>
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => { setHideNonVideo(!hideNonVideo); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-slate-300 transition-colors cursor-pointer"
+                              >
+                                <UserX size={16} className="text-slate-400" />
+                                <span>{hideNonVideo ? "Show non-video" : "Hide non-video"}</span>
+                              </button>
 
-                          <div className="h-px bg-white/10 my-1" />
-                          <button 
-                            onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); }}
-                            className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-white transition-colors"
-                          >
-                            <Settings size={16} className="text-slate-400" />
-                            <span>Settings</span>
-                          </button>
-                        </div>
-                      </motion.div>
+                              <div className="h-px bg-white/10 my-1" />
+                              <button 
+                                type="button"
+                                onClick={() => { setActiveTab('settings'); setIsMoreMenuOpen(false); }}
+                                className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-slate-300 hover:text-white transition-colors cursor-pointer"
+                              >
+                                <Settings size={16} className="text-slate-400" />
+                                <span>Settings</span>
+                              </button>
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
                     </>
                   )}
                 </AnimatePresence>
               </div>
-            </div>
 
-            {/* Right: Tab Buttons (Host Controls, 3x3 Tools, Chat, Settings, Collapse) */}
+              {/* End Call Button - Squircle Matching Other Buttons */}
+              <button 
+                type="button"
+                onClick={() => navigate('/')}
+                className={cn(
+                  "bg-[#ea4335] hover:bg-[#d93025] text-white flex items-center justify-center transition-all shadow-xs active:scale-95 cursor-pointer shrink-0",
+                  isMobile || isMobileLandscape 
+                    ? "w-[46px] h-[44px] rounded-[18px]" 
+                    : "w-[48px] h-[48px] sm:w-[52px] sm:h-[48px] rounded-2xl"
+                )}
+                title="Leave Call"
+              >
+                <PhoneOff size={isMobile || isMobileLandscape ? 17 : 20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Right: Tab Buttons (Host Controls, 4-Square Tools, Chat, Settings, Collapse) */}
+          {!isMobile && (
             <div className={cn(
-              "flex items-center",
+              "flex items-center z-10 pointer-events-auto",
               isMobileLandscape ? "flex-col gap-2 w-full mt-auto pt-2" : "flex-1 justify-end gap-1.5 sm:gap-2"
             )}>
               {!isMobileLandscape && (
@@ -3304,7 +4178,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     title="Host Controls" 
                   />
 
-                  {/* 3x3 Dots Tools Button */}
+                  {/* 4-Square Tools Button */}
                   <TabButton 
                     active={activeTab === 'tools' || activeTab === 'whiteboard' || activeTab === 'files'} 
                     onClick={() => setActiveTab(activeTab === 'tools' || activeTab === 'whiteboard' || activeTab === 'files' ? null : 'tools')} 
@@ -3342,6 +4216,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 {isMobileLandscape ? <ChevronRight size={18} /> : <ChevronDown size={20} />}
               </button>
             </div>
+          )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -3706,17 +4581,18 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
         </div>
       </div>
 
-      {/* Hand Raised */}
+      {/* Hand Raised - Icon ONLY, no text */}
       <AnimatePresence>
         {isHandRaised && (
           <motion.div 
-            initial={{ scale: 0, y: 20 }}
+            initial={{ scale: 0, y: 12 }}
             animate={{ scale: 1, y: 0 }}
-            exit={{ scale: 0, y: 20 }}
-            className="absolute top-3 left-3 bg-yellow-400 p-2 rounded-lg shadow-xl z-20 flex items-center gap-2"
+            exit={{ scale: 0, y: 12 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+            className="absolute top-3 left-3 bg-amber-400 text-slate-950 w-8 h-8 rounded-xl shadow-lg z-20 flex items-center justify-center backdrop-blur-sm pointer-events-none"
+            title="Hand raised"
           >
-            <Hand size={18} className="text-bg-dark" />
-            <span className="text-[11px] font-bold text-bg-dark uppercase tracking-tighter">Raised</span>
+            <Hand size={16} className="text-slate-950" />
           </motion.div>
         )}
       </AnimatePresence>
@@ -3743,12 +4619,12 @@ function ParticipantItem(props: any) {
         {avatarUrl ? (
           <img src={avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-gray-200" referrerPolicy="no-referrer" />
         ) : (
-          <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold border border-blue-200 shrink-0">
+          <div className="w-8 h-8 bg-stone-100 text-slate-700 rounded-xl flex items-center justify-center text-xs font-medium border border-neutral-200/70 shrink-0">
             {participant?.identity ? participant.identity.charAt(0).toUpperCase() : "?"}
           </div>
         )}
         <div className="flex flex-col min-w-0">
-          <span className="text-sm font-medium text-gray-900 truncate">
+          <span className="text-sm font-medium text-slate-900 truncate">
             {participant?.identity?.split('#')[0] || "User"} {isLocal && "(You)"}
           </span>
         </div>
@@ -3758,12 +4634,12 @@ function ParticipantItem(props: any) {
           <button
             onClick={() => onSendFile(participant.identity)}
             title={`Send file to ${participant.identity.split('#')[0]}`}
-            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
           >
             <Paperclip size={14} />
           </button>
         )}
-        {!participant?.isMicrophoneEnabled ? <MicOff size={14} className="text-accent-red" /> : <Mic size={14} className="text-gray-500" />}
+        {!participant?.isMicrophoneEnabled ? <MicOff size={14} className="text-rose-500" /> : <Mic size={14} className="text-slate-400" />}
       </div>
     </div>
   );
@@ -3777,20 +4653,21 @@ function ControlButton({ active, onClick, icon, danger, warning, highlight, micV
         onClick={onClick}
         title={title}
         className={cn(
-          "transition-all duration-200 ease-out flex items-center justify-center flex-shrink-0 shadow-sm cursor-pointer",
+          "transition-all duration-150 ease-out flex items-center justify-center flex-shrink-0 cursor-pointer shadow-xs active:scale-95",
           isSmall 
-            ? "w-[42px] h-[42px] sm:w-[46px] sm:h-[46px] rounded-full" 
-            : (isLandscape ? "w-[46px] h-[46px] rounded-[16px]" : "w-[50px] h-[50px] sm:w-[54px] sm:h-[54px] rounded-full"),
+            ? "w-[46px] h-[44px] rounded-[18px]" 
+            : (isLandscape ? "w-[46px] h-[44px] rounded-[18px]" : "w-[48px] h-[48px] sm:w-[52px] sm:h-[48px] rounded-2xl"),
           hasDropdown ? (isLandscape ? "rounded-b-none border-b border-white/10" : "rounded-r-none border-r border-white/10") : "",
           micVideo ? (
-            enabled ? "bg-[#3c4043] text-white hover:bg-[#4a4e52]" : "bg-[#ea4335] text-white hover:bg-[#d93025]"
+            enabled 
+              ? "bg-[#2a2d32] text-white hover:bg-[#383b40]" 
+              : "bg-[#fce8e6] text-[#b3261e] hover:bg-[#fad2cf] border border-red-200/50"
           ) : (
             danger && !active ? "bg-[#ea4335] text-white hover:bg-[#d93025]" : 
-            warning && active ? "bg-amber-400 text-slate-950 hover:bg-amber-300 font-bold" :
-            highlight && active ? "bg-[#4285f4] text-white hover:bg-[#3367d6]" :
-            active ? "bg-[#4285f4] text-white hover:bg-[#3367d6]" : "bg-[#3c4043] text-white hover:bg-[#4a4e52]"
-          ),
-          "active:scale-95"
+            warning && active ? "bg-amber-100 text-amber-900 border border-amber-300/60 font-medium" :
+            highlight && active ? "bg-white/25 text-white border border-white/20" :
+            active ? "bg-white/20 text-white" : "bg-[#2a2d32] text-white hover:bg-[#383b40]"
+          )
         )}
       >
         {icon}
@@ -3799,10 +4676,10 @@ function ControlButton({ active, onClick, icon, danger, warning, highlight, micV
         <button
           onClick={onDropdownClick}
           className={cn(
-            "bg-[#3c4043] text-white/70 hover:text-white hover:bg-[#4a4e52] transition-all flex items-center justify-center cursor-pointer",
+            "bg-[#2a2d32] text-white/70 hover:text-white hover:bg-[#383b40] transition-all flex items-center justify-center cursor-pointer",
             isLandscape 
-              ? "w-[46px] h-[16px] rounded-b-[16px] border-t border-white/10" 
-              : (isSmall ? "w-[20px] h-[42px] sm:h-[46px] rounded-r-full border-l border-white/10" : "w-[22px] h-[50px] sm:h-[54px] rounded-r-full border-l border-white/10")
+              ? "w-[46px] h-[16px] rounded-b-2xl border-t border-white/10" 
+              : (isSmall ? "w-[18px] h-[44px] rounded-r-[18px] border-l border-white/10" : "w-[20px] h-[48px] rounded-r-2xl border-l border-white/10")
           )}
         >
           {isLandscape ? (
@@ -3822,13 +4699,13 @@ function TabButton({ active, onClick, icon, badge, title }: any) {
       onClick={onClick}
       title={title}
       className={cn(
-        "w-10 h-10 sm:w-11 sm:h-11 rounded-full transition-all duration-200 ease-out relative flex items-center justify-center cursor-pointer",
-        active ? "bg-white/20 text-white shadow-md" : "bg-transparent text-slate-300 hover:bg-white/10 hover:text-white"
+        "w-10 h-10 sm:w-11 sm:h-11 rounded-2xl transition-all duration-150 ease-out relative flex items-center justify-center cursor-pointer shadow-xs",
+        active ? "bg-white/20 text-white shadow-xs" : "bg-transparent text-slate-300 hover:bg-white/10 hover:text-white"
       )}
     >
       {icon}
       {badge !== undefined && (
-        <span className="absolute -top-1 -right-1 bg-[#4285f4] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center border-2 border-[#202124]">
+        <span className="absolute -top-1 -right-1 bg-slate-800 text-white text-[10px] font-medium px-1.5 py-0.5 rounded-lg min-w-[18px] text-center border border-white/20">
           {badge}
         </span>
       )}
@@ -3859,9 +4736,7 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
 
   useEffect(() => {
     if (!uid) return;
-    console.log("[NotesPanel] Fetching notes for Komu UID:", uid);
     try {
-      // Query notes collection for this user's UID in the komu project
       const q = query(
         collection(komuDb, 'notes'),
         where('uid', '==', uid),
@@ -3870,7 +4745,6 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
       
       const unsubscribe = onSnapshot(q, (snapshot) => {
         let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        // Manual sort in client
         data.sort((a: any, b: any) => {
           const tA = a.updatedAt?.toMillis?.() || 0;
           const tB = b.updatedAt?.toMillis?.() || 0;
@@ -3878,7 +4752,6 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         });
         setNotes(data);
 
-        // Update selected note if it was updated in background
         if (selectedNote) {
           const updatedSelected = data.find(n => n.id === selectedNote.id);
           if (updatedSelected && updatedSelected.body !== selectedNote.body) {
@@ -3886,7 +4759,7 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
           }
         }
       }, (err) => {
-        console.error("NotesPanel fetch error (komu-notes project)::", err);
+        console.error("NotesPanel fetch error:", err);
       });
       return () => unsubscribe();
     } catch (err) {
@@ -3928,7 +4801,7 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
       setNewNoteBody("");
       setIsCreatingNote(false);
     } catch (err) {
-      console.error("Failed to add note to komu-notes project:", err);
+      console.error("Failed to add note:", err);
     }
   };
 
@@ -3953,23 +4826,20 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
 
   if (!user || !komuUser) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-8">
-        <div className="w-24 h-24 bg-blue-50 rounded-3xl flex items-center justify-center text-blue-600 shadow-inner relative">
-          <FileText size={48} />
-          <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg">
-             <ShieldCheck size={18} className="text-green-500" />
-          </div>
+      <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
+        <div className="w-16 h-16 bg-stone-100 rounded-2xl flex items-center justify-center text-slate-700 border border-neutral-200/60">
+          <FileText size={32} />
         </div>
-        <div className="space-y-3">
-           <h3 className="text-xl font-bold text-gray-900 leading-tight">Secure Notes Sync</h3>
-           <p className="text-sm text-gray-500 max-w-[240px] mx-auto">Access your Komu Notes directly in the meeting. Your notes are private and encrypted.</p>
+        <div className="space-y-2">
+           <h3 className="text-lg font-medium text-slate-900 leading-tight">Secure Notes Sync</h3>
+           <p className="text-xs text-slate-500 max-w-[260px] mx-auto leading-relaxed">Access and sync notes directly during your conference. Private and encrypted.</p>
         </div>
         <button 
           onClick={komuLogin}
-          className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-500/20 active:scale-95 flex items-center justify-center gap-2"
+          className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-xl shadow-xs transition-all active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
         >
-          <Plus size={20} />
-          <span>{user ? "Link Komu Account" : "Sign in with Google"}</span>
+          <Plus size={16} />
+          <span>{user ? "Link Account" : "Sign in with Google"}</span>
         </button>
       </div>
     );
@@ -3977,39 +4847,39 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
 
   if (selectedNote) {
     return (
-      <div className="flex flex-col h-full bg-white -m-5 p-4 z-20">
-        <div className="flex items-center gap-3 mb-4 sticky top-0 bg-white z-10 pb-2 border-b border-gray-50">
+      <div className="flex flex-col h-full bg-white -m-5 p-5 z-20">
+        <div className="flex items-center gap-3 mb-4 sticky top-0 bg-white z-10 pb-3 border-b border-neutral-200/60">
           <button 
              onClick={() => { handleUpdateNote(); setSelectedNote(null); }} 
-             className="p-1.5 hover:bg-gray-100 rounded-full text-gray-500 transition-all flex items-center justify-center"
+             className="p-2 hover:bg-stone-100 rounded-xl text-slate-500 hover:text-slate-900 transition-colors flex items-center justify-center cursor-pointer"
              title="Back to list"
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft size={18} />
           </button>
           <div className="flex-1">
              <input 
                 value={selectedNote.title}
                 onChange={(e) => setSelectedNote({...selectedNote, title: e.target.value})}
                 placeholder="Title"
-                className="w-full text-lg font-bold text-gray-900 bg-transparent border-none outline-none placeholder:text-gray-300"
+                className="w-full text-base font-semibold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300"
                 onBlur={handleUpdateNote}
              />
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button 
               onClick={handleUpdateNote} 
               disabled={isSaving}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all shadow-md shadow-blue-500/10"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl disabled:opacity-50 transition-colors shadow-xs cursor-pointer"
             >
-              <Save size={14} />
+              <Save size={13} />
               <span>{isSaving ? "Saving..." : "Save"}</span>
             </button>
             <button 
               onClick={() => toggleTrash(selectedNote.id, true)} 
-              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
               title="Delete note"
             >
-              <Trash2 size={18} />
+              <Trash2 size={16} />
             </button>
           </div>
         </div>
@@ -4017,11 +4887,11 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
           value={selectedNote.body}
           onChange={(e) => setSelectedNote({...selectedNote, body: e.target.value})}
           placeholder="Start writing..."
-          className="flex-1 w-full text-sm text-gray-800 bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-gray-300 custom-scroll"
+          className="flex-1 w-full text-sm text-slate-800 bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-slate-300 custom-scroll"
           onBlur={handleUpdateNote}
         />
-        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-           <span className="text-[10px] text-gray-400 font-medium">
+        <div className="mt-4 pt-4 border-t border-neutral-200/60 flex items-center justify-between">
+           <span className="text-[10px] text-slate-400 font-medium">
              Last edited {selectedNote.updatedAt?.toDate() ? format(selectedNote.updatedAt.toDate(), 'PPp') : 'Just now'}
            </span>
         </div>
@@ -4032,22 +4902,22 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="mb-4 space-y-4 shrink-0">
-        <div className="bg-blue-50/50 rounded-2xl p-4 border border-blue-100/50">
+        <div className="bg-stone-50 rounded-2xl p-4 border border-neutral-200/70">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600">
-                <Languages size={20} />
+              <div className="w-9 h-9 rounded-xl bg-stone-200/70 flex items-center justify-center text-slate-700">
+                <Languages size={18} />
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-gray-900 leading-none mb-1">Auto-Transcript</span>
-                <span className="text-[10px] text-gray-500 font-medium leading-none">Save meeting to notes</span>
+                <span className="text-xs font-semibold text-slate-900 leading-none mb-1">Auto-Transcript</span>
+                <span className="text-[10px] text-slate-500 font-normal leading-none">Save meeting to notes</span>
               </div>
             </div>
             <button 
                onClick={() => setAutoSaveTranscript(!autoSaveTranscript)}
                className={cn(
-                 "w-10 h-5 rounded-full relative transition-all duration-300",
-                 autoSaveTranscript ? "bg-blue-600" : "bg-gray-300"
+                 "w-10 h-5 rounded-full relative transition-all duration-300 cursor-pointer",
+                 autoSaveTranscript ? "bg-slate-900" : "bg-neutral-300"
                )}
             >
               <div className={cn(
@@ -4059,50 +4929,50 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         </div>
 
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 peer-focus:text-blue-500 transition-colors" size={16} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 peer-focus:text-slate-800 transition-colors" size={16} />
           <input 
             type="text"
             placeholder="Search notes..."
             value={searchNotesTerm}
             onChange={(e) => setSearchNotesTerm(e.target.value)}
-            className="peer w-full pl-10 pr-4 py-2 bg-gray-100 border-2 border-transparent rounded-xl text-sm text-black focus:ring-4 focus:ring-blue-500/10 focus:bg-white focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
+            className="peer w-full pl-10 pr-4 py-2.5 bg-stone-50 border border-neutral-200/80 rounded-xl text-sm text-slate-900 focus:ring-1 focus:ring-slate-400 focus:bg-white focus:border-slate-400 outline-none transition-all font-normal placeholder:text-slate-400"
           />
         </div>
         {!isCreatingNote ? (
           <button 
             onClick={() => setIsCreatingNote(true)}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-3 rounded-xl hover:bg-blue-700 transition-all font-bold shadow-lg shadow-blue-600/20"
+            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white px-4 py-3 rounded-xl hover:bg-slate-800 transition-all font-medium text-xs shadow-xs cursor-pointer"
           >
-            <Plus size={18} />
-            Take a note
+            <Plus size={16} />
+            <span>Take a note</span>
           </button>
         ) : (
-          <div className="bg-white border border-blue-200 rounded-2xl p-4 shadow-xl space-y-3">
+          <div className="bg-white border border-neutral-200/80 rounded-2xl p-4 shadow-sm space-y-3">
             <input 
               type="text"
               placeholder="Title"
               autoFocus
               value={newNoteTitle}
               onChange={(e) => setNewNoteTitle(e.target.value)}
-              className="w-full text-base font-bold bg-transparent border-none outline-none text-gray-900 placeholder:text-gray-400"
+              className="w-full text-sm font-semibold bg-transparent border-none outline-none text-slate-900 placeholder:text-slate-400"
             />
             <textarea 
               placeholder="Take a note..."
               value={newNoteBody}
               onChange={(e) => setNewNoteBody(e.target.value)}
-              className="w-full text-sm bg-transparent border-none outline-none resize-none min-h-[100px] text-gray-800 placeholder:text-gray-400"
+              className="w-full text-xs bg-transparent border-none outline-none resize-none min-h-[90px] text-slate-700 placeholder:text-slate-400 leading-relaxed"
             />
             <div className="flex items-center justify-between pt-2">
                <button 
                 onClick={() => { setIsCreatingNote(false); setNewNoteTitle(""); setNewNoteBody(""); }}
-                className="text-xs font-bold text-gray-500 hover:text-gray-700"
+                className="text-xs font-medium text-slate-500 hover:text-slate-800 cursor-pointer"
               >
                 Cancel
               </button>
               <button 
                 disabled={!newNoteTitle.trim() && !newNoteBody.trim()}
                 onClick={handleAddNote}
-                className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all font-medium"
+                className="px-4 py-2 bg-slate-900 text-white text-xs font-medium rounded-xl hover:bg-slate-800 disabled:opacity-40 transition-all cursor-pointer"
               >
                 Save note
               </button>
@@ -4111,33 +4981,33 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         )}
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto custom-scroll pr-2">
+      <div className="flex-1 space-y-3 overflow-y-auto custom-scroll pr-1">
         {notes
           .filter(n => n.title.toLowerCase().includes(searchNotesTerm.toLowerCase()) || n.body.toLowerCase().includes(searchNotesTerm.toLowerCase()))
           .map(note => (
           <div 
             key={note.id} 
             onClick={() => setSelectedNote(note)}
-            className="group p-4 bg-white border border-gray-100 rounded-2xl hover:border-blue-200 hover:shadow-md transition-all relative cursor-pointer"
+            className="group p-4 bg-white border border-neutral-200/70 rounded-2xl hover:border-slate-400 hover:shadow-xs transition-all relative cursor-pointer"
           >
-            <h4 className="font-bold text-gray-900 text-sm mb-1">{note.title || "Untitled"}</h4>
-            <p className="text-gray-600 text-xs line-clamp-3 leading-relaxed whitespace-pre-wrap">
+            <h4 className="font-semibold text-slate-900 text-xs mb-1">{note.title || "Untitled"}</h4>
+            <p className="text-slate-600 text-xs line-clamp-3 leading-relaxed whitespace-pre-wrap">
               {note.body}
             </p>
             <div className="mt-3 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
-              <span className="text-[10px] text-gray-400 font-medium">
+              <span className="text-[10px] text-slate-400 font-medium">
                 {note.updatedAt?.toDate() ? new Date(note.updatedAt.toDate()).toLocaleDateString() : 'Just now'}
               </span>
               <div className="flex items-center gap-1">
                 <button 
                   onClick={(e) => { e.stopPropagation(); toggleArchive(note.id, !note.isArchive); }} 
-                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-all"
+                  className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-stone-100 rounded-lg transition-all cursor-pointer"
                 >
                   <Archive size={14} />
                 </button>
                 <button 
                   onClick={(e) => { e.stopPropagation(); toggleTrash(note.id, true); }} 
-                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all"
+                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -4146,8 +5016,8 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
           </div>
         ))}
         {notes.length === 0 && !isCreatingNote && (
-          <div className="h-40 flex flex-col items-center justify-center text-center p-6 space-y-3 text-gray-400">
-            <FileText size={32} />
+          <div className="h-40 flex flex-col items-center justify-center text-center p-6 space-y-3 text-slate-400">
+            <FileText size={28} />
             <p className="text-xs">Your saved notes will appear here.</p>
           </div>
         )}
@@ -4155,6 +5025,3 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
     </div>
   );
 });
-
-
-

@@ -3,7 +3,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Pencil, Eraser, Type, Minus, Square, Circle, Undo, Trash2, Download,
   FileText, Plus, Copy, Check, Folder, Search, X, Edit2, Upload,
-  FileCode2, FilePlus, RefreshCw, Layers, Eye, MoreVertical, CopyCheck, ArrowUpDown
+  FileCode2, FilePlus, RefreshCw, Layers, Eye, MoreVertical, CopyCheck, ArrowUpDown,
+  Bot, Loader2, CornerDownLeft, CheckCheck, ChevronLeft, Maximize2, Minimize2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -44,6 +45,8 @@ interface JointWorkspaceProps {
   incomingBroadcast?: any;
   defaultMode?: 'editor' | 'whiteboard';
   onClose?: () => void;
+  isMaximized?: boolean;
+  onToggleMaximize?: () => void;
 }
 
 // Material 3 neutral grey file icon component
@@ -59,7 +62,9 @@ export default function JointWorkspace({
   onBroadcast,
   incomingBroadcast,
   defaultMode = 'editor',
-  onClose
+  onClose,
+  isMaximized = false,
+  onToggleMaximize
 }: JointWorkspaceProps) {
   const [mode, setMode] = useState<'editor' | 'whiteboard'>(defaultMode);
   
@@ -87,6 +92,11 @@ export default function JointWorkspace({
     return files[0]?.id || '';
   });
 
+  // Responsive mobile sub-view: 'list' (files browser) or 'editor' (active document editor)
+  const [mobileView, setMobileView] = useState<'list' | 'editor'>(() => {
+    return files.length > 0 ? 'editor' : 'list';
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
@@ -95,6 +105,14 @@ export default function JointWorkspace({
   const [copiedCode, setCopiedCode] = useState(false);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  // Minimalist AI Assistance State
+  const [isAIAssistOpen, setIsAIAssistOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiAction, setAiAction] = useState<string>('');
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
 
   // Real remote cursors
   const [remoteCursors, setRemoteCursors] = useState<Map<string, RemoteCursor>>(new Map());
@@ -244,6 +262,7 @@ export default function JointWorkspace({
 
     setFiles(prev => [...prev, newFile]);
     setActiveFileId(newFile.id);
+    setMobileView('editor');
     setNewFileName('');
     setIsCreatingFile(false);
 
@@ -294,6 +313,7 @@ export default function JointWorkspace({
 
     setFiles(prev => [...prev, newFile]);
     setActiveFileId(newFile.id);
+    setMobileView('editor');
 
     if (onBroadcast) {
       onBroadcast({
@@ -311,7 +331,12 @@ export default function JointWorkspace({
     const updated = files.filter(f => f.id !== id);
     setFiles(updated);
     if (activeFileId === id) {
-      setActiveFileId(updated.length > 0 ? updated[0].id : '');
+      if (updated.length > 0) {
+        setActiveFileId(updated[0].id);
+      } else {
+        setActiveFileId('');
+        setMobileView('list');
+      }
     }
 
     if (onBroadcast) {
@@ -340,6 +365,7 @@ export default function JointWorkspace({
 
         setFiles(prev => [...prev, newFile]);
         setActiveFileId(newFile.id);
+        setMobileView('editor');
 
         if (onBroadcast) {
           onBroadcast({
@@ -391,6 +417,59 @@ export default function JointWorkspace({
     link.download = activeFile.name;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  // AI Workspace Assistant handler
+  const handleRunAIAssist = async (actionType: string, customInstruction?: string) => {
+    if (!activeFile) return;
+    setAiLoading(true);
+    setAiAction(actionType);
+    setAiResult(null);
+    setAiNotice(null);
+
+    try {
+      const response = await fetch('/api/ai/workspace-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: activeFile.content,
+          action: actionType,
+          instruction: customInstruction || aiPrompt,
+          fileName: activeFile.name
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.result) {
+        setAiResult(data.result);
+      }
+    } catch (err: any) {
+      console.warn("AI workspace assist error:", err);
+      setAiNotice("Could not process request. Please try again.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleApplyAIResult = () => {
+    if (!aiResult || !activeFile) return;
+    handleContentChange(aiResult);
+    setAiResult(null);
+    setIsAIAssistOpen(false);
+    setAiPrompt('');
+  };
+
+  const handleAppendAIResult = () => {
+    if (!aiResult || !activeFile) return;
+    const updatedContent = activeFile.content ? `${activeFile.content}\n\n${aiResult}` : aiResult;
+    handleContentChange(updatedContent);
+    setAiResult(null);
+    setIsAIAssistOpen(false);
+    setAiPrompt('');
   };
 
   // ==========================================
@@ -639,83 +718,73 @@ export default function JointWorkspace({
       <div className="px-3.5 sm:px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between gap-2.5 shrink-0">
         {/* Left: Mode Toggle */}
         <div className="flex items-center gap-2 min-w-0">
-          <div className="inline-flex p-0.5 sm:p-1 bg-[#f1f3f4] rounded-full border border-gray-200/60 shrink-0">
+          <div className="inline-flex p-1 bg-stone-100 rounded-xl border border-neutral-200/70 shrink-0">
             <button
               onClick={() => setMode('editor')}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs transition-all cursor-pointer",
+                "flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer whitespace-nowrap",
                 mode === 'editor' 
-                  ? "bg-white text-gray-900 shadow-xs font-semibold border border-gray-200/50" 
-                  : "text-gray-600 hover:text-gray-900 hover:bg-white/50 font-medium"
+                  ? "bg-white text-slate-900 shadow-xs font-medium border border-neutral-200/60" 
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/50 font-normal"
               )}
             >
-              <FileText size={14} className={mode === 'editor' ? 'text-gray-800' : 'text-gray-500'} />
-              <span>Document & Files</span>
+              <FileText size={14} className={mode === 'editor' ? 'text-slate-800' : 'text-slate-500'} />
+              <span>Documents</span>
             </button>
             <button
               onClick={() => setMode('whiteboard')}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs transition-all cursor-pointer",
+                "flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer whitespace-nowrap",
                 mode === 'whiteboard' 
-                  ? "bg-white text-gray-900 shadow-xs font-semibold border border-gray-200/50" 
-                  : "text-gray-600 hover:text-gray-900 hover:bg-white/50 font-medium"
+                  ? "bg-white text-slate-900 shadow-xs font-medium border border-neutral-200/60" 
+                  : "text-slate-600 hover:text-slate-900 hover:bg-white/50 font-normal"
               )}
             >
-              <Pencil size={14} className={mode === 'whiteboard' ? 'text-gray-800' : 'text-gray-500'} />
-              <span>Whiteboard Canvas</span>
+              <Pencil size={14} className={mode === 'whiteboard' ? 'text-slate-800' : 'text-slate-500'} />
+              <span>Whiteboard</span>
             </button>
           </div>
         </div>
 
-        {/* Right: Actions + Close Button on the exact same line */}
+        {/* Right: Mode Actions & Close Button */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {mode === 'editor' && (
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <button
-                onClick={() => fileUploadInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:border-gray-400 hover:bg-gray-50 text-gray-700 rounded-full text-xs font-medium transition-colors cursor-pointer shadow-xs"
-                title="Upload file from device"
+          {mode === 'whiteboard' && (
+            <div className="flex items-center gap-1.5">
+              <button 
+                onClick={undoCanvas} 
+                className="flex items-center gap-1 px-2.5 py-1 bg-white border border-gray-300 hover:border-gray-400 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium transition-colors cursor-pointer shadow-xs"
+                title="Undo last stroke"
               >
-                <Upload size={13} className="text-gray-600" />
-                <span>Upload</span>
+                <Undo size={13} />
+                <span className="hidden sm:inline">Undo</span>
               </button>
-              <button
-                onClick={() => setIsCreatingFile(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 rounded-full text-xs font-medium transition-colors cursor-pointer shadow-xs"
-                title="Create new file"
+              <button 
+                onClick={clearCanvas} 
+                className="flex items-center gap-1 px-2.5 py-1 bg-white border border-gray-300 hover:border-red-200 hover:bg-red-50 text-gray-700 hover:text-red-600 rounded-lg text-xs font-medium transition-colors cursor-pointer shadow-xs"
+                title="Clear Canvas"
               >
-                <Plus size={14} />
-                <span>New File</span>
+                <Trash2 size={13} />
+                <span className="hidden sm:inline">Clear</span>
+              </button>
+              <button 
+                onClick={exportWhiteboard}
+                className="flex items-center gap-1 px-2.5 py-1 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 rounded-lg text-xs font-medium transition-colors cursor-pointer shadow-xs"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Export</span>
               </button>
             </div>
           )}
 
-          {mode === 'whiteboard' && (
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <button 
-                onClick={undoCanvas} 
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:border-gray-400 hover:bg-gray-50 text-gray-700 rounded-full text-xs font-medium transition-colors cursor-pointer shadow-xs"
-                title="Undo last stroke"
-              >
-                <Undo size={14} />
-                <span>Undo</span>
-              </button>
-              <button 
-                onClick={clearCanvas} 
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:border-red-200 hover:bg-red-50 text-gray-700 hover:text-red-600 rounded-full text-xs font-medium transition-colors cursor-pointer shadow-xs"
-                title="Clear Canvas"
-              >
-                <Trash2 size={14} />
-                <span>Clear</span>
-              </button>
-              <button 
-                onClick={exportWhiteboard}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 rounded-full text-xs font-medium transition-colors cursor-pointer shadow-xs"
-              >
-                <Download size={13} />
-                <span>Export PNG</span>
-              </button>
-            </div>
+          {onToggleMaximize && (
+            <button
+              type="button"
+              onClick={onToggleMaximize}
+              className="p-1.5 hover:bg-stone-100 rounded-xl text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+              title={isMaximized ? "Restore View" : "Maximize Workspace"}
+            >
+              {isMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
           )}
 
           {onClose && (
@@ -736,28 +805,33 @@ export default function JointWorkspace({
       {/* Main Workspace Body */}
       {mode === 'editor' ? (
         <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden bg-white">
-          {/* Left Column: Files Explorer */}
-          <div className="w-full md:w-64 lg:w-72 bg-[#f8f9fa] border-r border-gray-200 flex flex-col shrink-0">
+          {/* Left Column: Files Explorer (Responsive Mobile Full-width or Desktop Sidebar) */}
+          <div className={cn(
+            "w-full md:w-64 lg:w-72 bg-[#f8f9fa] border-r border-gray-200 flex flex-col shrink-0 min-h-0",
+            mobileView === 'editor' ? "hidden md:flex" : "flex flex-1"
+          )}>
             {/* Explorer Header */}
             <div className="p-3 border-b border-gray-200 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-semibold text-gray-700 tracking-wider uppercase">
                 <Folder size={14} className="text-gray-500" />
-                <span>Workspace Files</span>
+                <span>Files</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
+                  type="button"
                   onClick={() => fileUploadInputRef.current?.click()}
-                  className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-200/70 rounded-full transition-colors cursor-pointer"
+                  className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-200/70 rounded-lg transition-colors cursor-pointer"
                   title="Upload File"
                 >
                   <Upload size={14} />
                 </button>
                 <button
+                  type="button"
                   onClick={() => setIsCreatingFile(true)}
-                  className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-200/70 rounded-full transition-colors cursor-pointer"
-                  title="New File"
+                  className="p-1.5 text-gray-700 hover:text-gray-900 hover:bg-gray-200/70 rounded-lg transition-colors cursor-pointer"
+                  title="Create New Document"
                 >
-                  <Plus size={14} />
+                  <Plus size={16} />
                 </button>
               </div>
             </div>
@@ -797,37 +871,38 @@ export default function JointWorkspace({
               )}
             </AnimatePresence>
 
-            {/* Search Filter */}
-            <div className="p-2 border-b border-gray-200">
-              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-gray-200 rounded-xl text-xs">
-                <Search size={13} className="text-gray-400 shrink-0" />
-                <input
-                  type="text"
-                  placeholder="Search files..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-transparent border-none outline-none text-xs text-gray-900 placeholder-gray-400"
-                />
-                {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-700 cursor-pointer">
-                    <X size={12} />
-                  </button>
-                )}
+            {/* Search Filter - Shown only when 4 or more files */}
+            {files.length >= 4 && (
+              <div className="p-2 border-b border-gray-200">
+                <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-gray-200 rounded-xl text-xs">
+                  <Search size={13} className="text-gray-400 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search files..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-transparent border-none outline-none text-xs text-gray-900 placeholder-gray-400"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-700 cursor-pointer">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Files List */}
             <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scroll">
               {filteredFiles.length === 0 ? (
-                <div className="py-8 px-4 text-center">
-                  <p className="text-xs text-gray-500 mb-2">No files in workspace.</p>
-                  <button
-                    onClick={() => setIsCreatingFile(true)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 rounded-full text-xs font-medium shadow-xs transition-colors cursor-pointer"
-                  >
-                    <Plus size={12} />
-                    <span>Create a file</span>
-                  </button>
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center my-auto">
+                  <div className="w-10 h-10 rounded-2xl bg-neutral-100 border border-neutral-200/60 flex items-center justify-center mb-2.5 text-slate-500">
+                    <FileText size={18} />
+                  </div>
+                  <p className="text-xs font-medium text-slate-800 mb-0.5">No files yet</p>
+                  <p className="text-[11px] text-slate-400 max-w-[170px] leading-relaxed">
+                    Use the + icon above to start your first document.
+                  </p>
                 </div>
               ) : (
                 filteredFiles.map(file => {
@@ -870,9 +945,12 @@ export default function JointWorkspace({
                   return (
                     <div
                       key={file.id}
-                      onClick={() => setActiveFileId(file.id)}
+                      onClick={() => {
+                        setActiveFileId(file.id);
+                        setMobileView('editor');
+                      }}
                       className={cn(
-                        "group flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-all",
+                        "group flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium cursor-pointer transition-all",
                         isActive
                           ? "bg-slate-200/80 text-slate-900 font-semibold shadow-xs border border-slate-300/60"
                           : "text-gray-700 hover:bg-gray-200/60 hover:text-gray-900"
@@ -926,26 +1004,34 @@ export default function JointWorkspace({
             </div>
 
             {/* Left Column Footer */}
-            <div className="p-3 border-t border-gray-200 bg-[#f8f9fa] flex items-center justify-between text-[11px] text-gray-500">
-              <span>{files.length} {files.length === 1 ? 'file' : 'files'}</span>
-              <button
-                onClick={() => fileUploadInputRef.current?.click()}
-                className="text-gray-700 hover:text-gray-900 hover:underline font-medium cursor-pointer"
-              >
-                + Drop or Upload
-              </button>
-            </div>
+            {files.length > 0 && (
+              <div className="p-2.5 px-3 border-t border-gray-200 bg-[#f8f9fa] flex items-center justify-between text-[11px] text-gray-500">
+                <span>{files.length} {files.length === 1 ? 'file' : 'files'}</span>
+              </div>
+            )}
           </div>
 
           {/* Right Column: Universal Document / Notes Editor */}
-          <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
+          <div className={cn(
+            "flex-1 flex flex-col min-h-0 bg-white overflow-hidden",
+            mobileView === 'list' ? "hidden md:flex" : "flex flex-1"
+          )}>
             {activeFile ? (
               <>
                 {/* Editor Sub-Header */}
-                <div className="px-4 py-2.5 bg-white border-b border-gray-200 flex items-center justify-between gap-3 shrink-0">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <NeutralFileIcon name={activeFile.name} size={16} />
-                    <span className="text-sm font-semibold text-gray-900 truncate">{activeFile.name}</span>
+                <div className="px-3.5 sm:px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between gap-2.5 shrink-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setMobileView('list')}
+                      className="md:hidden flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer shrink-0"
+                      title="Back to file list"
+                    >
+                      <ChevronLeft size={14} />
+                      <span>Files</span>
+                    </button>
+                    <NeutralFileIcon name={activeFile.name} size={15} />
+                    <span className="text-xs sm:text-sm font-semibold text-gray-900 truncate">{activeFile.name}</span>
                   </div>
 
                   {/* Action Buttons */}
@@ -962,6 +1048,21 @@ export default function JointWorkspace({
                         <span className="text-[9px] text-gray-500">L{cursor.line}</span>
                       </div>
                     ))}
+
+                    {/* Minimalist AI Assistant Toggle */}
+                    <button
+                      onClick={() => setIsAIAssistOpen(!isAIAssistOpen)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer shadow-xs border",
+                        isAIAssistOpen 
+                          ? "bg-slate-200 border-slate-300 text-slate-900" 
+                          : "bg-white border-gray-300 hover:border-gray-400 hover:bg-gray-50 text-gray-700"
+                      )}
+                      title="AI Workspace Assistant"
+                    >
+                      <Bot size={13} className="text-gray-600" />
+                      <span>AI Assist</span>
+                    </button>
 
                     <button
                       onClick={handleCopyCode}
@@ -980,6 +1081,138 @@ export default function JointWorkspace({
                     </button>
                   </div>
                 </div>
+
+                {/* Minimalist AI Assistant Panel */}
+                <AnimatePresence>
+                  {isAIAssistOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="bg-[#f8f9fa] border-b border-gray-200 p-3 space-y-2.5 overflow-hidden text-xs text-gray-700"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 font-medium text-gray-800">
+                          <Bot size={14} className="text-gray-600" />
+                          <span>AI Workspace Assistant</span>
+                          <span className="text-[10px] text-gray-400 font-normal">Gemini</span>
+                        </div>
+                        <button
+                          onClick={() => { setIsAIAssistOpen(false); setAiResult(null); }}
+                          className="p-1 text-gray-400 hover:text-gray-700 rounded-md cursor-pointer"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+
+                      {/* Quick Action Chips */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          disabled={aiLoading}
+                          onClick={() => handleRunAIAssist('improve')}
+                          className="px-2.5 py-1 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-lg text-xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Improve Clarity
+                        </button>
+                        <button
+                          disabled={aiLoading}
+                          onClick={() => handleRunAIAssist('fix')}
+                          className="px-2.5 py-1 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-lg text-xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Fix Grammar & Typos
+                        </button>
+                        <button
+                          disabled={aiLoading}
+                          onClick={() => handleRunAIAssist('format')}
+                          className="px-2.5 py-1 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-lg text-xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Format & Structure
+                        </button>
+                        <button
+                          disabled={aiLoading}
+                          onClick={() => handleRunAIAssist('summarize')}
+                          className="px-2.5 py-1 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-lg text-xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Summarize Key Points
+                        </button>
+                      </div>
+
+                      {/* Custom Prompt Input */}
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (aiPrompt.trim()) {
+                            handleRunAIAssist('custom', aiPrompt.trim());
+                          }
+                        }}
+                        className="flex items-center gap-1.5"
+                      >
+                        <input
+                          type="text"
+                          value={aiPrompt}
+                          onChange={(e) => setAiPrompt(e.target.value)}
+                          placeholder="Or instruct AI (e.g. 'Convert to bullet points', 'Add python docstrings')..."
+                          className="flex-1 px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs text-gray-900 outline-none focus:border-gray-500 placeholder:text-gray-400"
+                        />
+                        <button
+                          type="submit"
+                          disabled={aiLoading || !aiPrompt.trim()}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-medium cursor-pointer disabled:opacity-50 transition-colors"
+                        >
+                          {aiLoading ? <Loader2 size={12} className="animate-spin" /> : <CornerDownLeft size={12} />}
+                          <span>Run</span>
+                        </button>
+                      </form>
+
+                      {/* Loading status (clean and static without pulsing) */}
+                      {aiLoading && (
+                        <div className="flex items-center gap-2 py-1 text-gray-500 text-xs">
+                          <Loader2 size={13} className="animate-spin text-gray-600" />
+                          <span>Generating AI suggestion...</span>
+                        </div>
+                      )}
+
+                      {/* Result Box */}
+                      {aiResult && (
+                        <div className="bg-white border border-gray-300 rounded-xl p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-gray-800 text-[11px] uppercase tracking-wide">
+                              AI Suggestion ({aiAction})
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={handleApplyAIResult}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-medium cursor-pointer"
+                              >
+                                <CheckCheck size={12} />
+                                <span>Replace All</span>
+                              </button>
+                              <button
+                                onClick={handleAppendAIResult}
+                                className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium cursor-pointer"
+                              >
+                                Append
+                              </button>
+                              <button
+                                onClick={() => setAiResult(null)}
+                                className="px-2 py-1 text-gray-500 hover:text-gray-800 rounded-lg text-xs cursor-pointer"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          </div>
+                          <pre className="max-h-40 overflow-y-auto p-2.5 bg-gray-50 rounded-lg text-xs font-mono text-gray-800 whitespace-pre-wrap leading-relaxed custom-scroll border border-gray-200/60">
+                            {aiResult}
+                          </pre>
+                        </div>
+                      )}
+
+                      {aiNotice && (
+                        <p className="text-xs text-red-600">{aiNotice}</p>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Editor Workspace Surface with Multi-User Cursors */}
                 <div className="flex-1 relative flex overflow-auto bg-white select-text">
@@ -1035,10 +1268,10 @@ export default function JointWorkspace({
                               {cursor.initials}
                             </div>
 
-                            {/* Vertical Blinking Cursor Bar */}
+                            {/* Clean Vertical Cursor Bar without pulsing */}
                             <div
                               style={{ backgroundColor: cursor.color || '#5f6368' }}
-                              className="w-[2px] h-5 rounded-full shadow-xs animate-pulse"
+                              className="w-[2px] h-5 rounded-full shadow-xs"
                             />
                           </motion.div>
                         );
@@ -1064,31 +1297,15 @@ export default function JointWorkspace({
                 </div>
               </>
             ) : (
-              /* Clean Empty State when no file is selected */
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white">
-                <div className="w-16 h-16 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-center mb-4 text-gray-500 shadow-xs">
-                  <FileCode2 size={32} />
+              /* Clean Minimalist Empty State when no file is selected */
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white my-auto">
+                <div className="w-12 h-12 rounded-2xl bg-neutral-100 border border-neutral-200/60 flex items-center justify-center mb-3 text-slate-500">
+                  <FileText size={20} />
                 </div>
-                <h3 className="text-base font-bold text-gray-900 mb-1">No file selected</h3>
-                <p className="text-xs text-gray-500 max-w-sm mb-6 leading-relaxed">
-                  Create a new document, code file, or upload files from your device to start collaborating in real time.
+                <h3 className="text-xs font-semibold text-slate-900 mb-1">No file selected</h3>
+                <p className="text-[11px] text-slate-400 max-w-xs leading-relaxed">
+                  Select a document from the left or click + to start a new file.
                 </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setIsCreatingFile(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 rounded-full text-xs font-medium shadow-xs transition-colors cursor-pointer"
-                  >
-                    <Plus size={14} />
-                    <span>New File</span>
-                  </button>
-                  <button
-                    onClick={() => fileUploadInputRef.current?.click()}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 hover:border-gray-400 hover:bg-gray-50 text-gray-700 rounded-full text-xs font-medium shadow-xs transition-colors cursor-pointer"
-                  >
-                    <Upload size={14} />
-                    <span>Upload File</span>
-                  </button>
-                </div>
               </div>
             )}
           </div>

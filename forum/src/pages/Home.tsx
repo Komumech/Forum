@@ -4,11 +4,13 @@ import {
   Video, Keyboard, Plus, 
   Workflow, PenTool, FileText, Check, ChevronDown, 
   ChevronUp, Lock, Monitor, LayoutDashboard,
-  X, ArrowRight, Minus, ShieldCheck, Share2, Sparkles, AlertCircle
+  X, ArrowRight, Minus, ShieldCheck, Share2, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
+import { db } from '../firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function Home() {
   const [roomCode, setRoomCode] = useState('');
@@ -67,9 +69,38 @@ export default function Home() {
 
   const handleNewMeeting = () => {
     const randomCode = Math.random().toString(36).substring(2, 10);
+    const hostId = user ? user.uid : `guest_${randomCode}`;
+    const hostEmail = user?.email || "";
+    const hostName = user?.displayName || user?.email?.split('@')[0] || "Host";
+
     try {
       localStorage.setItem(`forum_room_host_${randomCode}`, 'true');
     } catch (e) {}
+
+    // Persist meeting in Firestore so host is recognized across devices
+    setDoc(doc(db, 'meetings', randomCode), {
+      roomId: randomCode,
+      title: `Meeting ${randomCode}`,
+      hostId,
+      hostEmail,
+      hostName,
+      createdBy: hostEmail || hostName,
+      participants: user ? [user.uid] : [],
+      createdAt: serverTimestamp(),
+      startTime: serverTimestamp(),
+      isMeeting: true,
+      isInstant: true,
+      status: 'active'
+    }, { merge: true }).catch(err => console.warn("Firestore meeting registration:", err));
+
+    setDoc(doc(db, 'rooms', randomCode), {
+      hostId,
+      hostEmail,
+      hostName,
+      createdAt: Date.now(),
+      lobby: false,
+      admittedList: [hostId, hostEmail, hostName].filter(Boolean)
+    }, { merge: true }).catch(err => console.warn("Firestore room registration:", err));
 
     if (user) {
       navigate(`/meeting/${randomCode}`);
@@ -93,6 +124,32 @@ export default function Home() {
       try {
         localStorage.setItem(`forum_room_host_${randomCode}`, 'true');
       } catch (e) {}
+
+      // Persist meeting in Firestore with guest username as host
+      setDoc(doc(db, 'meetings', randomCode), {
+        roomId: randomCode,
+        title: `Meeting ${randomCode}`,
+        hostId: `guest_${randomCode}`,
+        hostEmail: "",
+        hostName: trimmedUser,
+        createdBy: trimmedUser,
+        participants: [],
+        createdAt: serverTimestamp(),
+        startTime: serverTimestamp(),
+        isMeeting: true,
+        isInstant: true,
+        status: 'active'
+      }, { merge: true }).catch(err => console.warn("Firestore guest meeting registration:", err));
+
+      setDoc(doc(db, 'rooms', randomCode), {
+        hostId: `guest_${randomCode}`,
+        hostEmail: "",
+        hostName: trimmedUser,
+        createdAt: Date.now(),
+        lobby: false,
+        admittedList: [`guest_${randomCode}`, trimmedUser]
+      }, { merge: true }).catch(err => console.warn("Firestore room registration:", err));
+
       navigate(`/meeting/${randomCode}?name=${encodeURIComponent(trimmedUser)}`);
     } else {
       const cleanCode = (guestRoomCode || roomCode).trim().replace(/^https?:\/\/[^/]+\/meeting\//i, '');
@@ -167,27 +224,27 @@ export default function Home() {
             <span className="text-xl font-bold text-gray-900 tracking-tight">Forum</span>
           </div>
           
-          <nav className="hidden lg:flex items-center gap-8 bg-white px-6 py-2 rounded-full border border-gray-200/60 shadow-sm text-sm font-semibold text-gray-600">
-            <a href="#features" className="hover:text-gray-900 transition-colors">Features</a>
-            <a href="#workspace" className="hover:text-gray-900 transition-colors">Workspace</a>
-            <a href="#faq" className="hover:text-gray-900 transition-colors">FAQ</a>
+          <nav className="hidden lg:flex items-center gap-8 bg-white px-6 py-2 rounded-xl border border-neutral-200/60 shadow-xs text-sm font-medium text-slate-600">
+            <a href="#features" className="hover:text-slate-900 transition-colors">Features</a>
+            <a href="#workspace" className="hover:text-slate-900 transition-colors">Workspace</a>
+            <a href="#faq" className="hover:text-slate-900 transition-colors">FAQ</a>
           </nav>
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="text-gray-400 text-xs hidden md:block font-medium">
+          <span className="text-slate-400 text-xs hidden md:block font-normal">
             {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
           </span>
           {user ? (
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => navigate('/dashboard')} 
-                className="bg-accent-blue hover:bg-blue-600 text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-accent-blue/20 transition-all active:scale-95 flex items-center gap-2"
+                className="bg-slate-900 hover:bg-slate-800 text-white px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-medium shadow-xs transition-colors active:scale-95 flex items-center gap-2 cursor-pointer"
               >
                 <LayoutDashboard size={15} />
                 <span>Dashboard</span>
               </button>
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl overflow-hidden border border-gray-200">
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl overflow-hidden border border-neutral-200/80">
                 <img src={user.photoURL || `https://picsum.photos/seed/${user.uid}/36/36`} alt="User" referrerPolicy="no-referrer" />
               </div>
             </div>
@@ -203,7 +260,7 @@ export default function Home() {
               </button>
               <button 
                 onClick={() => openGuestModal('create')}
-                className="hidden sm:flex bg-accent-blue/10 hover:bg-accent-blue/20 text-accent-blue border border-accent-blue/20 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all"
+                className="hidden sm:flex bg-white hover:bg-stone-50 text-slate-800 border border-neutral-200/80 items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer shadow-xs"
               >
                 <Plus size={15} />
                 <span>Instant Meeting</span>
@@ -214,7 +271,7 @@ export default function Home() {
                 className="bg-white hover:bg-gray-50 text-gray-800 border border-gray-200 flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-60"
               >
                 {isLoggingIn ? (
-                  <div className="w-3.5 h-3.5 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
+                  <div className="w-3.5 h-3.5 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-3.5 h-3.5 shrink-0" alt="Google" />
                 )}
@@ -254,15 +311,11 @@ export default function Home() {
       <section className="relative overflow-hidden py-12 sm:py-16 lg:py-20 px-5 sm:px-8 lg:px-16 max-w-7xl mx-auto w-full flex flex-col lg:flex-row items-center gap-10 lg:gap-16">
         <div className="flex-1 space-y-6 sm:space-y-8 max-w-xl text-center lg:text-left">
           <div className="space-y-3 sm:space-y-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-accent-blue rounded-full text-xs font-bold border border-blue-100">
-              <ShieldCheck size={14} />
-              <span>Modern WebRTC Video Suite</span>
-            </div>
-            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-gray-900 leading-tight tracking-tight">
-              Video calls and meetings for <span className="text-accent-blue">everyone</span>
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-light text-slate-900 leading-tight tracking-tight">
+              Video calls and meetings for <span className="font-semibold text-slate-900">everyone</span>
             </h1>
-            <p className="text-base sm:text-lg text-gray-600 leading-relaxed font-medium">
-              Connect instantly with HD video, collaborative whiteboards, and real-time meeting notes — right in your browser.
+            <p className="text-sm sm:text-base text-slate-600 leading-relaxed font-normal">
+              Direct, encrypted video meetings with collaborative whiteboard and synchronized notes right in your browser.
             </p>
           </div>
 
@@ -270,13 +323,13 @@ export default function Home() {
             <div className="flex flex-col sm:flex-row items-center gap-3.5 justify-center lg:justify-start w-full">
               <button 
                 onClick={handleNewMeeting}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-accent-blue hover:bg-blue-600 text-white px-5 py-3.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-accent-blue/20 active:scale-98"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-3.5 rounded-xl text-sm font-medium transition-all shadow-xs active:scale-98 cursor-pointer"
               >
                 <Plus size={18} />
                 Start Instant Meeting
               </button>
 
-              <form onSubmit={handleJoin} className="w-full sm:w-auto flex items-center gap-3 border border-gray-200 bg-white rounded-xl px-4 py-2.5 shadow-sm focus-within:border-accent-blue focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+              <form onSubmit={handleJoin} className="w-full sm:w-auto flex items-center gap-3 border border-neutral-200 bg-white rounded-xl px-4 py-2.5 shadow-xs focus-within:border-slate-500 transition-all">
                 <Keyboard className="text-gray-400" size={16} />
                 <input 
                   type="text" 
@@ -288,7 +341,7 @@ export default function Home() {
                 <button 
                   type="submit"
                   disabled={!roomCode.trim()}
-                  className="text-accent-blue font-bold text-sm disabled:text-gray-300 transition-colors"
+                  className="text-slate-900 hover:text-slate-700 font-medium text-sm disabled:text-gray-300 transition-colors cursor-pointer"
                 >
                   Join
                 </button>
@@ -299,13 +352,13 @@ export default function Home() {
               <div className="flex flex-col sm:flex-row items-center gap-3 justify-center lg:justify-start w-full">
                 <button 
                   onClick={() => openGuestModal('create')}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-accent-blue hover:bg-blue-600 text-white px-6 py-3.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-accent-blue/25 active:scale-98"
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-6 py-3.5 rounded-xl text-sm font-medium transition-all shadow-xs active:scale-98 cursor-pointer"
                 >
                   <Plus size={18} />
                   <span>Start Instant Meeting</span>
                 </button>
 
-                <form onSubmit={handleJoin} className="w-full sm:w-auto flex items-center gap-2.5 border border-gray-200 bg-white rounded-xl px-4 py-2.5 shadow-sm focus-within:border-accent-blue focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+                <form onSubmit={handleJoin} className="w-full sm:w-auto flex items-center gap-2.5 border border-neutral-200 bg-white rounded-xl px-4 py-2.5 shadow-xs focus-within:border-slate-500 transition-all">
                   <Keyboard className="text-gray-400 shrink-0" size={16} />
                   <input 
                     type="text" 
@@ -317,34 +370,23 @@ export default function Home() {
                   <button 
                     type="submit"
                     disabled={!roomCode.trim()}
-                    className="text-accent-blue font-bold text-sm disabled:text-gray-300 transition-colors px-1"
+                    className="text-slate-900 hover:text-slate-700 font-medium text-sm disabled:text-gray-300 transition-colors px-1 cursor-pointer"
                   >
                     Join
                   </button>
                 </form>
               </div>
 
-              {/* Sign in with Google Bar */}
-              <div className="flex flex-wrap items-center gap-3 justify-center lg:justify-start pt-2">
+              {/* Subtle Sign in context without redundant buttons */}
+              <div className="flex items-center gap-1.5 justify-center lg:justify-start pt-2 text-xs text-slate-500">
+                <span>Want to keep your minutes and scheduled events?</span>
                 <button 
+                  type="button"
                   onClick={login}
                   disabled={isLoggingIn}
-                  className="px-4 py-2.5 bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50/80 rounded-xl text-xs sm:text-sm font-semibold text-gray-800 shadow-sm transition-all flex items-center gap-2.5 active:scale-98 disabled:opacity-60"
+                  className="font-medium text-slate-900 hover:underline cursor-pointer"
                 >
-                  {isLoggingIn ? (
-                    <div className="w-4 h-4 border-2 border-accent-blue border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 shrink-0" alt="Google" />
-                  )}
-                  <span>Sign in with Google</span>
-                </button>
-                <button 
-                  onClick={() => navigate('/dashboard')}
-                  className="px-3.5 py-2.5 text-xs sm:text-sm font-medium text-gray-600 hover:text-accent-blue transition-colors flex items-center gap-1.5 group"
-                >
-                  <LayoutDashboard size={14} className="text-gray-400 group-hover:text-accent-blue transition-colors" />
-                  <span>Explore Dashboard</span>
-                  <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
+                  Sign in with Google
                 </button>
               </div>
             </div>
@@ -463,7 +505,7 @@ export default function Home() {
                       <button
                         type="submit"
                         disabled={!guestUsername.trim() || (guestModalMode === 'join' && !guestRoomCode.trim())}
-                        className="w-full py-4 bg-accent-blue hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm rounded-xl shadow-lg shadow-accent-blue/20 transition-all flex items-center justify-center gap-2 active:scale-98"
+                        className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 active:scale-98 cursor-pointer"
                       >
                         <span>{guestModalMode === 'create' ? 'Start Meeting' : 'Join Room'}</span>
                         <ArrowRight size={16} />
@@ -475,13 +517,13 @@ export default function Home() {
                 <div className="pt-6 pb-2 space-y-3">
                   <div className="relative flex items-center justify-center">
                     <div className="border-t border-gray-200 w-full" />
-                    <span className="bg-white px-3 text-[11px] font-bold text-gray-400 uppercase tracking-wider absolute">or</span>
+                    <span className="bg-white px-3 text-[11px] font-medium text-gray-400 uppercase tracking-wider absolute">or</span>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => { setIsGuestModalOpen(false); login(); }}
-                    className="w-full py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 font-semibold text-xs rounded-xl border border-gray-200 transition-colors flex items-center justify-center gap-2.5"
+                    className="w-full py-3 bg-stone-50 hover:bg-stone-100 text-gray-700 font-medium text-xs rounded-xl border border-gray-200 transition-colors flex items-center justify-center gap-2.5 cursor-pointer"
                   >
                     <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 shrink-0" alt="Google" />
                     <span>Sign in with Google account</span>
@@ -494,61 +536,61 @@ export default function Home() {
       </AnimatePresence>
 
       {/* Feature Grid */}
-      <section id="features" className="bg-[#f2f4f6] py-20 px-6 lg:px-16 border-y border-gray-200/60">
+      <section id="features" className="bg-[#f8f9fa] py-20 px-6 lg:px-16 border-y border-neutral-200/60">
         <div className="max-w-7xl mx-auto space-y-14">
           <div className="text-center max-w-2xl mx-auto space-y-3">
-            <h2 className="text-xs font-bold text-accent-blue uppercase tracking-widest">Built for Fluid Collaboration</h2>
-            <p className="text-2xl sm:text-4xl font-extrabold text-gray-900 tracking-tight">Everything in one active window.</p>
-            <p className="text-sm sm:text-base text-gray-500 font-medium">No external tools or complicated setups. Direct video, drawings, and notes together.</p>
+            <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Built for Fluid Collaboration</h2>
+            <p className="text-2xl sm:text-4xl font-light text-slate-900 tracking-tight">Everything in one active window.</p>
+            <p className="text-sm sm:text-base text-slate-500 font-normal">No external tools or complicated setups. Direct video, drawings, and notes together.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="p-7 bg-white rounded-3xl border border-gray-200/70 shadow-sm hover:shadow-md transition-all">
-              <div className="w-11 h-11 bg-blue-50 text-accent-blue rounded-2xl flex items-center justify-center mb-4">
+            <div className="p-7 bg-white rounded-2xl border border-neutral-200/70 shadow-xs hover:border-slate-400 transition-all">
+              <div className="w-11 h-11 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center mb-4">
                 <Video size={20} />
               </div>
-              <h3 className="text-base font-bold text-gray-900 mb-2">High Definition Video</h3>
-              <p className="text-sm text-gray-500 leading-relaxed font-medium">Smart video routing adjusted dynamically depending on your connection. Smooth streams without voice dropouts.</p>
+              <h3 className="text-base font-semibold text-slate-900 mb-2">High Definition Video</h3>
+              <p className="text-sm text-slate-500 leading-relaxed font-normal">Smart video routing adjusted dynamically depending on your connection. Smooth streams without voice dropouts.</p>
             </div>
 
-            <div className="p-7 bg-white rounded-3xl border border-gray-200/70 shadow-sm hover:shadow-md transition-all">
-              <div className="w-11 h-11 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
+            <div className="p-7 bg-white rounded-2xl border border-neutral-200/70 shadow-xs hover:border-slate-400 transition-all">
+              <div className="w-11 h-11 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center mb-4">
                 <PenTool size={20} />
               </div>
-              <h3 className="text-base font-bold text-gray-900 mb-2">Shared Whiteboard</h3>
-              <p className="text-sm text-gray-500 leading-relaxed font-medium">Brainstorm visually with pens, sticky notes, and shapes on a live canvas embedded directly into the call.</p>
+              <h3 className="text-base font-semibold text-slate-900 mb-2">Shared Whiteboard</h3>
+              <p className="text-sm text-slate-500 leading-relaxed font-normal">Brainstorm visually with pens, sticky notes, and shapes on a live canvas embedded directly into the call.</p>
             </div>
 
-            <div className="p-7 bg-white rounded-3xl border border-gray-200/70 shadow-sm hover:shadow-md transition-all">
-              <div className="w-11 h-11 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center mb-4">
+            <div className="p-7 bg-white rounded-2xl border border-neutral-200/70 shadow-xs hover:border-slate-400 transition-all">
+              <div className="w-11 h-11 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center mb-4">
                 <FileText size={20} />
               </div>
-              <h3 className="text-base font-bold text-gray-900 mb-2">Collaborative Notes</h3>
-              <p className="text-sm text-gray-500 leading-relaxed font-medium">Take structured meeting minutes as a team. Notes auto-save with your meeting records for easy review.</p>
+              <h3 className="text-base font-semibold text-slate-900 mb-2">Collaborative Notes</h3>
+              <p className="text-sm text-slate-500 leading-relaxed font-normal">Take structured meeting minutes as a team. Notes auto-save with your meeting records for easy review.</p>
             </div>
 
-            <div className="p-7 bg-white rounded-3xl border border-gray-200/70 shadow-sm hover:shadow-md transition-all">
-              <div className="w-11 h-11 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-4">
+            <div className="p-7 bg-white rounded-2xl border border-neutral-200/70 shadow-xs hover:border-slate-400 transition-all">
+              <div className="w-11 h-11 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center mb-4">
                 <Workflow size={20} />
               </div>
-              <h3 className="text-base font-bold text-gray-900 mb-2">Calendar Integration</h3>
-              <p className="text-sm text-gray-500 leading-relaxed font-medium">Schedule meetings directly with Google Calendar integration and view upcoming sessions in your dashboard.</p>
+              <h3 className="text-base font-semibold text-slate-900 mb-2">Calendar Integration</h3>
+              <p className="text-sm text-slate-500 leading-relaxed font-normal">Schedule meetings directly with Google Calendar integration and view upcoming sessions in your dashboard.</p>
             </div>
 
-            <div className="p-7 bg-white rounded-3xl border border-gray-200/70 shadow-sm hover:shadow-md transition-all">
-              <div className="w-11 h-11 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-4">
+            <div className="p-7 bg-white rounded-2xl border border-neutral-200/70 shadow-xs hover:border-slate-400 transition-all">
+              <div className="w-11 h-11 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center mb-4">
                 <Lock size={20} />
               </div>
-              <h3 className="text-base font-bold text-gray-900 mb-2">Encrypted Streams</h3>
-              <p className="text-sm text-gray-500 leading-relaxed font-medium">WebRTC encrypted streams ensuring your meetings, audio, video, and screen shares remain strictly private.</p>
+              <h3 className="text-base font-semibold text-slate-900 mb-2">Encrypted Streams</h3>
+              <p className="text-sm text-slate-500 leading-relaxed font-normal">WebRTC encrypted streams ensuring your meetings, audio, video, and screen shares remain strictly private.</p>
             </div>
 
-            <div className="p-7 bg-white rounded-3xl border border-gray-200/70 shadow-sm hover:shadow-md transition-all">
-              <div className="w-11 h-11 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-4">
+            <div className="p-7 bg-white rounded-2xl border border-neutral-200/70 shadow-xs hover:border-slate-400 transition-all">
+              <div className="w-11 h-11 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center mb-4">
                 <Monitor size={20} />
               </div>
-              <h3 className="text-base font-bold text-gray-900 mb-2">Screen & Media Sharing</h3>
-              <p className="text-sm text-gray-500 leading-relaxed font-medium">Share your full desktop, application windows, or browser tabs with high-framerate audio streaming.</p>
+              <h3 className="text-base font-semibold text-slate-900 mb-2">Screen & Media Sharing</h3>
+              <p className="text-sm text-slate-500 leading-relaxed font-normal">Share your full desktop, application windows, or browser tabs with high-framerate audio streaming.</p>
             </div>
           </div>
         </div>
@@ -559,42 +601,42 @@ export default function Home() {
         <div className="flex flex-col lg:flex-row items-center gap-12 lg:gap-16">
           <div className="flex-1 space-y-6">
             <div className="space-y-3">
-              <h2 className="text-xs font-bold text-accent-blue uppercase tracking-widest text-center lg:text-left">Interactive Workspace</h2>
-              <p className="text-2xl sm:text-4xl font-extrabold text-gray-900 tracking-tight text-center lg:text-left">Engage beyond conversation.</p>
-              <p className="text-gray-500 text-sm sm:text-base leading-relaxed text-center lg:text-left font-medium">
+              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-widest text-center lg:text-left">Interactive Workspace</h2>
+              <p className="text-2xl sm:text-4xl font-light text-slate-900 tracking-tight text-center lg:text-left">Engage beyond conversation.</p>
+              <p className="text-slate-500 text-sm sm:text-base leading-relaxed text-center lg:text-left font-normal">
                 Switch between video feeds, real-time whiteboards, and collaborative minutes in a single click.
               </p>
             </div>
 
             {/* Selector list */}
-            <div className="flex bg-gray-200/60 p-1 rounded-full w-full max-w-md mx-auto lg:mx-0 border border-gray-300/30">
+            <div className="flex bg-stone-100 p-1 rounded-xl w-full max-w-md mx-auto lg:mx-0 border border-neutral-200/60">
               <button 
                 onClick={() => setActiveTab('video')}
-                className={`flex-1 py-2 text-xs font-bold rounded-full transition-all ${activeTab === 'video' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
+                className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all cursor-pointer ${activeTab === 'video' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-900"}`}
               >
                 Conferencing
               </button>
               <button 
                 onClick={() => setActiveTab('board')}
-                className={`flex-1 py-2 text-xs font-bold rounded-full transition-all ${activeTab === 'board' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
+                className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all cursor-pointer ${activeTab === 'board' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-900"}`}
               >
                 Whiteboard
               </button>
               <button 
                 onClick={() => setActiveTab('notes')}
-                className={`flex-1 py-2 text-xs font-bold rounded-full transition-all ${activeTab === 'notes' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"}`}
+                className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all cursor-pointer ${activeTab === 'notes' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-900"}`}
               >
                 Minutes
               </button>
             </div>
 
-            <div className="bg-white p-7 sm:p-8 rounded-[28px] border border-gray-200/80 shadow-sm space-y-5">
-              <h3 className="text-lg font-bold text-gray-900">{features[activeTab].title}</h3>
-              <p className="text-sm font-medium text-gray-500 leading-relaxed">{features[activeTab].desc}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-4 border-t border-gray-100">
+            <div className="bg-white p-7 sm:p-8 rounded-2xl border border-neutral-200/70 shadow-xs space-y-5">
+              <h3 className="text-lg font-medium text-slate-900">{features[activeTab].title}</h3>
+              <p className="text-sm font-normal text-slate-500 leading-relaxed">{features[activeTab].desc}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-4 border-t border-neutral-100">
                 {features[activeTab].bullets.map((b, i) => (
-                  <div key={i} className="flex items-center gap-2.5 text-xs font-semibold text-gray-700">
-                    <div className="w-4 h-4 bg-blue-50 text-accent-blue rounded-md flex items-center justify-center shrink-0">
+                  <div key={i} className="flex items-center gap-2.5 text-xs font-medium text-slate-700">
+                    <div className="w-4 h-4 bg-slate-100 text-slate-700 rounded flex items-center justify-center shrink-0">
                       <Check size={11} />
                     </div>
                     <span>{b}</span>
@@ -605,52 +647,52 @@ export default function Home() {
           </div>
 
           <div className="flex-1 max-w-lg w-full relative">
-            <div className="relative bg-white rounded-[32px] p-5 border border-gray-200/80 shadow-xl overflow-hidden aspect-[4/3] flex items-center justify-center">
+            <div className="relative bg-white rounded-2xl p-5 border border-neutral-200/80 shadow-xs overflow-hidden aspect-[4/3] flex items-center justify-center">
               {activeTab === 'video' && (
                 <div className="w-full h-full flex flex-col justify-between">
                   <div className="grid grid-cols-2 gap-3 flex-1">
-                    <div className="bg-[#f0f2f4] rounded-2xl relative overflow-hidden flex items-center justify-center border border-gray-200">
-                      <img src="https://picsum.photos/seed/user1/200/200" className="w-full h-full object-cover rounded-2xl opacity-90" referrerPolicy="no-referrer" alt="Participant" />
-                      <span className="absolute bottom-2.5 left-2.5 bg-black/65 backdrop-blur-md text-white text-[9px] font-bold px-2 py-0.5 rounded-lg">Sarah (Design)</span>
+                    <div className="bg-[#f0f2f4] rounded-xl relative overflow-hidden flex items-center justify-center border border-neutral-200">
+                      <img src="https://picsum.photos/seed/user1/200/200" className="w-full h-full object-cover rounded-xl opacity-90" referrerPolicy="no-referrer" alt="Participant" />
+                      <span className="absolute bottom-2.5 left-2.5 bg-black/65 backdrop-blur-md text-white text-[9px] font-medium px-2 py-0.5 rounded">Sarah (Design)</span>
                     </div>
-                    <div className="bg-[#f0f2f4] rounded-2xl relative overflow-hidden flex items-center justify-center border border-gray-200">
-                      <img src="https://picsum.photos/seed/user2/200/200" className="w-full h-full object-cover rounded-2xl opacity-90" referrerPolicy="no-referrer" alt="Participant" />
-                      <span className="absolute bottom-2.5 left-2.5 bg-black/65 backdrop-blur-md text-white text-[9px] font-bold px-2 py-0.5 rounded-lg">Marc (Engineering)</span>
+                    <div className="bg-[#f0f2f4] rounded-xl relative overflow-hidden flex items-center justify-center border border-neutral-200">
+                      <img src="https://picsum.photos/seed/user2/200/200" className="w-full h-full object-cover rounded-xl opacity-90" referrerPolicy="no-referrer" alt="Participant" />
+                      <span className="absolute bottom-2.5 left-2.5 bg-black/65 backdrop-blur-md text-white text-[9px] font-medium px-2 py-0.5 rounded">Marc (Engineering)</span>
                     </div>
                   </div>
-                  <div className="flex items-center justify-center gap-2.5 mt-3 pt-3 border-t border-gray-100">
-                    <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center text-gray-500"><Video size={14} /></div>
-                    <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center text-gray-500"><Monitor size={14} /></div>
-                    <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center text-gray-500"><Share2 size={14} /></div>
+                  <div className="flex items-center justify-center gap-2.5 mt-3 pt-3 border-t border-neutral-100">
+                    <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center text-slate-600"><Video size={14} /></div>
+                    <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center text-slate-600"><Monitor size={14} /></div>
+                    <div className="w-8 h-8 bg-slate-100 rounded-xl flex items-center justify-center text-slate-600"><Share2 size={14} /></div>
                   </div>
                 </div>
               )}
               {activeTab === 'board' && (
                 <div className="w-full h-full flex flex-col justify-between">
-                  <div className="flex-1 border border-dashed border-gray-300 rounded-2xl p-4 flex flex-col relative justify-center bg-slate-50/50">
-                    <div className="absolute top-3 left-3 px-2.5 py-1 bg-white rounded-lg shadow-sm border border-gray-200 flex items-center gap-1.5 text-[10px] font-bold text-gray-600">
-                      <PenTool size={11} className="text-accent-blue" />
+                  <div className="flex-1 border border-dashed border-neutral-300 rounded-xl p-4 flex flex-col relative justify-center bg-stone-50/50">
+                    <div className="absolute top-3 left-3 px-2.5 py-1 bg-white rounded-lg shadow-xs border border-neutral-200 flex items-center gap-1.5 text-[10px] font-medium text-slate-700">
+                      <PenTool size={11} className="text-slate-700" />
                       <span>Diagram #1 (Auto-saved)</span>
                     </div>
                     <div className="text-center space-y-1">
-                      <p className="text-xs font-bold text-gray-800">Shared Whiteboard Canvas</p>
-                      <p className="text-[11px] text-gray-400 font-medium">Drawings and sticky notes render in real time for all participants</p>
+                      <p className="text-xs font-medium text-slate-800">Shared Whiteboard Canvas</p>
+                      <p className="text-[11px] text-slate-400 font-normal">Drawings and sticky notes render in real time for all participants</p>
                     </div>
                   </div>
                 </div>
               )}
               {activeTab === 'notes' && (
                 <div className="w-full h-full flex flex-col justify-between">
-                  <div className="flex-1 bg-slate-50/70 border border-gray-200 rounded-2xl p-5 text-left space-y-3">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Minutes</p>
-                    <h4 className="text-sm font-bold text-gray-900">Sprint Sync Notes</h4>
+                  <div className="flex-1 bg-stone-50/70 border border-neutral-200 rounded-xl p-5 text-left space-y-3">
+                    <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Minutes</p>
+                    <h4 className="text-sm font-medium text-slate-900">Sprint Sync Notes</h4>
                     <div className="space-y-2.5 pt-1">
-                      <div className="flex items-center gap-2 text-xs font-medium text-gray-700">
-                        <div className="w-4 h-4 rounded bg-accent-blue/10 text-accent-blue flex items-center justify-center shrink-0 font-bold">✓</div>
+                      <div className="flex items-center gap-2 text-xs font-normal text-slate-700">
+                        <div className="w-4 h-4 rounded bg-slate-200 text-slate-800 flex items-center justify-center shrink-0 font-medium">✓</div>
                         <span>Review roadmap milestones</span>
                       </div>
-                      <div className="flex items-center gap-2 text-xs font-medium text-gray-700">
-                        <div className="w-4 h-4 rounded bg-gray-200 shrink-0" />
+                      <div className="flex items-center gap-2 text-xs font-normal text-slate-700">
+                        <div className="w-4 h-4 rounded bg-neutral-200 shrink-0" />
                         <span>Coordinate calendar invitations</span>
                       </div>
                     </div>

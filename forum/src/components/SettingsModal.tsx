@@ -109,8 +109,8 @@ function MaterialSwitch({ checked, onChange, disabled }: { checked: boolean; onC
       disabled={disabled}
       onClick={onChange}
       className={cn(
-        "w-11 h-6 rounded-full transition-colors relative inline-flex items-center shrink-0 cursor-pointer p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-[#0b57d0]",
-        checked ? "bg-[#0b57d0]" : "bg-[#747775]/35",
+        "w-11 h-6 rounded-full transition-colors relative inline-flex items-center shrink-0 cursor-pointer p-0.5 outline-none focus-visible:ring-1 focus-visible:ring-slate-500",
+        checked ? "bg-slate-900" : "bg-neutral-300",
         disabled && "opacity-40 cursor-not-allowed"
       )}
     >
@@ -454,11 +454,11 @@ export default function SettingsModal({
                   className={cn(
                     "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
                     selectedBg === 'none' 
-                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
-                      : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
+                      ? "bg-stone-100 border-slate-900 text-slate-900 font-medium shadow-xs" 
+                      : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
                   )}
                 >
-                  <div className="w-8 h-8 rounded-full bg-[#f1f3f4] flex items-center justify-center text-[#444746]">
+                  <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
                     <X size={16} />
                   </div>
                   <span className="text-xs">None</span>
@@ -473,11 +473,11 @@ export default function SettingsModal({
                   className={cn(
                     "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
                     selectedBg === 'blur' 
-                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
-                      : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
+                      ? "bg-stone-100 border-slate-900 text-slate-900 font-medium shadow-xs" 
+                      : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
                   )}
                 >
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-[#94a3b8] to-[#cbd5e1] flex items-center justify-center blur-[1.5px] border border-white/40" />
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#94a3b8] to-[#cbd5e1] flex items-center justify-center blur-[1.5px] border border-white/40" />
                   <span className="text-xs">Blur</span>
                 </button>
 
@@ -491,11 +491,11 @@ export default function SettingsModal({
                   className={cn(
                     "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
                     selectedBg === 'greenscreen' || (selectedBg === 'color' && selectedBgImage === '#00FF00')
-                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
-                      : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
+                      ? "bg-stone-100 border-slate-900 text-slate-900 font-medium shadow-xs" 
+                      : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
                   )}
                 >
-                  <div className="w-8 h-8 rounded-full bg-[#00FF00] flex items-center justify-center text-black font-bold shadow-inner border border-black/10">
+                  <div className="w-8 h-8 rounded-xl bg-[#00FF00] flex items-center justify-center text-black font-medium shadow-inner border border-black/10">
                     <Sparkles size={14} className="text-emerald-950" />
                   </div>
                   <span className="text-xs">Green Screen</span>
@@ -507,11 +507,11 @@ export default function SettingsModal({
                   className={cn(
                     "flex flex-col items-center justify-center gap-2 p-3 rounded-xl border transition-all cursor-pointer",
                     selectedBg === 'image' && customBgImage 
-                      ? "bg-[#d3e3fd] border-[#0b57d0] text-[#041e49] font-medium shadow-sm" 
-                      : "bg-white border-[#e0e2ec] text-[#1f1f1f] hover:bg-[#f1f3f4]"
+                      ? "bg-stone-100 border-slate-900 text-slate-900 font-medium shadow-xs" 
+                      : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
                   )}
                 >
-                  <div className="w-8 h-8 rounded-full bg-[#e8f0fe] text-[#0b57d0] flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
                     <ImageIcon size={16} />
                   </div>
                   <span className="text-xs truncate max-w-[85px]">Custom Photo</span>
@@ -534,12 +534,12 @@ export default function SettingsModal({
             </div>
 
             {/* Studio Green & Solid Chroma Backdrops */}
-            <div className="space-y-3 pt-3 border-t border-[#e0e2ec]">
+            <div className="space-y-3 pt-3 border-t border-neutral-200/60">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-semibold text-[#1f1f1f] block">
+                <label className="text-sm font-semibold text-slate-900 block">
                   Studio Colors & Green Screens
                 </label>
-                <span className="text-[11px] text-gray-500">Perfect for OBS & stream keying</span>
+                <span className="text-[11px] text-slate-400">Stream and backdrop keying</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {SOLID_STUDIO_COLORS.map((item) => {
@@ -554,18 +554,18 @@ export default function SettingsModal({
                         setSelectedBg(item.type);
                       }}
                       className={cn(
-                        "relative flex items-center gap-2.5 p-2.5 rounded-xl border-2 transition-all cursor-pointer text-left group",
-                        isSelected ? "border-[#0b57d0] bg-[#f0f4f9] ring-2 ring-[#0b57d0]/20" : "border-[#e0e2ec] bg-white hover:border-[#747775]"
+                        "relative flex items-center gap-2.5 p-2.5 rounded-xl border transition-all cursor-pointer text-left group",
+                        isSelected ? "border-slate-900 bg-stone-100 shadow-xs" : "border-neutral-200 bg-white hover:border-slate-400"
                       )}
                     >
                       <div 
-                        className="w-7 h-7 rounded-lg shrink-0 shadow-sm border border-black/10 flex items-center justify-center"
+                        className="w-7 h-7 rounded-lg shrink-0 shadow-xs border border-black/10 flex items-center justify-center"
                         style={{ backgroundColor: item.value }}
                       >
                         {isSelected && <Check size={12} className={item.value === '#F8FAFC' || item.value === '#00FF00' || item.value === '#00E676' ? "text-black" : "text-white"} />}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <span className="text-xs font-medium text-gray-900 block truncate">{item.label}</span>
+                        <span className="text-xs font-medium text-slate-900 block truncate">{item.label}</span>
                       </div>
                     </button>
                   );
@@ -574,8 +574,8 @@ export default function SettingsModal({
             </div>
 
             {/* Preset Photo Backgrounds */}
-            <div className="space-y-3 pt-3 border-t border-[#e0e2ec]">
-              <label className="text-sm font-semibold text-[#1f1f1f] block">
+            <div className="space-y-3 pt-3 border-t border-neutral-200/60">
+              <label className="text-sm font-semibold text-slate-900 block">
                 Virtual Scene Backgrounds
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -591,8 +591,8 @@ export default function SettingsModal({
                         setSelectedBg('image');
                       }}
                       className={cn(
-                        "relative aspect-video rounded-xl overflow-hidden border-2 transition-all cursor-pointer group shadow-sm",
-                        isSelected ? "border-[#0b57d0] ring-2 ring-[#0b57d0]/25" : "border-[#e0e2ec] hover:border-[#747775]"
+                        "relative aspect-video rounded-xl overflow-hidden border transition-all cursor-pointer group shadow-xs",
+                        isSelected ? "border-slate-900 ring-2 ring-slate-900/20" : "border-neutral-200 hover:border-slate-400"
                       )}
                     >
                       <img src={img.value} alt={img.label} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" referrerPolicy="no-referrer" />
@@ -600,7 +600,7 @@ export default function SettingsModal({
                         <span className="text-xs font-medium text-white truncate">{img.label}</span>
                       </div>
                       {isSelected && (
-                        <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-[#0b57d0] text-white flex items-center justify-center shadow">
+                        <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-lg bg-slate-900 text-white flex items-center justify-center shadow-xs">
                           <Check size={12} />
                         </div>
                       )}
@@ -820,8 +820,8 @@ export default function SettingsModal({
 
         {/* Modal Body */}
         <div className="flex flex-1 min-h-0 bg-white">
-          {/* Desktop Left Navigation (Material 3 standard drawer) */}
-          <nav className="hidden md:flex flex-col w-56 border-r border-[#e0e2ec] p-3 space-y-1 overflow-y-auto custom-scroll shrink-0">
+          {/* Desktop Left Navigation */}
+          <nav className="hidden md:flex flex-col w-60 border-r border-neutral-200/70 p-3.5 space-y-1.5 overflow-y-auto custom-scroll shrink-0 bg-stone-50/50">
             {categories.map((cat) => {
               const isActive = selectedCategory === cat.id;
               const Icon = cat.icon;
@@ -831,13 +831,13 @@ export default function SettingsModal({
                   type="button"
                   onClick={() => setSelectedCategory(cat.id)}
                   className={cn(
-                    "w-full flex items-center gap-3.5 px-4 py-2.5 rounded-full text-left transition-colors cursor-pointer",
+                    "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left transition-colors cursor-pointer",
                     isActive 
-                      ? "bg-[#d3e3fd] text-[#041e49] font-medium" 
-                      : "text-[#444746] hover:bg-[#1f1f1f]/5 hover:text-[#1f1f1f]"
+                      ? "bg-slate-200/80 text-slate-900 font-medium border border-neutral-200/60" 
+                      : "text-slate-600 hover:bg-neutral-100/70 hover:text-slate-900"
                   )}
                 >
-                  <Icon size={18} className={cn("shrink-0", isActive ? "text-[#041e49]" : "text-[#444746]")} />
+                  <Icon size={17} className={cn("shrink-0", isActive ? "text-slate-900" : "text-slate-500")} />
                   <span className="text-sm truncate">{cat.label}</span>
                 </button>
               );
@@ -845,9 +845,9 @@ export default function SettingsModal({
           </nav>
 
           {/* Main Content Area */}
-          <div className="flex-1 overflow-y-auto p-6 sm:p-8 custom-scroll">
+          <div className="flex-1 overflow-y-auto p-6 sm:p-8 md:p-10 custom-scroll">
             {isMobile && mobileView === 'categories' ? (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {categories.map((cat) => {
                   const Icon = cat.icon;
                   return (
@@ -858,13 +858,13 @@ export default function SettingsModal({
                         setSelectedCategory(cat.id);
                         setMobileView('detail');
                       }}
-                      className="w-full flex items-center justify-between p-3.5 hover:bg-[#f1f3f4] rounded-xl transition-colors text-left cursor-pointer"
+                      className="w-full flex items-center justify-between p-4 hover:bg-stone-50 rounded-xl transition-colors text-left cursor-pointer border border-transparent hover:border-neutral-200/60"
                     >
                       <div className="flex items-center gap-3.5 min-w-0">
-                        <Icon size={20} className="text-[#444746] shrink-0" />
-                        <span className="text-sm font-medium text-[#1f1f1f] truncate">{cat.label}</span>
+                        <Icon size={18} className="text-slate-600 shrink-0" />
+                        <span className="text-sm font-medium text-slate-900 truncate">{cat.label}</span>
                       </div>
-                      <ChevronRight size={18} className="text-[#747775] shrink-0" />
+                      <ChevronRight size={18} className="text-slate-400 shrink-0" />
                     </button>
                   );
                 })}
@@ -876,11 +876,11 @@ export default function SettingsModal({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-3 bg-white border-t border-[#e0e2ec] flex items-center justify-end shrink-0">
+        <div className="px-6 py-3.5 bg-white border-t border-neutral-200/70 flex items-center justify-end shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2 bg-[#0b57d0] hover:bg-[#0842a0] text-white text-sm font-medium rounded-full shadow-xs transition-colors cursor-pointer"
+            className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             Done
           </button>

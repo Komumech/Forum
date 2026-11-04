@@ -55,5 +55,15 @@ service cloud.firestore {
     match /recordings/{recId} {
       allow read, write: if true;
     }
+
+    // Events (Calendar Sync)
+    match /events/{eventId} {
+      allow read, write: if true;
+    }
+
+    // Test connectivity
+    match /test/{docId} {
+      allow read, write: if true;
+    }
   }
 }

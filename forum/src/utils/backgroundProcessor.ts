@@ -47,13 +47,20 @@ export async function applyBackgroundEffect(
     chromaKeyHex?: string;
   }
 ): Promise<boolean> {
-  if (!videoTrack) return false;
+  if (!videoTrack || !videoTrack.mediaStreamTrack) {
+    console.warn('[applyBackgroundEffect] No active video track or mediaStreamTrack available');
+    return false;
+  }
 
   try {
     // 1. Stop any currently active track processor
     try {
-      await videoTrack.stopProcessor();
-    } catch {}
+      if (videoTrack.getProcessor()) {
+        await videoTrack.stopProcessor();
+      }
+    } catch (stopErr) {
+      console.warn('[applyBackgroundEffect] Error stopping previous processor:', stopErr);
+    }
 
     if (mode === 'none') {
       return true;
@@ -61,11 +68,12 @@ export async function applyBackgroundEffect(
 
     if (mode === 'blur') {
       try {
-        const processor = BackgroundBlur(options?.blurRadius || 12);
+        const processor = BackgroundBlur(options?.blurRadius || 14);
         await videoTrack.setProcessor(processor);
+        console.log('[applyBackgroundEffect] Background blur applied successfully');
         return true;
       } catch (err) {
-        console.warn('Track processor blur fallback:', err);
+        console.warn('[applyBackgroundEffect] Track processor blur fallback:', err);
         return false;
       }
     }
@@ -76,32 +84,33 @@ export async function applyBackgroundEffect(
         : (options?.colorHex || (mode === 'greenscreen' ? '#00FF00' : '#121316'));
 
       try {
-        // If it's a solid color or green screen, generate a crisp solid canvas data URL
+        // If it's a solid color or green screen, generate a solid canvas data URL
         let finalImageSource = bgSource;
         if (mode === 'color' || mode === 'greenscreen' || bgSource.startsWith('#')) {
           const colorCanvas = document.createElement('canvas');
-          colorCanvas.width = 16;
-          colorCanvas.height = 16;
+          colorCanvas.width = 64;
+          colorCanvas.height = 64;
           const ctx = colorCanvas.getContext('2d');
           if (ctx) {
             ctx.fillStyle = bgSource.startsWith('#') ? bgSource : '#00FF00';
-            ctx.fillRect(0, 0, 16, 16);
+            ctx.fillRect(0, 0, 64, 64);
             finalImageSource = colorCanvas.toDataURL('image/png');
           }
         }
 
         const processor = VirtualBackground(finalImageSource);
         await videoTrack.setProcessor(processor);
+        console.log('[applyBackgroundEffect] Virtual background applied successfully');
         return true;
       } catch (err) {
-        console.warn('Track processor virtual background fallback:', err);
+        console.warn('[applyBackgroundEffect] Track processor virtual background fallback:', err);
         return false;
       }
     }
 
     return true;
   } catch (err) {
-    console.error('Failed to apply background processor:', err);
+    console.error('[applyBackgroundEffect] Failed to apply background processor:', err);
     return false;
   }
 }
