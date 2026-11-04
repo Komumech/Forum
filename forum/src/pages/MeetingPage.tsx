@@ -253,13 +253,14 @@ export default function MeetingPage() {
       console.log(`[MeetingPage] Fetching token from: ${getUrl}`);
 
       let tokenData: any = null;
-      let lastFetchErr: any = null;
+      let lastFetchErr: Error | null = null;
 
       // Resilient fetch with up to 3 attempts
       for (let attempt = 1; attempt <= 3; attempt++) {
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 6000);
+          timeoutId = setTimeout(() => controller.abort(), 6000);
 
           // Try GET first
           const resp = await fetch(getUrl, {
@@ -267,42 +268,48 @@ export default function MeetingPage() {
             headers: { 'Accept': 'application/json' },
             cache: 'no-store'
           });
-          clearTimeout(timeoutId);
 
           if (resp.ok) {
             tokenData = await resp.json();
             if (tokenData?.token) break;
+            lastFetchErr = new Error("The conference server returned an invalid token response.");
           } else {
-            // Try POST fallback
-            const postController = new AbortController();
-            const postTimeoutId = setTimeout(() => postController.abort(), 6000);
+            let errorMessage = `The conference server returned an error (${resp.status}).`;
+            try {
+              const errorData = await resp.json();
+              if (typeof errorData?.error === 'string') errorMessage = errorData.error;
+            } catch {
+              // Keep the HTTP status message when the server response is not JSON.
+            }
+            lastFetchErr = new Error(errorMessage);
+            if (resp.status !== 404 && resp.status !== 405) break;
+
             const postResp = await fetch('/api/get-participant-token', {
-              signal: postController.signal,
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-              body: JSON.stringify({
-                room,
-                username: uniqueIdentity,
-                metadata
-              })
+              body: JSON.stringify({ room, username: uniqueIdentity, metadata })
             });
-            clearTimeout(postTimeoutId);
-            if (postResp.ok) {
-              tokenData = await postResp.json();
-              if (tokenData?.token) break;
+            if (!postResp.ok) {
+              lastFetchErr = new Error(`The conference server returned an error (${postResp.status}).`);
+              break;
             }
+            tokenData = await postResp.json();
+            if (tokenData?.token) break;
+            lastFetchErr = new Error("The conference server returned an invalid token response.");
           }
         } catch (fetchErr) {
-          lastFetchErr = fetchErr;
+          lastFetchErr = fetchErr instanceof Error ? fetchErr : new Error(String(fetchErr));
           console.warn(`[MeetingPage] Token fetch attempt ${attempt} failed:`, fetchErr);
           if (attempt < 3) {
             await new Promise(res => setTimeout(res, 400 * attempt));
           }
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
         }
       }
 
       if (!tokenData?.token) {
-        throw new Error(lastFetchErr?.message || "Could not retrieve access token from the conference server. Please check your connection and retry.");
+        throw lastFetchErr || new Error("Could not retrieve access token from the conference server. Please check your connection and retry.");
       }
 
       console.log(`[MeetingPage] Token received successfully, connecting to LiveKit...`);

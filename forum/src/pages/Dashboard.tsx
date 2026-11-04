@@ -131,6 +131,8 @@ export default function Dashboard() {
     const q = query(collection(db, 'notifications'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
     return onSnapshot(q, (snapshot) => {
       setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.error("[Dashboard] Notifications snapshot error:", err);
     });
   }, [user]);
 

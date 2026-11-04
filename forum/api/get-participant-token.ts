@@ -45,8 +45,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(200).json({ token, room, username });
   } catch (error) {
     console.error("[Token API] Error generating token:", error);
-    return res.status(500).json({
-      error: error instanceof Error ? error.message : "Failed to generate token",
+    const message = error instanceof Error ? error.message : "Failed to generate token";
+    return res.status(message === "LiveKit server configuration missing" ? 503 : 500).json({
+      error: message,
     });
   }
 }
