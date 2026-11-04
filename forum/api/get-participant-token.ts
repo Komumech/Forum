@@ -1,4 +1,4 @@
-import { createParticipantToken } from "../livekit-token";
+import { AccessToken } from "livekit-server-sdk";
 
 type ApiRequest = {
   method?: string;
@@ -36,18 +36,31 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
 
   try {
-    const token = await createParticipantToken({
-      room,
-      username,
-      metadata,
-      subscriberOnly,
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    if (!apiKey || !apiSecret) {
+      return res.status(503).json({ error: "LiveKit server configuration missing" });
+    }
+
+    const accessToken = new AccessToken(apiKey, apiSecret, {
+      identity: username,
+      metadata: typeof metadata === "string" ? metadata : JSON.stringify(metadata),
     });
+    accessToken.addGrant({
+      roomJoin: true,
+      room,
+      canPublish: !subscriberOnly,
+      canSubscribe: true,
+      canPublishData: !subscriberOnly,
+      canUpdateOwnMetadata: !subscriberOnly,
+    });
+
+    const token = await accessToken.toJwt();
     return res.status(200).json({ token, room, username });
   } catch (error) {
     console.error("[Token API] Error generating token:", error);
-    const message = error instanceof Error ? error.message : "Failed to generate token";
-    return res.status(message === "LiveKit server configuration missing" ? 503 : 500).json({
-      error: message,
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to generate token",
     });
   }
 }
