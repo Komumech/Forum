@@ -1,7 +1,14 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import { createParticipantToken } from "./livekit-token";
+import {
+  AccessToken,
+  EgressClient,
+  RoomServiceClient,
+  StreamOutput,
+  StreamProtocol,
+  EncodingOptionsPreset,
+} from "livekit-server-sdk";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -322,14 +329,30 @@ Return ONLY the processed text replacement without introductory greetings or met
       return res.status(400).json({ error: "Missing room or username parameter" });
     }
 
+    const apiKey = process.env.LIVEKIT_API_KEY || "APIKKz48zYgzLs5";
+    const apiSecret = process.env.LIVEKIT_API_SECRET || "xxFMWxVfAtzMUJf1WXGHZj2Kp7plcChVagiQJAfYNzcB";
+
+    if (!apiKey || !apiSecret) {
+      console.error("[Token API] Missing API Key or Secret");
+      return res.status(500).json({ error: "LiveKit server configuration missing" });
+    }
+
     try {
-      const token = await createParticipantToken({
-        room,
-        username,
-        metadata,
-        subscriberOnly,
+      const at = new AccessToken(apiKey, apiSecret, {
+        identity: username,
+        metadata: typeof metadata === "object" ? JSON.stringify(metadata) : metadata,
       });
 
+      at.addGrant({
+        roomJoin: true,
+        room: room,
+        canPublish: !subscriberOnly,
+        canSubscribe: true,
+        canPublishData: !subscriberOnly,
+        canUpdateOwnMetadata: !subscriberOnly,
+      });
+
+      const token = await at.toJwt();
       console.log(`[Token API] Successfully generated token for ${username} (room: ${room})`);
       res.json({ token, room, username });
     } catch (error: any) {
@@ -340,6 +363,101 @@ Return ONLY the processed text replacement without introductory greetings or met
 
   app.get("/api/get-participant-token", handleTokenGeneration);
   app.post("/api/get-participant-token", handleTokenGeneration);
+
+  const getLiveKitClients = () => {
+    const rawUrl = process.env.VITE_LIVEKIT_URL || process.env.LIVEKIT_URL || "https://forum-xchlx8up.livekit.cloud";
+    const host = rawUrl.replace(/^wss?:\/\//, "https://");
+    const apiKey = process.env.LIVEKIT_API_KEY || "APIKKz48zYgzLs5";
+    const apiSecret = process.env.LIVEKIT_API_SECRET || "xxFMWxVfAtzMUJf1WXGHZj2Kp7plcChVagiQJAfYNzcB";
+    return {
+      egressClient: new EgressClient(host, apiKey, apiSecret),
+      roomService: new RoomServiceClient(host, apiKey, apiSecret),
+    };
+  };
+
+  // Start LiveKit Room Composite RTMP Stream
+  app.post("/api/livekit/egress-start", async (req, res) => {
+    const { room, rtmpUrl, streamKey, layout } = req.body || {};
+    if (!room || !rtmpUrl) {
+      return res.status(400).json({ error: "Room ID and RTMP URL are required." });
+    }
+    try {
+      const { egressClient } = getLiveKitClients();
+      const base = String(rtmpUrl).replace(/\/+$/, "");
+      const fullUrl = streamKey ? `${base}/${String(streamKey).replace(/^\/+/, "")}` : base;
+      const streamOutput = new StreamOutput({
+        protocol: StreamProtocol.RTMP,
+        urls: [fullUrl],
+      });
+      const info = await egressClient.startRoomCompositeEgress(
+        room,
+        { stream: streamOutput },
+        {
+          layout: layout || "grid",
+          encodingOptions: EncodingOptionsPreset.H264_1080P_30,
+        }
+      );
+      return res.json({ status: "started", egressId: info.egressId, info });
+    } catch (err: any) {
+      console.error("[LiveKit Egress Start] Error:", err?.message || err);
+      return res.status(502).json({
+        error: err?.message || "Failed to start LiveKit RTMP Egress stream. Verify RTMP endpoint and LiveKit Egress quota.",
+      });
+    }
+  });
+
+  // Stop LiveKit Egress Stream
+  app.post("/api/livekit/egress-stop", async (req, res) => {
+    const { egressId, room } = req.body || {};
+    try {
+      const { egressClient } = getLiveKitClients();
+      if (egressId) {
+        const info = await egressClient.stopEgress(egressId);
+        return res.json({ status: "stopped", egressId: info.egressId });
+      }
+      if (room) {
+        const active = await egressClient.listEgress({ roomName: room, active: true });
+        await Promise.all(active.map((e) => egressClient.stopEgress(e.egressId)));
+        return res.json({ status: "stopped", stoppedCount: active.length });
+      }
+      return res.status(400).json({ error: "egressId or room is required." });
+    } catch (err: any) {
+      console.error("[LiveKit Egress Stop] Error:", err?.message || err);
+      return res.status(502).json({ error: err?.message || "Failed to stop Egress stream" });
+    }
+  });
+
+  // Server-enforced Host Removal
+  app.post("/api/livekit/remove-participant", async (req, res) => {
+    const { room, identity } = req.body || {};
+    if (!room || !identity) {
+      return res.status(400).json({ error: "room and identity are required" });
+    }
+    try {
+      const { roomService } = getLiveKitClients();
+      await roomService.removeParticipant(room, identity);
+      return res.json({ status: "removed", room, identity });
+    } catch (err: any) {
+      console.warn("[LiveKit RemoveParticipant] Notice:", err?.message || err);
+      return res.status(200).json({ status: "fallback-data-channel", notice: err?.message });
+    }
+  });
+
+  // Server-enforced Host Mute Track
+  app.post("/api/livekit/mute-track", async (req, res) => {
+    const { room, identity, trackSid, muted } = req.body || {};
+    if (!room || !identity || !trackSid) {
+      return res.status(400).json({ error: "room, identity, and trackSid are required" });
+    }
+    try {
+      const { roomService } = getLiveKitClients();
+      await roomService.mutePublishedTrack(room, identity, trackSid, muted !== false);
+      return res.json({ status: "ok", room, identity, trackSid, muted: muted !== false });
+    } catch (err: any) {
+      console.warn("[LiveKit MuteTrack] Notice:", err?.message || err);
+      return res.status(200).json({ status: "fallback-data-channel", notice: err?.message });
+    }
+  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

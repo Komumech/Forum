@@ -47,6 +47,9 @@ export function useVoiceActivity(participant?: Participant | null): VoiceActivit
 
       const audioCtx = new AudioCtx();
       audioContextRef.current = audioCtx;
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
 
       const stream = new MediaStream([mediaStreamTrack]);
       const source = audioCtx.createMediaStreamSource(stream);

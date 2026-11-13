@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Whiteboard from '../components/Whiteboard.tsx';
 import { 
   Video, Calendar, Plus, Search, Settings, Clock, 
@@ -9,15 +9,27 @@ import {
   Copy, Check, Monitor, ChevronLeft, Calendar as CalendarIcon,
   Filter, Grid, List as ListIcon, Trash2, Edit2, Menu,
   Paperclip, FolderUp, ArrowUpRight, Download, Send, Share2, Sparkles, Layers,
-  FileCheck, HardDrive, ShieldCheck, ArrowRight
+  FileCheck, HardDrive, ShieldCheck, ArrowRight, Upload, Mail
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { db, auth, komuDb, komuAuth, googleProvider } from '../firebase';
-import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, setDoc, writeBatch, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, setDoc, writeBatch, deleteDoc, updateDoc, getDocs, getDoc, arrayUnion, serverTimestamp } from 'firebase/firestore';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { format, isToday, isTomorrow, parseISO } from 'date-fns';
 import { cn } from '../lib/utils';
+import { downloadICSFile, getGoogleCalendarUrl } from '../utils/calendarExport';
+import { MEETING_COVER_PRESETS, DEFAULT_MEETING_COVER } from '../assets/covers';
+import {
+  getPushPreferences,
+  savePushPreferences,
+  getNotificationSupportStatus,
+  registerForumServiceWorker,
+  requestForumNotificationPermission,
+  triggerForumPushNotification
+} from '../utils/pushNotifications';
+import MeetingCanvas from '../components/MeetingCanvas';
+import ClipsBasic from '../components/ClipsBasic';
 
 interface Meeting {
   id: string;
@@ -35,6 +47,37 @@ interface Meeting {
   isGoogle?: boolean;
   isMeeting?: boolean;
   type?: 'event' | 'task' | 'focus' | 'meeting';
+  coverImage?: string;
+  invitedEmails?: string[];
+}
+
+function compressCoverImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Invalid image file'));
+      img.onload = () => {
+        const maxW = 800;
+        const scale = img.width > maxW ? maxW / img.width : 1;
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(String(reader.result));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.78));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 enum OperationType {
@@ -72,7 +115,8 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 export default function Dashboard() {
   const { user, login, isLoggingIn, logout } = useAuth();
   const navigate = useNavigate();
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'dashboard' | 'meetings' | 'contacts' | 'notes' | 'settings' | 'whiteboard' | 'calendar' | 'files'>('dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'dashboard' | 'meetings' | 'contacts' | 'notes' | 'settings' | 'whiteboard' | 'calendar' | 'files' | 'canvas' | 'clips'>('dashboard');
   const [dashboardFiles, setDashboardFiles] = useState<Array<{ id: string; name: string; size: number; type: string; timestamp: number; url?: string }>>([
     { id: 'f-1', name: 'Project_Architecture_Overview.pdf', size: 2450000, type: 'application/pdf', timestamp: Date.now() - 3600000 },
     { id: 'f-2', name: 'Q3_Sprint_Deliverables.xlsx', size: 840000, type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', timestamp: Date.now() - 86400000 },
@@ -92,7 +136,9 @@ export default function Dashboard() {
     description: '', 
     date: format(new Date(), 'yyyy-MM-dd'), 
     time: format(new Date(), 'HH:mm'), 
-    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'monthly' 
+    recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'monthly',
+    coverImage: DEFAULT_MEETING_COVER,
+    invitedEmails: ''
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -108,11 +154,79 @@ export default function Dashboard() {
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const [pushPrefs, setPushPrefs] = useState(() => getPushPreferences());
+  const [notifPermission, setNotifPermission] = useState(() => getNotificationSupportStatus());
+  const [inviteModalMeeting, setInviteModalMeeting] = useState<Meeting | null>(null);
+  const [inviteEmailInput, setInviteEmailInput] = useState('');
+  const [sendingInvite, setSendingInvite] = useState(false);
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
+  const loadedNotifIdsRef = React.useRef<Set<string>>(new Set());
+  const notifsHydratedRef = React.useRef(false);
   const lastScrollTop = React.useRef(0);
 
   useEffect(() => {
     setIsHeaderVisible(true);
   }, [activeSidebarTab]);
+
+  useEffect(() => {
+    registerForumServiceWorker();
+    setNotifPermission(getNotificationSupportStatus());
+  }, []);
+
+  // Support deep links to Calendar tabs and pending invite auto-calendar sync
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    const dateParam = searchParams.get('date');
+    if (tabParam === 'calendar' || tabParam === 'meetings' || tabParam === 'contacts' || tabParam === 'notes' || tabParam === 'settings') {
+      setActiveSidebarTab(tabParam);
+    }
+    if (dateParam) {
+      const parsed = new Date(`${dateParam}T12:00:00`);
+      if (!Number.isNaN(parsed.getTime())) setSelectedDate(parsed);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!user) return;
+    const urlInvite = searchParams.get('invite');
+    let pendingInvite: string | null = urlInvite;
+    try {
+      if (!pendingInvite) pendingInvite = localStorage.getItem('pending_forum_invite');
+    } catch {}
+    if (!pendingInvite) return;
+
+    const roomId = pendingInvite;
+    const syncPendingInvite = async () => {
+      try {
+        const emailLower = user.email?.toLowerCase();
+        const mRef = doc(db, 'meetings', roomId);
+        const snap = await getDoc(mRef);
+        if (snap.exists()) {
+          await updateDoc(mRef, {
+            participants: arrayUnion(user.uid),
+            ...(emailLower ? { invitedEmails: arrayUnion(emailLower) } : {})
+          });
+          setDashboardToast({
+            message: `Added "${snap.data()?.title || roomId}" to your Forum Calendar`,
+            type: 'success'
+          });
+          setActiveSidebarTab('calendar');
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Pending invite sync error:', err);
+      } finally {
+        try {
+          localStorage.removeItem('pending_forum_invite');
+        } catch {}
+        if (urlInvite) {
+          const next = new URLSearchParams(searchParams);
+          next.delete('invite');
+          setSearchParams(next, { replace: true });
+        }
+      }
+    };
+    syncPendingInvite();
+  }, [user, searchParams, setSearchParams]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const scrollTop = e.currentTarget.scrollTop;
@@ -128,13 +242,33 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'notifications'), where('userId', '==', user.uid));
+    notifsHydratedRef.current = false;
+    loadedNotifIdsRef.current.clear();
+    const q = query(collection(db, 'notifications'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
     return onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      items.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-      setNotifications(items);
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      if (!notifsHydratedRef.current) {
+        list.forEach(item => loadedNotifIdsRef.current.add(item.id));
+        notifsHydratedRef.current = true;
+      } else {
+        list.forEach(item => {
+          if (!loadedNotifIdsRef.current.has(item.id)) {
+            loadedNotifIdsRef.current.add(item.id);
+            const prefs = getPushPreferences();
+            if (!item.read && prefs.enabled && prefs.inviteAlerts) {
+              void triggerForumPushNotification({
+                title: item.title || 'Forum Notification',
+                body: item.message || 'You have a new update in Forum',
+                url: item.roomId ? `/invite/${item.roomId}` : '/dashboard',
+                tag: `notif-${item.id}`
+              });
+            }
+          }
+        });
+      }
+      setNotifications(list);
     }, (err) => {
-      console.error("[Dashboard] Notifications snapshot error:", err);
+      console.warn('[Dashboard] Notifications listener notice:', err);
     });
   }, [user]);
 
@@ -145,13 +279,35 @@ export default function Dashboard() {
       console.error("Failed to mark notification as read:", err);
     }
   };
+
+  const markAllNotificationsRead = async () => {
+    const unread = notifications.filter(n => !n.read);
+    if (unread.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      unread.forEach(n => {
+        batch.update(doc(db, 'notifications', n.id), { read: true });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error("Failed to mark all notifications read:", err);
+    }
+  };
+
   const [isNewMeetingMenuOpen, setIsNewMeetingMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false);
+  const [isImportContactsModalOpen, setIsImportContactsModalOpen] = useState(false);
+  const [importContactsText, setImportContactsText] = useState('');
+  const [contactToDelete, setContactToDelete] = useState<any | null>(null);
+  const [meetingToDelete, setMeetingToDelete] = useState<Meeting | null>(null);
+  const [dashboardToast, setDashboardToast] = useState<{ message: string; type?: 'info' | 'success' | 'error' } | null>(null);
   const [newContact, setNewContact] = useState({ displayName: '', email: '' });
   const [editingNote, setEditingNote] = useState<any>(null);
+  const [noteCopied, setNoteCopied] = useState(false);
+  const [notesFilter, setNotesFilter] = useState<'all' | 'transcripts' | 'notes'>('all');
   const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
-  const [editMeetingForm, setEditMeetingForm] = useState({ title: '', description: '', date: '', time: '' });
+  const [editMeetingForm, setEditMeetingForm] = useState({ title: '', description: '', date: '', time: '', coverImage: '' });
   const [contacts, setContacts] = useState<any[]>([]);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [notes, setNotes] = useState<any[]>([]);
@@ -197,7 +353,23 @@ export default function Dashboard() {
       }
     });
 
-    // Fetch meetings from local Forum DB
+    // Fetch meetings from local Forum DB (by participant UID + invitedEmail)
+    let participantMeetings: Meeting[] = [];
+    let emailInvitedMeetings: Meeting[] = [];
+
+    const mergeAndSetMeetings = (komuOverride?: Meeting[]) => {
+      setMeetings(prev => {
+        const komuOnes = komuOverride ?? prev.filter(m => m.isKomu);
+        const map = new Map<string, Meeting>();
+        participantMeetings.forEach(m => map.set(m.id, m));
+        emailInvitedMeetings.forEach(m => {
+          if (!map.has(m.id)) map.set(m.id, m);
+        });
+        const mergedLocal = Array.from(map.values());
+        return [...mergedLocal, ...komuOnes].sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+      });
+    };
+
     const q = query(
       collection(db, 'meetings'), 
       where('participants', 'array-contains', user.uid),
@@ -205,40 +377,103 @@ export default function Dashboard() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const localMeetings = snapshot.docs.map(doc => {
-        const data = doc.data();
-        const startTime = data.startTime.toDate();
+      participantMeetings = snapshot.docs.map(d => {
+        const data = d.data();
+        const startTime = data.startTime?.toDate ? data.startTime.toDate() : new Date();
         return {
-          id: doc.id,
+          id: d.id,
           ...data,
           startTime,
-          endTime: data.endTime?.toDate() || new Date(startTime.getTime() + 3600000),
-          notes: data.description || '', // Ensure notes/description are synced
+          endTime: data.endTime?.toDate ? data.endTime.toDate() : new Date(startTime.getTime() + 3600000),
+          notes: data.description || '',
         };
       }) as Meeting[];
       
-      setMeetings(prev => {
-        const komuOnes = prev.filter(m => m.isKomu);
-        return [...localMeetings, ...komuOnes].sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
-      });
+      mergeAndSetMeetings();
       setLoading(false);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'meetings');
     });
+
+    let unsubInvited = () => {};
+    if (user.email) {
+      const emailQ = query(
+        collection(db, 'meetings'),
+        where('invitedEmails', 'array-contains', user.email.toLowerCase())
+      );
+      unsubInvited = onSnapshot(emailQ, (snapshot) => {
+        emailInvitedMeetings = snapshot.docs.map(d => {
+          const data = d.data();
+          const startTime = data.startTime?.toDate ? data.startTime.toDate() : new Date();
+          return {
+            id: d.id,
+            ...data,
+            startTime,
+            endTime: data.endTime?.toDate ? data.endTime.toDate() : new Date(startTime.getTime() + 3600000),
+            notes: data.description || '',
+          };
+        }) as Meeting[];
+        mergeAndSetMeetings();
+      }, (err) => {
+        console.warn('[Dashboard] Invited meetings query notice:', err);
+      });
+    }
 
     // Initial Komu Sync
     const komuUnsubscribe = syncKomuCalendar();
 
     return () => {
       unsubscribe();
+      unsubInvited();
       profileUnsubscribe();
       if (komuUnsubscribe && typeof komuUnsubscribe === 'function') komuUnsubscribe();
     };
   }, [user]);
 
+  // Scheduled meeting reminders (10 minutes prior)
+  useEffect(() => {
+    if (!user || meetings.length === 0) return;
+
+    const checkReminders = () => {
+      const prefs = getPushPreferences();
+      if (!prefs.enabled || !prefs.meetingReminders || getNotificationSupportStatus() !== 'granted') return;
+      const now = Date.now();
+      let sentIds: Record<string, boolean> = {};
+      try {
+        sentIds = JSON.parse(localStorage.getItem('forum_sent_reminders_v1') || '{}');
+      } catch {}
+
+      let updated = false;
+      meetings.forEach((m) => {
+        const diff = m.startTime.getTime() - now;
+        if (diff > -60000 && diff <= 10 * 60 * 1000 && !sentIds[m.id]) {
+          sentIds[m.id] = true;
+          updated = true;
+          const mins = Math.max(0, Math.round(diff / 60000));
+          void triggerForumPushNotification({
+            title: mins <= 1 ? `${m.title} is starting now` : `${m.title} in ${mins} min`,
+            body: `Click to join Room ${m.roomId}`,
+            url: `/meeting/${m.roomId}`,
+            tag: `reminder-${m.id}`,
+          });
+        }
+      });
+
+      if (updated) {
+        try {
+          localStorage.setItem('forum_sent_reminders_v1', JSON.stringify(sentIds));
+        } catch {}
+      }
+    };
+
+    checkReminders();
+    const timer = setInterval(checkReminders, 30000);
+    return () => clearInterval(timer);
+  }, [user, meetings]);
+
   // Fetch Contacts
   useEffect(() => {
-    if (!user || activeSidebarTab !== 'contacts') return;
+    if (!user) return;
     const q = query(collection(db, 'contacts'), where('ownerId', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setContacts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -246,19 +481,25 @@ export default function Dashboard() {
       console.warn("[Dashboard] Contacts snapshot notice:", err);
     });
     return () => unsubscribe();
-  }, [user, activeSidebarTab]);
+  }, [user]);
 
-  // Fetch Notes
+  // Fetch Notes & Transcripts with resilient client-side sort
   useEffect(() => {
-    if (!user || activeSidebarTab !== 'notes') return;
-    const q = query(collection(komuDb, 'notes'), where('uid', '==', user.uid), orderBy('updatedAt', 'desc'));
+    if (!user) return;
+    const q = query(collection(db, 'notes'), where('uid', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setNotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      items.sort((a: any, b: any) => {
+        const timeA = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : (a.updatedAt?.seconds ? a.updatedAt.seconds * 1000 : (typeof a.updatedAt === 'number' ? a.updatedAt : (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0)));
+        const timeB = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : (b.updatedAt?.seconds ? b.updatedAt.seconds * 1000 : (typeof b.updatedAt === 'number' ? b.updatedAt : (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0)));
+        return timeB - timeA;
+      });
+      setNotes(items);
     }, (err) => {
       console.warn("[Dashboard] Notes snapshot notice:", err);
     });
     return () => unsubscribe();
-  }, [user, activeSidebarTab]);
+  }, [user]);
 
   const [recordings, setRecordings] = useState<any[]>([]);
   
@@ -328,13 +569,97 @@ export default function Dashboard() {
     }
   };
 
-  const handleDeleteMeeting = async (meetingId: string) => {
-    if (!user) return;
-    if (!confirm("Are you sure you want to delete this meeting?")) return;
+  const handleImportContacts = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !importContactsText.trim()) return;
+
     try {
-      await deleteDoc(doc(db, 'meetings', meetingId));
+      const lines = importContactsText.split('\n').map(l => l.trim()).filter(Boolean);
+      const batch = writeBatch(db);
+      let count = 0;
+
+      lines.forEach(line => {
+        let name = '';
+        let email = '';
+        if (line.includes(',')) {
+          const parts = line.split(',');
+          name = parts[0].trim();
+          email = parts[1].trim();
+        } else if (line.includes('\t')) {
+          const parts = line.split('\t');
+          name = parts[0].trim();
+          email = parts[1].trim();
+        } else {
+          email = line.trim();
+          name = email.split('@')[0];
+        }
+
+        if (email && email.includes('@')) {
+          const newRef = doc(collection(db, 'contacts'));
+          batch.set(newRef, {
+            displayName: name || email.split('@')[0],
+            email: email.toLowerCase(),
+            ownerId: user.uid,
+            createdAt: Timestamp.now()
+          });
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        await batch.commit();
+        setDashboardToast({ message: `Successfully imported ${count} contacts`, type: 'success' });
+      }
+      setIsImportContactsModalOpen(false);
+      setImportContactsText('');
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `meetings/${meetingId}`);
+      console.error("Failed to import contacts:", err);
+      setDashboardToast({ message: "Failed to import contacts", type: 'error' });
+    }
+  };
+
+  const handleDeleteContact = async (contactId: string) => {
+    if (!contactId) return;
+    try {
+      setContacts(prev => prev.filter(c => c.id !== contactId));
+      setContactToDelete(null);
+      await deleteDoc(doc(db, 'contacts', contactId));
+      setDashboardToast({ message: "Contact deleted", type: 'success' });
+    } catch (err) {
+      console.error("Failed to delete contact:", err);
+      setContacts(prev => prev.filter(c => c.id !== contactId));
+      setContactToDelete(null);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!user || !noteId) return;
+    try {
+      await deleteDoc(doc(db, 'notes', noteId));
+      setEditingNote(null);
+    } catch (err) {
+      console.error("Failed to delete note:", err);
+    }
+  };
+
+  const handleDeleteMeeting = (meetingId: string) => {
+    const target = meetings.find(m => m.id === meetingId);
+    if (target) {
+      setMeetingToDelete(target);
+    } else {
+      setMeetingToDelete({ id: meetingId, title: "Meeting" } as Meeting);
+    }
+  };
+
+  const confirmDeleteMeeting = async () => {
+    if (!user || !meetingToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'meetings', meetingToDelete.id));
+      setMeetingToDelete(null);
+      setDashboardToast({ message: "Meeting deleted successfully", type: 'success' });
+      setTimeout(() => setDashboardToast(null), 3000);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `meetings/${meetingToDelete.id}`);
     }
   };
 
@@ -344,7 +669,8 @@ export default function Dashboard() {
       title: meeting.title,
       description: meeting.description || '',
       date: format(meeting.startTime, 'yyyy-MM-dd'),
-      time: format(meeting.startTime, 'HH:mm')
+      time: format(meeting.startTime, 'HH:mm'),
+      coverImage: meeting.coverImage || DEFAULT_MEETING_COVER
     });
   };
 
@@ -372,7 +698,6 @@ export default function Dashboard() {
       }
 
       // If it's a Google event and we have a token, try to update it there too
-      // Note: This is an optimistic update, we don't block on Google API success
       if (editingMeeting.isGoogle && googleToken) {
         fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${editingMeeting.roomId}`, {
           method: 'PATCH',
@@ -392,10 +717,13 @@ export default function Dashboard() {
       await updateDoc(doc(db, 'meetings', editingMeeting.id), {
         title: editMeetingForm.title,
         description: editMeetingForm.description,
-        notes: editMeetingForm.description, // Keep notes synced with description
+        notes: editMeetingForm.description,
+        coverImage: editMeetingForm.coverImage || DEFAULT_MEETING_COVER,
         startTime: Timestamp.fromDate(startTime)
       });
       setEditingMeeting(null);
+      setDashboardToast({ message: 'Meeting updated', type: 'success' });
+      setTimeout(() => setDashboardToast(null), 2500);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `meetings/${editingMeeting.id}`);
     }
@@ -508,13 +836,57 @@ export default function Dashboard() {
         });
       });
       await batch.commit();
-      alert("Google Calendar synced!");
+      setDashboardToast({ message: "Google Calendar synced successfully!", type: 'success' });
+      setTimeout(() => setDashboardToast(null), 3000);
     } catch (err) {
       console.error("Google Sync Failed:", err);
-      alert("Sync failed. Ensure you granted permissions.");
+      setDashboardToast({ message: "Sync failed. Ensure you granted permissions.", type: 'error' });
+      setTimeout(() => setDashboardToast(null), 4000);
     } finally {
       setSyncing(false);
     }
+  };
+
+  const sendMeetingInviteToEmails = async (meetingObj: { id: string; roomId: string; title: string; hostName?: string }, rawEmails: string[]) => {
+    const emails = Array.from(new Set(rawEmails.map(e => e.trim().toLowerCase()).filter(e => e.includes('@'))));
+    if (emails.length === 0) return 0;
+
+    const participantUids: string[] = [];
+    for (const email of emails) {
+      try {
+        const snap = await getDocs(query(collection(db, 'userProfiles'), where('email', '==', email)));
+        if (!snap.empty) {
+          snap.docs.forEach(d => {
+            const uid = d.data().uid || d.id;
+            if (uid && !participantUids.includes(uid)) {
+              participantUids.push(uid);
+            }
+          });
+        }
+      } catch {}
+    }
+
+    try {
+      await updateDoc(doc(db, 'meetings', meetingObj.id), {
+        invitedEmails: arrayUnion(...emails),
+        ...(participantUids.length > 0 ? { participants: arrayUnion(...participantUids) } : {})
+      });
+    } catch {}
+
+    await Promise.all(
+      participantUids.map((uid) =>
+        addDoc(collection(db, 'notifications'), {
+          userId: uid,
+          type: 'meeting',
+          title: `Meeting Invite: ${meetingObj.title}`,
+          message: `${meetingObj.hostName || 'Host'} invited you. Added to your Forum Calendar.`,
+          roomId: meetingObj.roomId,
+          read: false,
+          createdAt: serverTimestamp(),
+        }).catch(() => {})
+      )
+    );
+    return emails.length;
   };
 
   const handleSchedule = async (e: React.FormEvent) => {
@@ -523,13 +895,18 @@ export default function Dashboard() {
 
     const startTime = new Date(`${newMeeting.date}T${newMeeting.time}`);
     const roomId = Math.random().toString(36).substring(2, 12);
+    const parsedEmails = newMeeting.invitedEmails
+      .split(/[\s,;]+/)
+      .map(s => s.trim().toLowerCase())
+      .filter(s => s.includes('@'));
 
     try {
       const hostEmail = user.email || "";
       const hostName = user.displayName || user.email?.split('@')[0] || 'Host';
+      const resolvedTitle = newMeeting.title || `Meeting ${roomId}`;
 
       await setDoc(doc(db, 'meetings', roomId), {
-        title: newMeeting.title || `Meeting ${roomId}`,
+        title: resolvedTitle,
         description: newMeeting.description,
         notes: newMeeting.description,
         startTime: Timestamp.fromDate(startTime),
@@ -540,7 +917,9 @@ export default function Dashboard() {
         hostName,
         createdBy: hostEmail || hostName,
         participants: [user.uid],
+        invitedEmails: parsedEmails,
         isMeeting: true,
+        coverImage: newMeeting.coverImage || DEFAULT_MEETING_COVER,
         createdAt: Timestamp.now()
       });
 
@@ -553,8 +932,32 @@ export default function Dashboard() {
         admittedList: [user.uid, hostEmail, hostName].filter(Boolean)
       }, { merge: true });
 
+      if (parsedEmails.length > 0) {
+        await sendMeetingInviteToEmails({ id: roomId, roomId, title: resolvedTitle, hostName }, parsedEmails);
+      }
+
+      const inviteLink = `${window.location.origin}/invite/${roomId}`;
+      try {
+        await navigator.clipboard.writeText(inviteLink);
+      } catch {}
+
       setIsScheduling(false);
-      setNewMeeting({ title: '', description: '', date: format(new Date(), 'yyyy-MM-dd'), time: format(new Date(), 'HH:mm'), recurrence: 'none' });
+      setNewMeeting({ 
+        title: '', 
+        description: '', 
+        date: format(new Date(), 'yyyy-MM-dd'), 
+        time: format(new Date(), 'HH:mm'), 
+        recurrence: 'none',
+        coverImage: DEFAULT_MEETING_COVER,
+        invitedEmails: ''
+      });
+      setDashboardToast({
+        message: parsedEmails.length > 0
+          ? `Meeting scheduled & calendar invite copied (${parsedEmails.length} invited)`
+          : 'Meeting scheduled & auto-calendar invite link copied',
+        type: 'success'
+      });
+      setTimeout(() => setDashboardToast(null), 3500);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'meetings');
     }
@@ -662,6 +1065,20 @@ export default function Dashboard() {
             collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
+            icon={<Layers size={20} />} 
+            label="Canvas" 
+            active={activeSidebarTab === 'canvas'} 
+            onClick={() => setActiveSidebarTab('canvas')}
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
+            icon={<Video size={20} />} 
+            label="Clips" 
+            active={activeSidebarTab === 'clips'} 
+            onClick={() => setActiveSidebarTab('clips')}
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
             icon={<Settings size={20} />} 
             label="Settings" 
             active={activeSidebarTab === 'settings'} 
@@ -745,6 +1162,18 @@ export default function Dashboard() {
                   label="Notes" 
                   active={activeSidebarTab === 'notes'} 
                   onClick={() => { setActiveSidebarTab('notes'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Layers size={20} />} 
+                  label="Canvas" 
+                  active={activeSidebarTab === 'canvas'} 
+                  onClick={() => { setActiveSidebarTab('canvas'); setIsMobileMenuOpen(false); }}
+                />
+                <SidebarItem 
+                  icon={<Video size={20} />} 
+                  label="Clips" 
+                  active={activeSidebarTab === 'clips'} 
+                  onClick={() => { setActiveSidebarTab('clips'); setIsMobileMenuOpen(false); }}
                 />
                 <SidebarItem 
                   icon={<Settings size={20} />} 
@@ -860,11 +1289,11 @@ export default function Dashboard() {
                       )}
 
                       {/* Contacts Results */}
-                      {contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.email.toLowerCase().includes(searchQuery.toLowerCase())).length > 0 && (
+                      {contacts.filter(c => (c.displayName || c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || (c.email || '').toLowerCase().includes(searchQuery.toLowerCase())).length > 0 && (
                         <div>
                           <p className="px-2 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">Contacts</p>
                           <div className="space-y-1">
-                            {contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.email.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(c => (
+                            {contacts.filter(c => (c.displayName || c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || (c.email || '').toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(c => (
                               <button 
                                 key={c.id}
                                 onClick={() => { 
@@ -875,14 +1304,14 @@ export default function Dashboard() {
                                 className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-all text-left group"
                               >
                                 <img 
-                                  src={c.avatar || `https://www.gravatar.com/avatar/${btoa(c.email).substring(0, 10)}?d=identicon`} 
+                                  src={c.photoURL || c.avatar || `https://www.gravatar.com/avatar/${btoa(c.email || 'user').substring(0, 10)}?d=identicon`} 
                                   className="w-10 h-10 rounded-lg object-cover shrink-0" 
                                   alt="" 
                                   referrerPolicy="no-referrer" 
                                 />
                                 <div>
-                                  <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{c.name}</p>
-                                  <p className="text-[10px] text-gray-500">{c.role}</p>
+                                  <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{c.displayName || c.name || c.email}</p>
+                                  <p className="text-[10px] text-gray-500">{c.role || c.email || 'Contact'}</p>
                                 </div>
                               </button>
                             ))}
@@ -891,11 +1320,11 @@ export default function Dashboard() {
                       )}
 
                       {/* Notes Results */}
-                      {notes.filter(n => n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase())).length > 0 && (
+                      {notes.filter(n => (n.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || (n.body || n.content || '').toLowerCase().includes(searchQuery.toLowerCase())).length > 0 && (
                         <div>
                           <p className="px-2 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">Notes</p>
                           <div className="space-y-1">
-                            {notes.filter(n => n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(n => (
+                            {notes.filter(n => (n.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || (n.body || n.content || '').toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(n => (
                               <button 
                                 key={n.id}
                                 onClick={() => { 
@@ -909,8 +1338,8 @@ export default function Dashboard() {
                                   <FileText size={18} />
                                 </div>
                                 <div>
-                                  <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{n.title}</p>
-                                  <p className="text-[10px] text-gray-500 line-clamp-1">{n.content}</p>
+                                  <p className="text-sm font-bold text-gray-900 group-hover:text-accent-blue transition-colors line-clamp-1">{n.title || 'Untitled Note'}</p>
+                                  <p className="text-[10px] text-gray-500 line-clamp-1">{n.body || n.content || ''}</p>
                                 </div>
                               </button>
                             ))}
@@ -919,9 +1348,9 @@ export default function Dashboard() {
                       )}
 
                       {/* No Results */}
-                      {meetings.filter(m => m.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 &&
-                       contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 &&
-                       notes.filter(n => n.title.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                      {meetings.filter(m => (m.title || '').toLowerCase().includes(searchQuery.toLowerCase())).length === 0 &&
+                       contacts.filter(c => (c.displayName || c.name || '').toLowerCase().includes(searchQuery.toLowerCase())).length === 0 &&
+                       notes.filter(n => (n.title || '').toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
                         <div className="p-10 text-center space-y-3">
                           <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
                             <Search className="text-gray-300" size={32} />
@@ -959,13 +1388,75 @@ export default function Dashboard() {
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
                       className="absolute right-0 mt-2 w-80 bg-white rounded-3xl shadow-2xl border border-gray-100 py-4 z-50 overflow-hidden"
                     >
-                      <div className="px-6 pb-3 border-b border-gray-50 flex items-center justify-between">
-                        <p className="font-bold text-gray-900">Notifications</p>
-                        <span className="text-[10px] font-black uppercase text-accent-blue tracking-wider">
-                          {notifications.filter(n => !n.read).length} New
-                        </span>
+                      <div className="px-6 pb-3 border-b border-gray-100 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-gray-900 text-sm">Notifications</p>
+                          {notifications.filter(n => !n.read).length > 0 && (
+                            <span className="text-[11px] font-semibold text-accent-blue">
+                              · {notifications.filter(n => !n.read).length} new
+                            </span>
+                          )}
+                        </div>
+                        {notifications.some(n => !n.read) && (
+                          <button
+                            type="button"
+                            onClick={markAllNotificationsRead}
+                            className="text-[11px] font-medium text-slate-500 hover:text-slate-900 cursor-pointer whitespace-nowrap"
+                          >
+                            Mark all read
+                          </button>
+                        )}
                       </div>
-                      <div className="max-h-[400px] overflow-y-auto custom-scroll">
+
+                      {/* Push Notification Enable Bar */}
+                      <div className="px-6 py-2.5 bg-stone-50/80 border-b border-gray-100 flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-slate-600 truncate">
+                          {notifPermission === 'granted' && pushPrefs.enabled
+                            ? 'Push alerts active'
+                            : notifPermission === 'denied'
+                              ? 'Push blocked in browser'
+                              : 'Get browser push alerts'}
+                        </span>
+                        {notifPermission !== 'granted' ? (
+                          <button
+                            type="button"
+                            disabled={notifPermission === 'denied' || notifPermission === 'unsupported'}
+                            onClick={async () => {
+                              const res = await requestForumNotificationPermission();
+                              setNotifPermission(res);
+                              if (res === 'granted') {
+                                const next = { ...pushPrefs, enabled: true };
+                                setPushPrefs(next);
+                                savePushPreferences(next);
+                                void triggerForumPushNotification({
+                                  title: 'Forum Push Notifications Enabled',
+                                  body: 'You will receive calendar & meeting reminders.',
+                                  url: '/dashboard'
+                                });
+                              }
+                            }}
+                            className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 cursor-pointer disabled:opacity-40 whitespace-nowrap"
+                          >
+                            Enable
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void triggerForumPushNotification({
+                                title: 'Forum Alert Test',
+                                body: 'Push notifications are working for Forum meetings.',
+                                url: '/dashboard'
+                              });
+                            }}
+                            className="text-[11px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer whitespace-nowrap"
+                          >
+                            Test
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="max-h-[380px] overflow-y-auto custom-scroll">
                         {notifications.length === 0 ? (
                           <div className="p-10 text-center space-y-3">
                             <div className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center mx-auto text-gray-300">
@@ -978,9 +1469,13 @@ export default function Dashboard() {
                             {notifications.map(n => (
                               <button 
                                 key={n.id} 
-                                onClick={() => markNotificationRead(n.id)}
+                                onClick={() => {
+                                  markNotificationRead(n.id);
+                                  setIsNotificationsOpen(false);
+                                  if (n.roomId) navigate(`/invite/${n.roomId}`);
+                                }}
                                 className={cn(
-                                  "w-full px-6 py-4 text-left transition-all hover:bg-gray-50 flex gap-3",
+                                  "w-full px-6 py-4 text-left transition-all hover:bg-gray-50 flex gap-3 cursor-pointer",
                                   !n.read && "bg-blue-50/30"
                                 )}
                               >
@@ -990,7 +1485,7 @@ export default function Dashboard() {
                                 )}>
                                   {n.type === 'meeting' ? <Video size={16} /> : <Bell size={16} />}
                                 </div>
-                                <div className="space-y-1">
+                                <div className="space-y-1 min-w-0">
                                   <p className="text-sm font-bold text-gray-900 line-clamp-1">{n.title}</p>
                                   <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{n.message}</p>
                                   <p className="text-[10px] text-gray-400">{n.createdAt?.toDate ? format(n.createdAt.toDate(), 'h:mm a') : 'Now'}</p>
@@ -1008,12 +1503,18 @@ export default function Dashboard() {
 
             <div className="flex items-center gap-3 pl-4">
               {user ? (
-                <img 
-                  src={user.photoURL || `https://picsum.photos/seed/${user.uid}/40/40`} 
-                  alt="Avatar" 
-                  className="w-9 h-9 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
-                  referrerPolicy="no-referrer"
-                />
+                user.photoURL ? (
+                  <img 
+                    src={user.photoURL} 
+                    alt="Avatar" 
+                    className="w-9 h-9 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-slate-900 text-white text-xs font-semibold flex items-center justify-center shadow-sm">
+                    {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                  </div>
+                )
               ) : (
                 <button 
                   onClick={login}
@@ -1126,6 +1627,48 @@ export default function Dashboard() {
                   </div>
                 </div>
 
+                {/* Personal Meeting ID (PMI) Card */}
+                <div className="bg-white p-5 sm:p-6 rounded-2xl border border-neutral-200/80 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-baseline gap-2.5">
+                      <span className="text-xs font-medium text-slate-600">
+                        Personal Meeting ID
+                      </span>
+                      <span className="text-sm font-mono font-semibold text-slate-900">
+                        pmi-{user?.uid?.substring(0, 8) || 'my-room'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Your permanent conference room link with dedicated 6-digit Host Key.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const pmiRoom = `pmi-${user?.uid || 'guest'}`;
+                        joinMeeting(pmiRoom, true);
+                      }}
+                      className="flex-1 md:flex-none px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer whitespace-nowrap"
+                    >
+                      Start PMI Call
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const link = `${window.location.origin}/meeting/pmi-${user?.uid || 'guest'}`;
+                        navigator.clipboard.writeText(`Join my Personal Meeting Room: ${link}`);
+                        setDashboardToast({ message: "Personal Meeting link copied to clipboard", type: 'success' });
+                      }}
+                      className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Copy size={13} />
+                      <span>Copy Link</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Meetings List & Recent Recordings Sidebars */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-6">
@@ -1182,6 +1725,11 @@ export default function Dashboard() {
                               key={meeting.id} 
                               meeting={meeting} 
                               onJoin={() => joinMeeting(meeting.roomId)}
+                              onInvite={() => {
+                                setInviteModalMeeting(meeting);
+                                setInviteEmailInput('');
+                                setInviteLinkCopied(false);
+                              }}
                               onEdit={() => handleEditMeeting(meeting)}
                               onDelete={() => handleDeleteMeeting(meeting.id)}
                             />
@@ -1384,6 +1932,11 @@ export default function Dashboard() {
                                 key={meeting.id} 
                                 meeting={meeting} 
                                 onJoin={() => joinMeeting(meeting.roomId)}
+                                onInvite={() => {
+                                  setInviteModalMeeting(meeting);
+                                  setInviteEmailInput('');
+                                  setInviteLinkCopied(false);
+                                }}
                                 onEdit={() => handleEditMeeting(meeting)}
                                 onDelete={() => handleDeleteMeeting(meeting.id)}
                               />
@@ -1444,6 +1997,11 @@ export default function Dashboard() {
                                 key={meeting.id} 
                                 meeting={meeting} 
                                 onJoin={() => joinMeeting(meeting.roomId)}
+                                onInvite={() => {
+                                  setInviteModalMeeting(meeting);
+                                  setInviteEmailInput('');
+                                  setInviteLinkCopied(false);
+                                }}
                                 onEdit={() => handleEditMeeting(meeting)}
                                 onDelete={() => handleDeleteMeeting(meeting.id)}
                               />
@@ -1506,75 +2064,103 @@ export default function Dashboard() {
             {activeSidebarTab === 'contacts' && (
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <h2 className="text-2xl font-bold text-gray-900">Contacts</h2>
-                  <div className="flex items-center gap-3">
-                    <div className="relative group">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-gray-700 transition-colors" size={18} />
+                  <div>
+                    <h2 className="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">Contacts</h2>
+                    <p className="text-xs text-slate-500 mt-1">Manage and sync your conference directory</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="relative group min-w-[200px]">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-700 transition-colors" size={15} />
                       <input 
                         type="text" 
                         placeholder="Search contacts..." 
                         value={contactSearchQuery}
                         onChange={(e) => setContactSearchQuery(e.target.value)}
-                        className="pl-10 pr-4 py-2 bg-white rounded-xl shadow-sm focus:ring-2 focus:ring-gray-200 outline-none w-full sm:w-64 transition-all"
+                        className="pl-9 pr-3.5 py-2 bg-white rounded-xl border border-neutral-200/80 text-xs text-slate-900 placeholder-slate-400 outline-none focus:ring-1 focus:ring-emerald-700/50 w-full transition-all shadow-xs"
                       />
                     </div>
                     <button 
-                      onClick={() => setIsAddContactModalOpen(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-xl font-medium text-sm hover:bg-gray-800 transition-all shrink-0 shadow-sm"
+                      onClick={() => setIsImportContactsModalOpen(true)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-stone-50 text-slate-800 rounded-xl text-xs font-medium transition-colors border border-neutral-200/80 cursor-pointer shadow-xs whitespace-nowrap"
                     >
-                      <Plus size={18} />
-                      <span className="hidden sm:inline">Add Contact</span>
-                      <span className="sm:hidden">Add</span>
+                      <FolderUp size={14} className="text-slate-600" />
+                      <span>Import Contacts</span>
+                    </button>
+                    <button 
+                      onClick={() => setIsAddContactModalOpen(true)}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+                    >
+                      <Plus size={14} />
+                      <span>Add Contact</span>
                     </button>
                   </div>
                 </div>
+
                 {contacts.length === 0 ? (
-                  <div className="p-12 bg-white rounded-3xl shadow-sm text-center space-y-4">
-                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
-                      <Users className="text-gray-300" size={32} />
+                  <div className="p-12 bg-white rounded-2xl border border-neutral-200/70 text-center space-y-3">
+                    <div className="w-12 h-12 bg-stone-100 rounded-2xl border border-neutral-200 flex items-center justify-center mx-auto text-slate-500">
+                      <Users size={20} />
                     </div>
-                    <p className="text-gray-500 font-medium">No contacts imported yet.</p>
+                    <p className="text-sm font-medium text-slate-900">No contacts in directory</p>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      Add contacts manually or import a contact list to quickly invite attendees to your meetings.
+                    </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
                     {contacts
                       .filter(c => 
-                        c.displayName.toLowerCase().includes(contactSearchQuery.toLowerCase()) || 
-                        c.email.toLowerCase().includes(contactSearchQuery.toLowerCase())
+                        (c.displayName || '').toLowerCase().includes(contactSearchQuery.toLowerCase()) || 
+                        (c.email || '').toLowerCase().includes(contactSearchQuery.toLowerCase())
                       )
                       .map(contact => (
-                      <div key={contact.id} className="bg-white p-4 rounded-2xl shadow-sm flex items-center gap-4 hover:shadow-md transition-all cursor-pointer group">
-                        <div className="w-12 h-12 rounded-xl relative overflow-hidden bg-gray-50">
-                          <img 
-                            src={contact.photoURL || `https://www.gravatar.com/avatar/${btoa(contact.email).substring(0, 10)}?d=identicon`} 
-                            className="w-full h-full object-cover" 
-                            alt={contact.displayName} 
-                            referrerPolicy="no-referrer"
-                          />
+                      <div key={contact.id} className="bg-white p-4 rounded-2xl border border-neutral-200/70 hover:border-slate-300 transition-all flex items-center gap-3.5 shadow-xs">
+                        <div className="w-10 h-10 rounded-xl relative overflow-hidden bg-stone-100 border border-neutral-200/60 shrink-0 flex items-center justify-center font-medium text-slate-700 text-xs">
+                          {contact.photoURL ? (
+                            <img 
+                              src={contact.photoURL} 
+                              className="w-full h-full object-cover" 
+                              alt={contact.displayName} 
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span>{(contact.displayName || contact.email || 'U').charAt(0).toUpperCase()}</span>
+                          )}
                         </div>
-                        <div className="flex-1">
-                          <p className="font-bold text-gray-900 group-hover:text-gray-700 transition-colors line-clamp-1">{contact.displayName}</p>
-                          <p className="text-xs text-gray-500 line-clamp-1">{contact.email}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-slate-900 text-xs truncate">{contact.displayName || contact.email}</p>
+                          <p className="text-[11px] text-slate-500 truncate mt-0.5">{contact.email}</p>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <button className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all" title="Message">
-                            <MessageSquare size={18} />
-                          </button>
+                        <div className="flex items-center gap-1 shrink-0">
                           <button 
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" 
-                            title="Remove"
+                            className="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-slate-700 text-[11px] font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap" 
+                            title="Copy auto-calendar meeting invite link for this contact"
                             onClick={async (e) => {
                               e.stopPropagation();
-                              if(confirm('Delete contact?')) {
-                                try {
-                                  await deleteDoc(doc(db, 'contacts', contact.id));
-                                } catch (err) {
-                                  console.error("Failed to delete contact:", err);
-                                }
+                              const pmiRoom = `pmi-${user?.uid || 'guest'}`;
+                              const inviteLink = `${window.location.origin}/invite/${pmiRoom}`;
+                              navigator.clipboard.writeText(inviteLink);
+                              if (contact.email) {
+                                await sendMeetingInviteToEmails(
+                                  { id: pmiRoom, roomId: pmiRoom, title: `${user?.displayName || 'Personal'} Meeting`, hostName: user?.displayName || 'Host' },
+                                  [contact.email]
+                                );
                               }
+                              setDashboardToast({ message: `Calendar invite copied & sent for ${contact.displayName || contact.email}`, type: 'success' });
+                              setTimeout(() => setDashboardToast(null), 3000);
                             }}
                           >
-                            <Trash2 size={18} />
+                            Invite
+                          </button>
+                          <button 
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer" 
+                            title="Remove contact"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setContactToDelete(contact);
+                            }}
+                          >
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </div>
@@ -1586,34 +2172,100 @@ export default function Dashboard() {
 
             {activeSidebarTab === 'notes' && (
               <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">Notes</h2>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">Notes & Transcripts</h2>
+                    <p className="text-xs text-slate-500 mt-1">Review meeting transcripts, notes, and AI summaries</p>
+                  </div>
+                  {/* Filter Subtabs */}
+                  <div className="inline-flex p-1 bg-stone-100 rounded-xl border border-neutral-200/70 shrink-0">
+                    <button
+                      onClick={() => setNotesFilter('all')}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer whitespace-nowrap",
+                        notesFilter === 'all' ? "bg-white text-slate-900 shadow-xs font-medium border border-neutral-200/60" : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      All ({notes.length})
+                    </button>
+                    <button
+                      onClick={() => setNotesFilter('transcripts')}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer whitespace-nowrap",
+                        notesFilter === 'transcripts' ? "bg-white text-slate-900 shadow-xs font-medium border border-neutral-200/60" : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      Transcripts ({notes.filter(n => n.title?.includes('Transcript') || n.type === 'transcript').length})
+                    </button>
+                    <button
+                      onClick={() => setNotesFilter('notes')}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer whitespace-nowrap",
+                        notesFilter === 'notes' ? "bg-white text-slate-900 shadow-xs font-medium border border-neutral-200/60" : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      Notes ({notes.filter(n => !n.title?.includes('Transcript') && n.type !== 'transcript').length})
+                    </button>
+                  </div>
                 </div>
+
                 {notes.length === 0 ? (
-                  <div className="p-12 bg-white rounded-3xl shadow-sm text-center space-y-4">
-                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto">
-                      <FileText className="text-gray-300" size={32} />
+                  <div className="p-12 bg-white rounded-2xl border border-neutral-200/70 text-center space-y-3">
+                    <div className="w-12 h-12 bg-stone-100 rounded-2xl border border-neutral-200 flex items-center justify-center mx-auto text-slate-500">
+                      <FileText size={20} />
                     </div>
-                    <p className="text-gray-500 font-medium">No notes found.</p>
+                    <p className="text-sm font-medium text-slate-900">No notes or transcripts yet</p>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      Enable live captions or automatic transcript saving in meetings to generate real-time records here.
+                    </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {notes.map(note => (
-                      <div 
-                        key={note.id} 
-                        onClick={() => setEditingNote(note)}
-                        className="bg-white p-6 rounded-3xl shadow-sm space-y-4 hover:shadow-md transition-all cursor-pointer group"
-                      >
-                        <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 group-hover:bg-gray-200 group-hover:text-gray-700 transition-all">
-                          <FileText size={20} />
-                        </div>
-                        <h4 className="font-bold text-gray-900 line-clamp-1">{note.title || 'Untitled'}</h4>
-                        <p className="text-sm text-gray-500 line-clamp-3">{note.body || 'No content'}</p>
-                        <p className="text-[10px] text-gray-400">
-                          Last edited {note.updatedAt?.toDate ? format(note.updatedAt.toDate(), 'MMM d, yyyy') : 'Recently'}
-                        </p>
-                      </div>
-                    ))}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {notes
+                      .filter(note => {
+                        const isTranscript = note.title?.includes('Transcript') || note.type === 'transcript';
+                        if (notesFilter === 'transcripts') return isTranscript;
+                        if (notesFilter === 'notes') return !isTranscript;
+                        return true;
+                      })
+                      .map(note => {
+                        const isTranscript = note.title?.includes('Transcript') || note.type === 'transcript';
+                        return (
+                          <div 
+                            key={note.id} 
+                            onClick={() => setEditingNote(note)}
+                            className="bg-white p-5 rounded-2xl border border-neutral-200/70 hover:border-slate-300 transition-all cursor-pointer flex flex-col justify-between space-y-3.5 shadow-xs group"
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className={cn(
+                                  "w-8 h-8 rounded-xl flex items-center justify-center text-xs font-medium border",
+                                  isTranscript ? "bg-emerald-50 text-emerald-800 border-emerald-200/60" : "bg-stone-100 text-slate-700 border-neutral-200/60"
+                                )}>
+                                  {isTranscript ? <MessageSquare size={14} /> : <FileText size={14} />}
+                                </div>
+                                {isTranscript && (
+                                  <span className="text-[11px] font-medium text-emerald-700">
+                                    Transcript
+                                  </span>
+                                )}
+                              </div>
+                              <h4 className="font-semibold text-slate-900 text-sm line-clamp-1 group-hover:text-emerald-800 transition-colors">
+                                {note.title || 'Untitled'}
+                              </h4>
+                              <p className="text-xs text-slate-500 line-clamp-3 leading-relaxed whitespace-pre-line">
+                                {note.body || 'No content recorded'}
+                              </p>
+                            </div>
+                            <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-[11px] text-slate-400">
+                              <span>
+                                {note.updatedAt?.toDate ? format(note.updatedAt.toDate(), 'MMM d, yyyy') : 'Recently'}
+                              </span>
+                              <span className="text-slate-500 font-medium group-hover:underline">View Details →</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                   </div>
                 )}
               </div>
@@ -1626,7 +2278,8 @@ export default function Dashboard() {
                   <button 
                     onClick={() => {
                       saveSettings(settings);
-                      alert('Settings saved!');
+                      setDashboardToast({ message: 'Settings saved successfully', type: 'success' });
+                      setTimeout(() => setDashboardToast(null), 3000);
                     }}
                     className="px-5 sm:px-8 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium text-sm shadow-sm transition-all active:scale-95"
                   >
@@ -1693,7 +2346,119 @@ export default function Dashboard() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Push Notifications Section */}
+                  <div className="bg-white p-6 rounded-3xl shadow-sm space-y-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="font-bold text-gray-900">Push Notifications</h3>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {notifPermission === 'granted'
+                            ? 'Browser push alerts are enabled on this device'
+                            : notifPermission === 'denied'
+                              ? 'Blocked in browser permissions'
+                              : notifPermission === 'unsupported'
+                                ? 'Not supported in this browser'
+                                : 'Enable real-time meeting and calendar alerts'}
+                        </p>
+                      </div>
+                      {notifPermission !== 'granted' ? (
+                        <button
+                          type="button"
+                          disabled={notifPermission === 'denied' || notifPermission === 'unsupported'}
+                          onClick={async () => {
+                            const res = await requestForumNotificationPermission();
+                            setNotifPermission(res);
+                            if (res === 'granted') {
+                              const next = { ...pushPrefs, enabled: true };
+                              setPushPrefs(next);
+                              savePushPreferences(next);
+                              setDashboardToast({ message: 'Push notifications enabled!', type: 'success' });
+                              setTimeout(() => setDashboardToast(null), 2500);
+                            }
+                          }}
+                          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-colors cursor-pointer disabled:opacity-40 whitespace-nowrap"
+                        >
+                          Enable Push
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await triggerForumPushNotification({
+                              title: 'Forum Push Notifications',
+                              body: 'Notifications are active for meeting invites & reminders.',
+                              url: '/dashboard'
+                            });
+                            setDashboardToast({ message: 'Test notification sent', type: 'success' });
+                            setTimeout(() => setDashboardToast(null), 2500);
+                          }}
+                          className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-slate-800 text-xs font-medium rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          Send Test Alert
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-bold text-gray-900">Upcoming meeting reminders</span>
+                        <p className="text-[10px] text-gray-500">Notify 10 minutes before scheduled calls start</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = { ...pushPrefs, meetingReminders: !pushPrefs.meetingReminders };
+                          setPushPrefs(next);
+                          savePushPreferences(next);
+                        }}
+                        className={cn("w-10 h-5 rounded-full relative transition-all cursor-pointer", pushPrefs.meetingReminders ? "bg-gray-900" : "bg-gray-200")}
+                      >
+                        <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", pushPrefs.meetingReminders ? "right-1" : "left-1")} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
+                      <div className="space-y-0.5">
+                        <span className="text-sm font-bold text-gray-900">Calendar & invite notifications</span>
+                        <p className="text-[10px] text-gray-500">Alert when someone invites you to a Forum meeting</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = { ...pushPrefs, inviteAlerts: !pushPrefs.inviteAlerts };
+                          setPushPrefs(next);
+                          savePushPreferences(next);
+                        }}
+                        className={cn("w-10 h-5 rounded-full relative transition-all cursor-pointer", pushPrefs.inviteAlerts ? "bg-gray-900" : "bg-gray-200")}
+                      >
+                        <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", pushPrefs.inviteAlerts ? "right-1" : "left-1")} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
+              </div>
+            )}
+
+            {activeSidebarTab === 'canvas' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">Canvas Workspace</h2>
+                  <p className="text-xs text-slate-500 mt-1">Organize ideas, projects, and actionable conference takeaways</p>
+                </div>
+                <div className="min-h-[560px]">
+                  <MeetingCanvas userId={user?.uid || 'user'} userName={user?.displayName || 'Host'} />
+                </div>
+              </div>
+            )}
+
+            {activeSidebarTab === 'clips' && (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">Clips Basic</h2>
+                  <p className="text-xs text-slate-500 mt-1">Record and export quick screen recordings or webcam video messages</p>
+                </div>
+                <ClipsBasic userId={user?.uid || 'user'} userName={user?.displayName || 'Host'} />
               </div>
             )}
           </div>
@@ -1703,101 +2468,358 @@ export default function Dashboard() {
       {/* Add Contact Modal */}
       <AnimatePresence>
         {isAddContactModalOpen && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-md rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
             >
-              <div className="p-8 space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">Add New Contact</h2>
-                  <button onClick={() => setIsAddContactModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
-                    <X size={20} />
-                  </button>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-light text-slate-900 tracking-tight">Add Contact</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Add an individual to your conference directory</p>
                 </div>
-                <form onSubmit={handleAddContact} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Full Name</label>
-                    <input 
-                      type="text" 
-                      required
-                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                      value={newContact.displayName}
-                      onChange={e => setNewContact(prev => ({ ...prev, displayName: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Email Address</label>
-                    <input 
-                      type="email" 
-                      required
-                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                      value={newContact.email}
-                      onChange={e => setNewContact(prev => ({ ...prev, email: e.target.value }))}
-                    />
-                  </div>
+                <button 
+                  onClick={() => setIsAddContactModalOpen(false)} 
+                  className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddContact} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Full Name</label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="e.g. Sarah Connor"
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                    value={newContact.displayName}
+                    onChange={e => setNewContact(prev => ({ ...prev, displayName: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Email Address</label>
+                  <input 
+                    type="email" 
+                    required
+                    placeholder="name@company.com"
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                    value={newContact.email}
+                    onChange={e => setNewContact(prev => ({ ...prev, email: e.target.value }))}
+                  />
+                </div>
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setIsAddContactModalOpen(false)}
+                    className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Cancel
+                  </button>
                   <button 
                     type="submit"
-                    className="w-full py-4 bg-accent-blue text-white rounded-2xl font-bold shadow-lg shadow-accent-blue/20"
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
                   >
-                    Add Contact
+                    Save Contact
                   </button>
-                </form>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Import Contacts Modal */}
+      <AnimatePresence>
+        {isImportContactsModalOpen && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-lg rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-light text-slate-900 tracking-tight">Import Contacts</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Paste list of contacts or upload a CSV file</p>
+                </div>
+                <button 
+                  onClick={() => setIsImportContactsModalOpen(false)} 
+                  className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleImportContacts} className="space-y-4">
+                <div className="flex items-center justify-between gap-3 p-3 bg-stone-50 rounded-xl border border-neutral-200/70">
+                  <div className="text-xs text-slate-600">
+                    <p className="font-medium text-slate-900">Supported format</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">One contact per line: <code className="bg-stone-200/70 px-1 rounded">Name, email@domain.com</code></p>
+                  </div>
+                  <label className="px-3 py-1.5 bg-white hover:bg-stone-100 border border-neutral-300 text-slate-800 rounded-lg text-xs font-medium cursor-pointer shadow-xs whitespace-nowrap">
+                    Upload CSV
+                    <input 
+                      type="file" 
+                      accept=".csv,.txt" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            setImportContactsText(event.target?.result as string || '');
+                          };
+                          reader.readAsText(file);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Contacts Data</label>
+                  <textarea 
+                    rows={6}
+                    placeholder={"Alice Smith, alice@example.com\nBob Jones, bob@company.org\ncarol@domain.io"}
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs font-mono text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors resize-none leading-relaxed"
+                    value={importContactsText}
+                    onChange={e => setImportContactsText(e.target.value)}
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setIsImportContactsModalOpen(false)}
+                    className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={!importContactsText.trim()}
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer disabled:opacity-50"
+                  >
+                    Import Contacts
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Contact Confirmation Modal */}
+      <AnimatePresence>
+        {contactToDelete && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-sm rounded-2xl border border-neutral-200/80 shadow-md p-6 space-y-4 overflow-hidden"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-light text-slate-900 tracking-tight">Remove Contact</h3>
+                <button onClick={() => setContactToDelete(null)} className="p-1 text-slate-400 hover:text-slate-800 rounded-lg">
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Are you sure you want to delete <span className="font-semibold text-slate-900">{contactToDelete.displayName || contactToDelete.email}</span> from your contacts?
+              </p>
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button 
+                  onClick={() => setContactToDelete(null)}
+                  className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => handleDeleteContact(contactToDelete.id)}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
+                >
+                  Delete
+                </button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Edit Note Modal */}
+      {/* Delete Meeting Confirmation Modal */}
       <AnimatePresence>
-        {editingNote && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6">
+        {meetingToDelete && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-2xl h-[80vh] rounded-[40px] shadow-2xl overflow-hidden flex flex-col"
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              className="bg-white w-full max-w-sm rounded-2xl border border-neutral-200/80 shadow-md p-6 space-y-4"
             >
-              <div className="p-8 border-b border-gray-100 flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Edit Note</h2>
-                  <p className="text-xs text-gray-400 mt-1">Changes are saved automatically</p>
-                </div>
-                <button onClick={() => setEditingNote(null)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
-                  <X size={20} />
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-light text-slate-900 tracking-tight">Delete Meeting</h3>
+                <button onClick={() => setMeetingToDelete(null)} className="p-1 text-slate-400 hover:text-slate-800 rounded-lg">
+                  <X size={16} />
                 </button>
               </div>
-              <div className="flex-1 p-8 overflow-y-auto space-y-6">
-                <input 
-                  type="text"
-                  value={editingNote.title}
-                  onChange={e => setEditingNote({ ...editingNote, title: e.target.value })}
-                  placeholder="Note Title"
-                  className="text-3xl font-bold text-gray-900 border-none outline-none w-full bg-transparent"
-                />
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Are you sure you want to delete <span className="font-semibold text-slate-900">{meetingToDelete.title || "this meeting"}</span>? This action cannot be undone.
+              </p>
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button 
+                  onClick={() => setMeetingToDelete(null)}
+                  className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmDeleteMeeting}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Dashboard Minimalist Floating Toast */}
+      <AnimatePresence>
+        {dashboardToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-6 z-[300] flex items-center gap-2.5 px-4 py-2.5 bg-slate-900 text-white text-xs font-medium rounded-xl shadow-lg border border-slate-800"
+          >
+            <span>{dashboardToast.message}</span>
+            <button 
+              onClick={() => setDashboardToast(null)}
+              className="p-0.5 text-slate-400 hover:text-white rounded"
+            >
+              <X size={13} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Note & Meeting Transcript Viewer / Editor Modal */}
+      <AnimatePresence>
+        {editingNote && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-3xl h-[85vh] rounded-2xl border border-neutral-200/80 shadow-md overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="p-5 sm:p-6 border-b border-neutral-200/80 flex items-center justify-between gap-4 shrink-0 bg-white">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={cn(
+                      "text-xs font-medium",
+                      editingNote.title?.includes('Transcript') || editingNote.type === 'transcript'
+                        ? "text-emerald-700"
+                        : "text-slate-600"
+                    )}>
+                      {editingNote.title?.includes('Transcript') || editingNote.type === 'transcript' ? 'Meeting Transcript' : 'Document Note'}
+                    </span>
+                    <span className="text-slate-300">·</span>
+                    <span className="text-[11px] text-slate-400">
+                      {editingNote.updatedAt?.toDate ? format(editingNote.updatedAt.toDate(), 'MMMM d, yyyy • h:mm a') : 'Saved locally'}
+                    </span>
+                  </div>
+                  <input 
+                    type="text"
+                    value={editingNote.title}
+                    onChange={e => setEditingNote({ ...editingNote, title: e.target.value })}
+                    placeholder="Note Title"
+                    className="text-lg sm:text-xl font-light text-slate-900 border-none outline-none w-full bg-transparent tracking-tight"
+                  />
+                </div>
+
+                {/* Header Action Buttons */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${editingNote.title}\n\n${editingNote.body}`);
+                      setNoteCopied(true);
+                      setTimeout(() => setNoteCopied(false), 2000);
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-stone-100 hover:bg-stone-200/70 border border-neutral-200 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer"
+                    title="Copy to clipboard"
+                  >
+                    {noteCopied ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
+                    <span className="hidden sm:inline">{noteCopied ? 'Copied' : 'Copy'}</span>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const blob = new Blob([`${editingNote.title}\n\n${editingNote.body}`], { type: 'text/plain;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = `${editingNote.title || 'Meeting_Transcript'}.txt`;
+                      link.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="p-2 bg-stone-100 hover:bg-stone-200/70 border border-neutral-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
+                    title="Download transcript"
+                  >
+                    <Download size={14} />
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteNote(editingNote.id)}
+                    className="p-2 bg-stone-100 hover:bg-rose-50 border border-neutral-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 rounded-xl transition-colors cursor-pointer"
+                    title="Delete note"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                  <button 
+                    onClick={() => setEditingNote(null)} 
+                    className="p-2 hover:bg-stone-100 text-slate-400 hover:text-slate-800 rounded-xl transition-colors cursor-pointer ml-1"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 p-5 sm:p-6 overflow-y-auto space-y-4 bg-stone-50/40 custom-scroll">
                 <textarea 
                   value={editingNote.body}
                   onChange={e => setEditingNote({ ...editingNote, body: e.target.value })}
-                  placeholder="Start writing..."
-                  className="w-full flex-1 min-h-[400px] border-none outline-none resize-none text-gray-700 leading-relaxed text-lg"
+                  placeholder="Record transcripts or take meeting notes..."
+                  className="w-full h-full min-h-[350px] border-none outline-none resize-none text-slate-800 text-xs sm:text-sm leading-relaxed font-sans bg-transparent placeholder-slate-400"
                 />
               </div>
-              <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
-                <button 
-                  onClick={() => setEditingNote(null)}
-                  className="px-6 py-2.5 text-gray-500 font-bold"
-                >
-                  Close
-                </button>
-                <button 
-                  onClick={() => handleUpdateNote(editingNote)}
-                  className="px-8 py-2.5 bg-accent-blue text-white rounded-xl font-bold shadow-lg shadow-accent-blue/20"
-                >
-                  Save Changes
-                </button>
+
+              {/* Footer */}
+              <div className="p-4 sm:p-5 bg-white border-t border-neutral-200/80 flex items-center justify-between gap-3 shrink-0">
+                <p className="text-[11px] text-slate-400">
+                  {editingNote.body ? `${editingNote.body.split(/\s+/).filter(Boolean).length} words` : 'Empty note'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setEditingNote(null)}
+                    className="px-4 py-2 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Close
+                  </button>
+                  <button 
+                    onClick={() => handleUpdateNote(editingNote)}
+                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
+                  >
+                    Save Changes
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -1807,72 +2829,122 @@ export default function Dashboard() {
       {/* Edit Meeting Modal */}
       <AnimatePresence>
         {editingMeeting && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-md rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
             >
-              <div className="p-8 space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">Edit Meeting</h2>
-                  <button onClick={() => setEditingMeeting(null)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
-                    <X size={20} />
-                  </button>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-light text-slate-900 tracking-tight">Edit Meeting</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Update scheduled conference details</p>
                 </div>
-                <form onSubmit={handleUpdateMeeting} className="space-y-4">
+                <button onClick={() => setEditingMeeting(null)} className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateMeeting} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Title</label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="Meeting Title"
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                    value={editMeetingForm.title}
+                    onChange={e => setEditMeetingForm(prev => ({ ...prev, title: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Title</label>
+                    <label className="text-xs font-medium text-slate-700 block">Date</label>
                     <input 
-                      type="text" 
+                      type="date" 
                       required
-                      placeholder="Meeting Title"
-                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                      value={editMeetingForm.title}
-                      onChange={e => setEditMeetingForm(prev => ({ ...prev, title: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                      value={editMeetingForm.date}
+                      onChange={e => setEditMeetingForm(prev => ({ ...prev, date: e.target.value }))}
                     />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Date</label>
-                      <input 
-                        type="date" 
-                        required
-                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                        value={editMeetingForm.date}
-                        onChange={e => setEditMeetingForm(prev => ({ ...prev, date: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Time</label>
-                      <input 
-                        type="time" 
-                        required
-                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                        value={editMeetingForm.time}
-                        onChange={e => setEditMeetingForm(prev => ({ ...prev, time: e.target.value }))}
-                      />
-                    </div>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Description</label>
-                    <textarea 
-                      placeholder="Optional meeting details..."
-                      rows={3}
-                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none resize-none"
-                      value={editMeetingForm.description}
-                      onChange={e => setEditMeetingForm(prev => ({ ...prev, description: e.target.value }))}
+                    <label className="text-xs font-medium text-slate-700 block">Time</label>
+                    <input 
+                      type="time" 
+                      required
+                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                      value={editMeetingForm.time}
+                      onChange={e => setEditMeetingForm(prev => ({ ...prev, time: e.target.value }))}
                     />
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Description</label>
+                  <textarea 
+                    placeholder="Optional meeting agenda..."
+                    rows={2}
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors resize-none"
+                    value={editMeetingForm.description}
+                    onChange={e => setEditMeetingForm(prev => ({ ...prev, description: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-700">Cover Image</label>
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer whitespace-nowrap">
+                      <Upload size={13} />
+                      <span>Upload image</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          try {
+                            const compressed = await compressCoverImageFile(f);
+                            setEditMeetingForm(prev => ({ ...prev, coverImage: compressed }));
+                          } catch {}
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {MEETING_COVER_PRESETS.map(preset => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setEditMeetingForm(prev => ({ ...prev, coverImage: preset.url }))}
+                        className={cn(
+                          "relative h-12 rounded-xl overflow-hidden border-2 transition-all cursor-pointer",
+                          editMeetingForm.coverImage === preset.url
+                            ? "border-emerald-600 ring-2 ring-emerald-600/30"
+                            : "border-neutral-200 hover:border-slate-400"
+                        )}
+                      >
+                        <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setEditingMeeting(null)}
+                    className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Cancel
+                  </button>
                   <button 
                     type="submit"
-                    className="w-full py-4 bg-accent-blue text-white rounded-2xl font-bold shadow-lg shadow-accent-blue/20 hover:bg-blue-600 transition-all active:scale-95 mt-4"
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
                   >
                     Save Changes
                   </button>
-                </form>
-              </div>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}
@@ -1881,31 +2953,42 @@ export default function Dashboard() {
       {/* Join Meeting Modal */}
       <AnimatePresence>
         {isJoinMeetingModalOpen && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-md rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
             >
-              <div className="p-8 space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">Join Meeting</h2>
-                  <button onClick={() => setIsJoinMeetingModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
-                    <X size={20} />
-                  </button>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-light text-slate-900 tracking-tight">Join Meeting</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Enter meeting room code or conference URL</p>
                 </div>
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Meeting ID or Link</label>
-                    <input 
-                      type="text" 
-                      placeholder="Enter ID or link"
-                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                      value={joinCode}
-                      onChange={e => setJoinCode(e.target.value)}
-                    />
-                  </div>
+                <button onClick={() => setIsJoinMeetingModalOpen(false)} className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Meeting ID or URL</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. room-123 or https://..."
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                    value={joinCode}
+                    onChange={e => setJoinCode(e.target.value)}
+                  />
+                </div>
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setIsJoinMeetingModalOpen(false)}
+                    className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Cancel
+                  </button>
                   <button 
                     onClick={() => {
                       if (joinCode) {
@@ -1913,9 +2996,10 @@ export default function Dashboard() {
                         setIsJoinMeetingModalOpen(false);
                       }
                     }}
-                    className="w-full py-4 bg-accent-blue text-white rounded-2xl font-bold shadow-lg shadow-accent-blue/20 hover:bg-blue-600 transition-all active:scale-95 disabled:opacity-50"
+                    disabled={!joinCode.trim()}
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer disabled:opacity-50"
                   >
-                    Join
+                    Join Call
                   </button>
                 </div>
               </div>
@@ -1927,207 +3011,371 @@ export default function Dashboard() {
       {/* Share Screen Modal */}
       <AnimatePresence>
         {isSharing && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden"
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-md rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
             >
-              <div className="p-8 space-y-6 text-center">
-                <div className="flex items-center justify-between text-left">
-                  <h2 className="text-2xl font-bold text-gray-900">Share Screen</h2>
-                  <button onClick={() => setIsSharing(false)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
-                    <X size={20} />
-                  </button>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-light text-slate-900 tracking-tight">Share Screen</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Start presenting your screen to a conference</p>
                 </div>
-                <div className="py-8 flex flex-col items-center gap-4">
-                  <div className="w-20 h-20 bg-orange-100 text-orange-500 rounded-full flex items-center justify-center">
-                    <Monitor size={40} />
-                  </div>
-                  <p className="text-gray-600 text-sm">Enter a meeting ID to start sharing your screen instantly.</p>
+                <button onClick={() => setIsSharing(false)} className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Target Meeting ID (Optional)</label>
                   <input 
                     type="text" 
-                    placeholder="Meeting ID (optional)"
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-orange-500/20 outline-none text-center font-bold"
+                    placeholder="Leave blank to create a new session"
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
                     value={shareCode}
                     onChange={e => setShareCode(e.target.value)}
                   />
-                  <p className="text-[10px] text-gray-400 italic">If left blank, a new meeting will be created.</p>
                 </div>
-                <button 
-                  onClick={() => {
-                    const target = shareCode || Math.random().toString(36).substring(2, 12);
-                    navigate(`/meeting/${target}?share=true`);
-                    setIsSharing(false);
-                  }}
-                  className="w-full py-4 bg-orange-500 text-white rounded-2xl font-bold shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95"
-                >
-                  Share Screen
-                </button>
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setIsSharing(false)}
+                    className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const target = shareCode || Math.random().toString(36).substring(2, 12);
+                      navigate(`/meeting/${target}?share=true`);
+                      setIsSharing(false);
+                    }}
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
+                  >
+                    Start Presenting
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-        {/* Scheduling Modal */}
+      {/* Scheduling Modal */}
       <AnimatePresence>
         {isScheduling && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden"
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-lg rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
             >
-              <div className="p-8 space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-gray-900">Schedule Meeting</h2>
-                  <button onClick={() => setIsScheduling(false)} className="p-2 hover:bg-gray-100 rounded-full transition-all">
-                    <X size={20} />
-                  </button>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-light text-slate-900 tracking-tight">Schedule Meeting</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Set up an upcoming conference room</p>
                 </div>
+                <button onClick={() => setIsScheduling(false)} className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer">
+                  <X size={18} />
+                </button>
+              </div>
 
-                <form onSubmit={handleSchedule} className="space-y-4">
+              <form onSubmit={handleSchedule} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Meeting Title</label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="e.g. Design Architecture Review"
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                    value={newMeeting.title}
+                    onChange={e => setNewMeeting(prev => ({ ...prev, title: e.target.value }))}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Meeting Title</label>
+                    <label className="text-xs font-medium text-slate-700 block">Date</label>
                     <input 
-                      type="text" 
+                      type="date"
                       required
-                      placeholder="e.g. Weekly Sync"
-                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none"
-                      value={newMeeting.title}
-                      onChange={e => setNewMeeting(prev => ({ ...prev, title: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                      value={newMeeting.date}
+                      onChange={e => setNewMeeting(prev => ({ ...prev, date: e.target.value }))}
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5 relative">
-                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Date</label>
-                      <div 
-                        onClick={() => setShowDatePicker(!showDatePicker)}
-                        className="w-full px-4 py-3 bg-gray-50 rounded-xl cursor-pointer flex items-center justify-between group hover:bg-gray-100 transition-all"
-                      >
-                        <span className="text-sm text-gray-900 font-medium">
-                          {format(parseISO(newMeeting.date), 'MMMM d, yyyy')}
-                        </span>
-                        <CalendarIcon size={16} className="text-gray-400 group-hover:text-accent-blue transition-colors" />
-                      </div>
-                      <AnimatePresence>
-                        {showDatePicker && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute top-full left-0 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-[300] w-72"
-                          >
-                            <input 
-                              type="date"
-                              className="w-full border-none focus:ring-0 p-0 text-sm font-bold text-accent-blue"
-                              value={newMeeting.date}
-                              onChange={(e) => {
-                                setNewMeeting(prev => ({ ...prev, date: e.target.value }));
-                                setShowDatePicker(false);
-                              }}
-                            />
-                            <div className="mt-4 grid grid-cols-7 gap-1 text-center">
-                              {/* Simple fallback custom view if native is still preferred inside bubble, but user wants nice */}
-                              <div className="text-[10px] font-bold text-gray-400 py-1">S</div>
-                              <div className="text-[10px] font-bold text-gray-400 py-1">M</div>
-                              <div className="text-[10px] font-bold text-gray-400 py-1">T</div>
-                              <div className="text-[10px] font-bold text-gray-400 py-1">W</div>
-                              <div className="text-[10px] font-bold text-gray-400 py-1">T</div>
-                              <div className="text-[10px] font-bold text-gray-400 py-1">F</div>
-                              <div className="text-[10px] font-bold text-gray-400 py-1">S</div>
-                              {/* We'll use the native picker for the actual selection logic to ensure range safety, but wrap it in a beautiful UI */}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                    <div className="space-y-1.5 relative">
-                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Time</label>
-                      <div 
-                        onClick={() => setShowTimePicker(!showTimePicker)}
-                        className="w-full px-4 py-3 bg-gray-50 rounded-xl cursor-pointer flex items-center justify-between group hover:bg-gray-100 transition-all"
-                      >
-                        <span className="text-sm text-gray-900 font-medium">{newMeeting.time}</span>
-                        <Clock size={16} className="text-gray-400 group-hover:text-accent-blue transition-colors" />
-                      </div>
-                      <AnimatePresence>
-                        {showTimePicker && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute top-full left-0 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 p-2 z-[300] w-48 max-h-60 overflow-y-auto custom-scroll"
-                          >
-                            {Array.from({ length: 24 }).map((_, h) => (
-                              Array.from({ length: 4 }).map((_, m) => {
-                                const timeStr = `${h.toString().padStart(2, '0')}:${(m * 15).toString().padStart(2, '0')}`;
-                                return (
-                                  <button 
-                                    key={timeStr}
-                                    onClick={() => {
-                                      setNewMeeting(prev => ({ ...prev, time: timeStr }));
-                                      setShowTimePicker(false);
-                                    }}
-                                    className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-lg text-sm font-medium text-gray-700"
-                                  >
-                                    {timeStr}
-                                  </button>
-                                );
-                              })
-                            ))}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-700 block">Time</label>
+                    <input 
+                      type="time"
+                      required
+                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                      value={newMeeting.time}
+                      onChange={e => setNewMeeting(prev => ({ ...prev, time: e.target.value }))}
+                    />
                   </div>
-                  <div className="space-y-3">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Recurrence</label>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { id: 'none', label: 'Once', icon: <Plus size={14} /> },
-                        { id: 'daily', label: 'Daily', icon: <RefreshCw size={14} /> },
-                        { id: 'weekly', label: 'Weekly', icon: <Calendar size={14} /> },
-                        { id: 'monthly', label: 'Monthly', icon: <Clock size={14} /> },
-                      ].map(option => (
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Recurrence</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { id: 'none', label: 'Once' },
+                      { id: 'daily', label: 'Daily' },
+                      { id: 'weekly', label: 'Weekly' },
+                      { id: 'monthly', label: 'Monthly' },
+                    ].map(option => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setNewMeeting(prev => ({ ...prev, recurrence: option.id as any }))}
+                        className={cn(
+                          "py-2 px-2.5 rounded-xl text-xs font-medium transition-colors border text-center cursor-pointer whitespace-nowrap",
+                          newMeeting.recurrence === option.id 
+                            ? "bg-slate-900 text-white border-slate-900 shadow-xs" 
+                            : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Description (Optional)</label>
+                  <textarea 
+                    placeholder="Add meeting agenda or notes..."
+                    rows={2}
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors resize-none"
+                    value={newMeeting.description}
+                    onChange={e => setNewMeeting(prev => ({ ...prev, description: e.target.value }))}
+                  />
+                </div>
+
+                {/* Invite Attendees */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Invite Attendees (Optional Emails)</label>
+                  <input
+                    type="text"
+                    placeholder="teammate@company.com, partner@studio.io"
+                    className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 transition-colors"
+                    value={newMeeting.invitedEmails}
+                    onChange={e => setNewMeeting(prev => ({ ...prev, invitedEmails: e.target.value }))}
+                  />
+                </div>
+
+                {/* Cover Image Picker */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-700">Meeting Cover Image</label>
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer whitespace-nowrap">
+                      <Upload size={13} />
+                      <span>Upload photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          try {
+                            const compressed = await compressCoverImageFile(file);
+                            setNewMeeting(prev => ({ ...prev, coverImage: compressed }));
+                          } catch {}
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {MEETING_COVER_PRESETS.map(preset => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setNewMeeting(prev => ({ ...prev, coverImage: preset.url }))}
+                        className={cn(
+                          "relative h-14 rounded-xl overflow-hidden border-2 transition-all cursor-pointer group text-left",
+                          newMeeting.coverImage === preset.url
+                            ? "border-emerald-600 ring-2 ring-emerald-600/30"
+                            : "border-neutral-200 hover:border-slate-400"
+                        )}
+                      >
+                        <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-1 left-1.5 text-[9px] font-semibold text-white drop-shadow">
+                          {preset.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="url"
+                    value={newMeeting.coverImage?.startsWith('data:') ? '' : (newMeeting.coverImage || '')}
+                    onChange={(e) => setNewMeeting(prev => ({ ...prev, coverImage: e.target.value }))}
+                    placeholder="Or paste custom cover image URL..."
+                    className="w-full px-3 py-1.5 bg-stone-50 border border-neutral-200 rounded-xl text-[11px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-700"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2.5">
+                  <button 
+                    type="button"
+                    onClick={() => setIsScheduling(false)}
+                    className="px-4 py-2.5 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
+                  >
+                    Schedule Meeting
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Send Calendar Invite Modal */}
+      <AnimatePresence>
+        {inviteModalMeeting && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white w-full max-w-md rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
+            >
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 pr-3">
+                  <h3 className="text-xl font-light text-slate-900 tracking-tight truncate">Invite to Meeting</h3>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">{inviteModalMeeting.title}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInviteModalMeeting(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer shrink-0"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Direct Auto-Calendar Invite Link */}
+              <div className="space-y-2 p-3.5 bg-stone-50 rounded-xl border border-neutral-200/70">
+                <p className="text-xs font-medium text-slate-800">Auto-Calendar Invite Link</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Anyone who opens this link has the meeting automatically added to their Forum Calendar.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${window.location.origin}/invite/${inviteModalMeeting.roomId}`}
+                    className="flex-1 min-w-0 px-3 py-1.5 bg-white border border-neutral-200 rounded-lg text-[11px] font-mono text-slate-700 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = `${window.location.origin}/invite/${inviteModalMeeting.roomId}`;
+                      navigator.clipboard.writeText(url);
+                      setInviteLinkCopied(true);
+                      setTimeout(() => setInviteLinkCopied(false), 2000);
+                    }}
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                  >
+                    {inviteLinkCopied ? <Check size={13} /> : <Copy size={13} />}
+                    <span>{inviteLinkCopied ? 'Copied' : 'Copy Link'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Send Direct Invite by Email */}
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!inviteEmailInput.trim() || sendingInvite) return;
+                  setSendingInvite(true);
+                  const list = inviteEmailInput.split(/[\s,;]+/).filter(Boolean);
+                  const sentCount = await sendMeetingInviteToEmails(
+                    {
+                      id: inviteModalMeeting.id,
+                      roomId: inviteModalMeeting.roomId,
+                      title: inviteModalMeeting.title,
+                      hostName: inviteModalMeeting.hostName
+                    },
+                    list
+                  );
+                  setSendingInvite(false);
+                  if (sentCount > 0) {
+                    setInviteEmailInput('');
+                    setDashboardToast({ message: `Calendar invite sent to ${sentCount} attendee(s)`, type: 'success' });
+                    setTimeout(() => setDashboardToast(null), 3000);
+                  }
+                }}
+                className="space-y-3"
+              >
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Send directly by email</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="colleague@company.com"
+                      value={inviteEmailInput}
+                      onChange={(e) => setInviteEmailInput(e.target.value)}
+                      className="flex-1 min-w-0 px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!inviteEmailInput.trim() || sendingInvite}
+                      className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {sendingInvite ? 'Sending...' : 'Send Invite'}
+                    </button>
+                  </div>
+                </div>
+
+                {contacts.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] font-medium text-slate-500 block">Quick add from contacts</span>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scroll">
+                      {contacts.slice(0, 8).map((c) => (
                         <button
-                          key={option.id}
+                          key={c.id}
                           type="button"
-                          onClick={() => setNewMeeting(prev => ({ ...prev, recurrence: option.id as any }))}
-                          className={cn(
-                            "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border-2",
-                            newMeeting.recurrence === option.id 
-                              ? "bg-accent-blue/10 border-accent-blue text-accent-blue" 
-                              : "bg-gray-50 border-transparent text-gray-500 hover:bg-gray-100"
-                          )}
+                          onClick={() => {
+                            if (!c.email) return;
+                            setInviteEmailInput(prev => prev ? `${prev}, ${c.email}` : c.email);
+                          }}
+                          className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg text-[11px] font-medium transition-colors cursor-pointer truncate max-w-[160px]"
                         >
-                          {option.icon}
-                          {option.label}
+                          + {c.displayName || c.email}
                         </button>
                       ))}
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Description</label>
-                    <textarea 
-                      placeholder="Optional meeting details..."
-                      rows={3}
-                      className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none resize-none"
-                      value={newMeeting.description}
-                      onChange={e => setNewMeeting(prev => ({ ...prev, description: e.target.value }))}
-                    />
-                  </div>
-                  <button 
-                    type="submit"
-                    className="w-full py-4 bg-accent-blue text-white rounded-2xl font-bold shadow-lg shadow-accent-blue/20 hover:bg-blue-600 transition-all active:scale-95 mt-4"
+                )}
+
+                <div className="pt-2 flex items-center justify-between border-t border-neutral-100">
+                  <a
+                    href={`mailto:?subject=${encodeURIComponent(`Forum Invite: ${inviteModalMeeting.title}`)}&body=${encodeURIComponent(`You're invited to ${inviteModalMeeting.title} on Forum.\n\nAdd to Forum Calendar & Join:\n${window.location.origin}/invite/${inviteModalMeeting.roomId}`)}`}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900"
                   >
-                    Schedule
+                    <Mail size={14} />
+                    <span>Open Email App</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setInviteModalMeeting(null)}
+                    className="px-4 py-2 bg-stone-100 hover:bg-stone-200/70 text-slate-700 rounded-xl text-xs font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Done
                   </button>
-                </form>
-              </div>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}
@@ -2197,89 +3445,175 @@ function QuickActionCard({
   );
 }
 
-function MeetingCard({ meeting, onJoin, onEdit, onDelete }: { meeting: Meeting, onJoin: () => void, onEdit: () => void, onDelete: () => void, key?: string }) {
+function MeetingCard({ meeting, onJoin, onInvite, onEdit, onDelete }: { meeting: Meeting, onJoin: () => void, onInvite: () => void, onEdit: () => void, onDelete: () => void, key?: string }) {
   const isNow = Math.abs(meeting.startTime.getTime() - Date.now()) < 15 * 60 * 1000;
   const isMeetingToday = isToday(meeting.startTime);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
+  const meetingUrl = `${window.location.origin}/meeting/${meeting.roomId}`;
+
+  const handleExportICS = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    downloadICSFile({
+      title: meeting.title,
+      description: meeting.description,
+      location: meetingUrl,
+      startTime: meeting.startTime,
+      endTime: meeting.endTime || new Date(meeting.startTime.getTime() + 60 * 60 * 1000),
+      roomId: meeting.roomId,
+      organizerName: meeting.hostName
+    }, `${meeting.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.ics`);
+  };
+
+  const handleGoogleCalendar = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const gUrl = getGoogleCalendarUrl({
+      title: meeting.title,
+      description: meeting.description,
+      location: meetingUrl,
+      startTime: meeting.startTime,
+      endTime: meeting.endTime || new Date(meeting.startTime.getTime() + 60 * 60 * 1000),
+      roomId: meeting.roomId
+    });
+    window.open(gUrl, '_blank', 'noopener,noreferrer');
+  };
+
   return (
-    <div id={`meeting-${meeting.id}`} className="bg-white p-4 sm:p-6 rounded-3xl shadow-sm hover:shadow-md transition-all group relative scroll-mt-24">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center sm:items-start gap-3 sm:gap-4 truncate">
-          <div className={cn(
-            "w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex flex-col items-center justify-center shrink-0 relative",
-            isNow ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600"
-          )}>
-            <span className="text-[8px] sm:text-[10px] font-bold uppercase leading-none">{format(meeting.startTime, 'MMM')}</span>
-            <span className="text-lg sm:text-xl font-bold">{format(meeting.startTime, 'dd')}</span>
-            {isMeetingToday && (
-              <div className="absolute -top-1 -right-1 px-1 py-0.5 bg-gray-900 text-[7px] text-white font-bold rounded-md shadow-sm">
-                NOW
-              </div>
-            )}
-          </div>
-          <div className="space-y-0.5 min-w-0">
-            <div className="flex items-center gap-2">
-              <h4 className="font-bold text-gray-900 text-sm sm:text-base truncate">{meeting.title}</h4>
-              {meeting.isKomu && (
-                <span className="text-[9px] sm:text-[10px] font-bold text-gray-500 uppercase tracking-wider shrink-0">KOMU</span>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 flex items-center gap-2">
-              <Clock size={12} className="shrink-0 text-gray-400" />
-              <span className="truncate">{format(meeting.startTime, 'hh:mm a')} • {meeting.hostName}</span>
-            </p>
-          </div>
+    <div id={`meeting-${meeting.id}`} className="bg-white rounded-2xl border border-neutral-200/80 shadow-xs hover:shadow-md transition-all group overflow-hidden flex flex-col sm:flex-row min-h-0">
+      {/* Cover Image Banner */}
+      {meeting.coverImage ? (
+        <div className="w-full sm:w-44 md:w-52 h-32 sm:h-auto shrink-0 relative overflow-hidden bg-stone-100">
+          <img 
+            src={meeting.coverImage} 
+            alt={meeting.title} 
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent sm:hidden" />
+          <span className="absolute bottom-2.5 left-3 text-[11px] font-semibold text-white drop-shadow sm:hidden">
+            {format(meeting.startTime, 'MMM dd')}
+          </span>
         </div>
-        <div className="flex items-center justify-between sm:justify-end gap-2">
-          <button 
-            onClick={onJoin}
-            className={cn(
-              "flex-1 sm:flex-none px-6 py-2.5 rounded-xl font-medium transition-all active:scale-95 text-xs sm:text-sm",
-              isNow 
-                ? "bg-gray-900 text-white hover:bg-gray-800 shadow-sm" 
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+      ) : (
+        <div className="w-full sm:w-20 shrink-0 bg-stone-100 flex sm:flex-col items-center justify-center p-3 border-b sm:border-b-0 sm:border-r border-neutral-200/70">
+          <span className="text-[10px] font-bold text-slate-500 uppercase">{format(meeting.startTime, 'MMM')}</span>
+          <span className="text-xl font-light text-slate-900">{format(meeting.startTime, 'dd')}</span>
+        </div>
+      )}
+
+      {/* Meeting Details Content */}
+      <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between gap-3 min-w-0">
+        <div className="space-y-1.5 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h4 className="font-semibold text-slate-900 text-sm sm:text-base truncate">{meeting.title}</h4>
+            {isMeetingToday && (
+              <span className="text-[11px] font-semibold text-emerald-700">
+                · Today
+              </span>
             )}
-          >
-            {isNow ? 'Join Now' : 'Join'}
-          </button>
-          <div className="relative">
-            <button 
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="p-2.5 text-gray-400 hover:bg-gray-100 rounded-xl transition-all"
+            {meeting.isKomu && (
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">· KOMU</span>
+            )}
+          </div>
+
+          <p className="text-xs text-slate-600 flex items-center gap-2">
+            <Clock size={13} className="shrink-0 text-slate-400" />
+            <span className="font-medium text-slate-800">{format(meeting.startTime, 'EEEE, MMM d, yyyy • h:mm a')}</span>
+            <span className="text-slate-400 hidden sm:inline">• Host: {meeting.hostName}</span>
+          </p>
+
+          {meeting.description && (
+            <p className="text-xs text-slate-500 line-clamp-1 leading-relaxed">
+              {meeting.description}
+            </p>
+          )}
+        </div>
+
+        {/* Action Row */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-neutral-100">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleExportICS}
+              className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-slate-700 text-xs font-medium rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              title="Download standardized .ics calendar file"
             >
-              <MoreVertical size={18} />
+              <Download size={13} />
+              <span>Export (.ics)</span>
             </button>
-            <AnimatePresence>
-              {isMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                    className="absolute right-0 bottom-full mb-2 w-40 bg-white rounded-2xl shadow-xl py-1.5 z-50 overflow-hidden"
-                  >
-                    {!meeting.isKomu && (
-                      <button 
-                        onClick={() => { onEdit(); setIsMenuOpen(false); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
-                      >
-                        <Edit2 size={14} className="text-gray-400" />
-                        Edit
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => { onDelete(); setIsMenuOpen(false); }}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors"
-                    >
-                      <Trash2 size={14} className="text-red-400" />
-                      Delete
-                    </button>
-                  </motion.div>
-                </>
+            <button
+              type="button"
+              onClick={handleGoogleCalendar}
+              className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-slate-700 text-xs font-medium rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              title="Add to Google Calendar"
+            >
+              <CalendarIcon size={13} />
+              <span>Google Cal</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onInvite();
+              }}
+              className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-slate-700 text-xs font-medium rounded-xl transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap"
+              title="Send calendar invite link or email"
+            >
+              <Share2 size={13} />
+              <span>Invite</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={onJoin}
+              className={cn(
+                "px-5 py-2 rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer whitespace-nowrap",
+                isNow 
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white" 
+                  : "bg-slate-800 hover:bg-slate-700 text-white"
               )}
-            </AnimatePresence>
+            >
+              {isNow ? 'Join Call Now' : 'Join'}
+            </button>
+
+            <div className="relative">
+              <button 
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                className="p-2 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer"
+              >
+                <MoreVertical size={16} />
+              </button>
+              <AnimatePresence>
+                {isMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                      className="absolute right-0 bottom-full mb-2 w-40 bg-white rounded-xl shadow-xl border border-neutral-200/80 py-1.5 z-50 overflow-hidden"
+                    >
+                      {!meeting.isKomu && (
+                        <button 
+                          onClick={() => { onEdit(); setIsMenuOpen(false); }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-slate-700 hover:bg-stone-50 transition-colors"
+                        >
+                          <Edit2 size={13} className="text-slate-400" />
+                          Edit
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => { onDelete(); setIsMenuOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 transition-colors"
+                      >
+                        <Trash2 size={13} className="text-rose-400" />
+                        Delete
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
       </div>

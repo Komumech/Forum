@@ -4,7 +4,8 @@ import {
   Pencil, Eraser, Type, Minus, Square, Circle, Undo, Trash2, Download,
   FileText, Plus, Copy, Check, Folder, Search, X, Edit2, Upload,
   FileCode2, FilePlus, RefreshCw, Layers, Eye, MoreVertical, CopyCheck, ArrowUpDown,
-  Bot, Loader2, CornerDownLeft, CheckCheck, ChevronLeft, Maximize2, Minimize2
+  Bot, Loader2, CornerDownLeft, CheckCheck, ChevronLeft, Maximize2, Minimize2,
+  Image as ImageIcon, Volume2, Video, File
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,6 +15,8 @@ export interface WorkspaceFile {
   name: string;
   content: string;
   updatedAt: number;
+  fileType?: 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'code';
+  mimeType?: string;
 }
 
 export interface RemoteCursor {
@@ -44,14 +47,31 @@ interface JointWorkspaceProps {
   onBroadcast?: (data: any) => void;
   incomingBroadcast?: any;
   defaultMode?: 'editor' | 'whiteboard';
+  onBack?: () => void;
   onClose?: () => void;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
 }
 
 // Material 3 neutral grey file icon component
-function NeutralFileIcon({ name, size = 16 }: { name: string; size?: number }) {
-  return <FileText size={size} className="text-[#5f6368] shrink-0" />;
+function NeutralFileIcon({ name, fileType, size = 16 }: { name: string; fileType?: string; size?: number }) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (fileType === 'image' || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
+    return <ImageIcon size={size} className="text-slate-600 shrink-0" />;
+  }
+  if (fileType === 'pdf' || ext === 'pdf') {
+    return <File size={size} className="text-rose-600 shrink-0" />;
+  }
+  if (fileType === 'audio' || ['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext)) {
+    return <Volume2 size={size} className="text-emerald-700 shrink-0" />;
+  }
+  if (fileType === 'video' || ['mp4', 'webm', 'mov'].includes(ext)) {
+    return <Video size={size} className="text-indigo-600 shrink-0" />;
+  }
+  if (['js', 'ts', 'tsx', 'jsx', 'json', 'py', 'html', 'css'].includes(ext)) {
+    return <FileCode2 size={size} className="text-slate-600 shrink-0" />;
+  }
+  return <FileText size={size} className="text-slate-500 shrink-0" />;
 }
 
 export default function JointWorkspace({ 
@@ -62,6 +82,7 @@ export default function JointWorkspace({
   onBroadcast,
   incomingBroadcast,
   defaultMode = 'editor',
+  onBack,
   onClose,
   isMaximized = false,
   onToggleMaximize
@@ -353,14 +374,29 @@ export default function JointWorkspace({
     if (!uploadedFiles || uploadedFiles.length === 0) return;
 
     Array.from(uploadedFiles).forEach(file => {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      let detectedType: 'text' | 'image' | 'pdf' | 'audio' | 'video' = 'text';
+
+      if (file.type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
+        detectedType = 'image';
+      } else if (file.type === 'application/pdf' || ext === 'pdf') {
+        detectedType = 'pdf';
+      } else if (file.type.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext)) {
+        detectedType = 'audio';
+      } else if (file.type.startsWith('video/') || ['mp4', 'webm', 'mov'].includes(ext)) {
+        detectedType = 'video';
+      }
+
       const reader = new FileReader();
       reader.onload = (event) => {
-        const textContent = (event.target?.result as string) || '';
+        const resultString = (event.target?.result as string) || '';
         const newFile: WorkspaceFile = {
           id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           name: file.name,
-          content: textContent,
-          updatedAt: Date.now()
+          content: resultString,
+          updatedAt: Date.now(),
+          fileType: detectedType,
+          mimeType: file.type || undefined
         };
 
         setFiles(prev => [...prev, newFile]);
@@ -376,7 +412,12 @@ export default function JointWorkspace({
           });
         }
       };
-      reader.readAsText(file);
+
+      if (detectedType === 'image' || detectedType === 'pdf' || detectedType === 'audio' || detectedType === 'video') {
+        reader.readAsDataURL(file);
+      } else {
+        reader.readAsText(file);
+      }
     });
   };
 
@@ -402,7 +443,11 @@ export default function JointWorkspace({
   // Copy code / content
   const handleCopyCode = () => {
     if (!activeFile) return;
-    navigator.clipboard.writeText(activeFile.content);
+    if (activeFile.content.startsWith('data:')) {
+      navigator.clipboard.writeText(`[File: ${activeFile.name}]`);
+    } else {
+      navigator.clipboard.writeText(activeFile.content);
+    }
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 2000);
   };
@@ -410,13 +455,20 @@ export default function JointWorkspace({
   // Download active file
   const handleDownloadFile = () => {
     if (!activeFile) return;
-    const blob = new Blob([activeFile.content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = activeFile.name;
-    link.click();
-    URL.revokeObjectURL(url);
+    if (activeFile.content.startsWith('data:')) {
+      const link = document.createElement('a');
+      link.href = activeFile.content;
+      link.download = activeFile.name;
+      link.click();
+    } else {
+      const blob = new Blob([activeFile.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = activeFile.name;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
   };
 
   // AI Workspace Assistant handler
@@ -716,8 +768,18 @@ export default function JointWorkspace({
 
       {/* Top Navigation Bar */}
       <div className="px-3.5 sm:px-4 py-2 bg-white border-b border-gray-200 flex items-center justify-between gap-2.5 shrink-0">
-        {/* Left: Mode Toggle */}
+        {/* Left: Back Button (if opened from sub-menu) + Mode Toggle */}
         <div className="flex items-center gap-2 min-w-0">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="p-1.5 hover:bg-stone-100 rounded-xl text-slate-600 hover:text-slate-900 transition-colors cursor-pointer shrink-0"
+              title="Back"
+            >
+              <ChevronLeft size={18} />
+            </button>
+          )}
           <div className="inline-flex p-1 bg-stone-100 rounded-xl border border-neutral-200/70 shrink-0">
             <button
               onClick={() => setMode('editor')}
@@ -957,7 +1019,7 @@ export default function JointWorkspace({
                       )}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <NeutralFileIcon name={file.name} size={15} />
+                        <NeutralFileIcon name={file.name} fileType={file.fileType} size={15} />
                         <span className="truncate">{file.name}</span>
                       </div>
 
@@ -1030,7 +1092,7 @@ export default function JointWorkspace({
                       <ChevronLeft size={14} />
                       <span>Files</span>
                     </button>
-                    <NeutralFileIcon name={activeFile.name} size={15} />
+                    <NeutralFileIcon name={activeFile.name} fileType={activeFile.fileType} size={15} />
                     <span className="text-xs sm:text-sm font-semibold text-gray-900 truncate">{activeFile.name}</span>
                   </div>
 
@@ -1214,82 +1276,160 @@ export default function JointWorkspace({
                   )}
                 </AnimatePresence>
 
-                {/* Editor Workspace Surface with Multi-User Cursors */}
-                <div className="flex-1 relative flex overflow-auto bg-white select-text">
-                  {/* Line Numbers Column */}
-                  <div className="w-12 py-3 bg-[#fafafa] border-r border-gray-200 text-gray-400 text-right pr-3 select-none shrink-0 font-mono text-xs leading-6">
-                    {lines.map((_, i) => (
-                      <div 
-                        key={i} 
-                        className={cn(
-                          "h-6 flex items-center justify-end",
-                          cursorPos.line === i + 1 ? "text-gray-900 font-bold" : ""
-                        )}
-                      >
-                        {i + 1}
+                {/* Editor Workspace Surface: Preview or Text Editor */}
+                {(() => {
+                  const ext = (activeFile.name.split('.').pop() || '').toLowerCase();
+                  const isImage = activeFile.fileType === 'image' || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext);
+                  const isPdf = activeFile.fileType === 'pdf' || ext === 'pdf';
+                  const isAudio = activeFile.fileType === 'audio' || ['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext);
+                  const isVideo = activeFile.fileType === 'video' || ['mp4', 'webm', 'mov'].includes(ext);
+
+                  if (isImage) {
+                    return (
+                      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-stone-50/60 overflow-auto">
+                        <div className="max-w-2xl max-h-[70vh] p-3 bg-white rounded-2xl border border-neutral-200/80 shadow-xs flex items-center justify-center overflow-hidden">
+                          <img 
+                            src={activeFile.content} 
+                            alt={activeFile.name} 
+                            className="max-w-full max-h-[64vh] object-contain rounded-xl select-none" 
+                          />
+                        </div>
+                        <div className="mt-3.5 flex items-center gap-2 text-xs text-slate-500 font-medium">
+                          <ImageIcon size={14} className="text-slate-400" />
+                          <span>{activeFile.name}</span>
+                          <span className="text-slate-300">•</span>
+                          <span className="uppercase text-[11px] text-slate-400">{ext} Image</span>
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  }
 
-                  {/* Text Area & Live Remote Cursors Overlay */}
-                  <div className="relative flex-1 min-w-[300px]">
-                    <textarea
-                      ref={textareaRef}
-                      value={activeFile.content}
-                      onChange={(e) => handleContentChange(e.target.value)}
-                      onKeyUp={handleCursorMove}
-                      onClick={handleCursorMove}
-                      onSelect={handleCursorMove}
-                      spellCheck={false}
-                      placeholder="Type notes, code, documents, or paste content here..."
-                      className="w-full h-full p-3 font-mono text-xs sm:text-[13px] leading-6 bg-transparent text-gray-900 resize-none outline-none border-none whitespace-pre overflow-auto placeholder-gray-400"
-                    />
+                  if (isPdf) {
+                    return (
+                      <div className="flex-1 w-full h-full bg-stone-100 flex flex-col overflow-hidden">
+                        <iframe 
+                          src={activeFile.content} 
+                          title={activeFile.name} 
+                          className="w-full h-full border-none" 
+                        />
+                      </div>
+                    );
+                  }
 
-                    {/* Real Remote Cursors Overlay */}
-                    <div className="absolute inset-0 pointer-events-none p-3 overflow-hidden">
-                      {activeRemoteCursorsInFile.map((cursor) => {
-                        const topPx = (cursor.line - 1) * 24 + 12;
-                        const leftPx = Math.min(800, (cursor.col - 1) * 7.8 + 12);
+                  if (isAudio) {
+                    return (
+                      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-stone-50/60">
+                        <div className="p-8 bg-white rounded-2xl border border-neutral-200/80 shadow-xs max-w-md w-full space-y-5 text-center">
+                          <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200/60 flex items-center justify-center mx-auto text-emerald-800">
+                            <Volume2 size={24} />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-semibold text-slate-900 truncate">{activeFile.name}</h4>
+                            <p className="text-xs text-slate-400 mt-1 uppercase tracking-wide">{ext} Audio Stream</p>
+                          </div>
+                          <audio src={activeFile.content} controls className="w-full outline-none" />
+                        </div>
+                      </div>
+                    );
+                  }
 
-                        return (
-                          <motion.div
-                            key={cursor.senderId}
-                            initial={false}
-                            animate={{ top: topPx, left: leftPx }}
-                            transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                            className="absolute z-20 flex flex-col items-start"
+                  if (isVideo) {
+                    return (
+                      <div className="flex-1 flex flex-col items-center justify-center p-6 bg-stone-50/60 overflow-auto">
+                        <div className="max-w-3xl max-h-[72vh] p-2 bg-black rounded-2xl border border-neutral-800 shadow-md flex items-center justify-center overflow-hidden">
+                          <video 
+                            src={activeFile.content} 
+                            controls 
+                            className="max-w-full max-h-[66vh] rounded-xl outline-none" 
+                          />
+                        </div>
+                        <p className="mt-3 text-xs text-slate-500 font-medium">{activeFile.name}</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="flex-1 relative flex overflow-auto bg-white select-text">
+                      {/* Line Numbers Column */}
+                      <div className="w-12 py-3 bg-[#fafafa] border-r border-gray-200 text-gray-400 text-right pr-3 select-none shrink-0 font-mono text-xs leading-6">
+                        {lines.map((_, i) => (
+                          <div 
+                            key={i} 
+                            className={cn(
+                              "h-6 flex items-center justify-end",
+                              cursorPos.line === i + 1 ? "text-gray-900 font-bold" : ""
+                            )}
                           >
-                            {/* Compact Initials Tag directly attached on top of cursor */}
-                            <div
-                              style={{ backgroundColor: cursor.color || '#5f6368' }}
-                              className="px-1 py-0.2 rounded-full text-white text-[9px] font-bold shadow-xs whitespace-nowrap transform -translate-y-full -translate-x-1/2 left-1/2 mb-0.5 tracking-tight"
-                              title={cursor.name}
-                            >
-                              {cursor.initials}
-                            </div>
+                            {i + 1}
+                          </div>
+                        ))}
+                      </div>
 
-                            {/* Clean Vertical Cursor Bar without pulsing */}
-                            <div
-                              style={{ backgroundColor: cursor.color || '#5f6368' }}
-                              className="w-[2px] h-5 rounded-full shadow-xs"
-                            />
-                          </motion.div>
-                        );
-                      })}
+                      {/* Text Area & Live Remote Cursors Overlay */}
+                      <div className="relative flex-1 min-w-[300px]">
+                        <textarea
+                          ref={textareaRef}
+                          value={activeFile.content}
+                          onChange={(e) => handleContentChange(e.target.value)}
+                          onKeyUp={handleCursorMove}
+                          onClick={handleCursorMove}
+                          onSelect={handleCursorMove}
+                          spellCheck={false}
+                          placeholder="Type notes, code, documents, or paste content here..."
+                          className="w-full h-full p-3 font-mono text-xs sm:text-[13px] leading-6 bg-transparent text-gray-900 resize-none outline-none border-none whitespace-pre overflow-auto placeholder-gray-400"
+                        />
+
+                        {/* Real Remote Cursors Overlay */}
+                        <div className="absolute inset-0 pointer-events-none p-3 overflow-hidden">
+                          {activeRemoteCursorsInFile.map((cursor) => {
+                            const topPx = (cursor.line - 1) * 24 + 12;
+                            const leftPx = Math.min(800, (cursor.col - 1) * 7.8 + 12);
+
+                            return (
+                              <motion.div
+                                key={cursor.senderId}
+                                initial={false}
+                                animate={{ top: topPx, left: leftPx }}
+                                transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                                className="absolute z-20 flex flex-col items-start"
+                              >
+                                <div
+                                  style={{ backgroundColor: cursor.color || '#5f6368' }}
+                                  className="px-1 py-0.2 rounded-full text-white text-[9px] font-bold shadow-xs whitespace-nowrap transform -translate-y-full -translate-x-1/2 left-1/2 mb-0.5 tracking-tight"
+                                  title={cursor.name}
+                                >
+                                  {cursor.initials}
+                                </div>
+
+                                <div
+                                  style={{ backgroundColor: cursor.color || '#5f6368' }}
+                                  className="w-[2px] h-5 rounded-full shadow-xs"
+                                />
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Editor Footer Status Bar */}
                 <div className="px-4 py-1.5 bg-[#f8f9fa] border-t border-gray-200 flex items-center justify-between text-[11px] text-gray-500 font-sans shrink-0">
                   <div className="flex items-center gap-3">
-                    <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
-                    <span>•</span>
-                    <span>{lines.length} lines</span>
-                    <span>•</span>
-                    <span>{wordCount} words</span>
-                    <span>•</span>
-                    <span>{charCount} chars</span>
+                    {activeFile.fileType === 'image' || activeFile.fileType === 'pdf' || activeFile.fileType === 'audio' || activeFile.fileType === 'video' ? (
+                      <span className="font-medium text-slate-700 capitalize">{activeFile.fileType} Preview</span>
+                    ) : (
+                      <>
+                        <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
+                        <span>•</span>
+                        <span>{lines.length} lines</span>
+                        <span>•</span>
+                        <span>{wordCount} words</span>
+                        <span>•</span>
+                        <span>{charCount} chars</span>
+                      </>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <span>Auto-saved locally</span>

@@ -1,8 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/dashboard", "destination": "/index.html" },
-    { "source": "/meeting/:id", "destination": "/index.html" },
-    { "source": "/isolated-feed/:room/:identity", "destination": "/index.html" },
-    { "source": "/feed/:room/:identity", "destination": "/index.html" }
-  ]
-}

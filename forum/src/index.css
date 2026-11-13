@@ -6,18 +6,18 @@
   --color-bg-dark: #121212;
   --color-surface: #1e1e1e;
   --color-surface-lighter: #2a2a2a;
-  --color-accent-blue: #4285f4;
-  --color-accent-red: #ea4335;
+  --color-accent-blue: #047857;
+  --color-accent-red: #dc2626;
   --color-text-primary: #ffffff;
   --color-text-secondary: #9aa0a6;
-  --color-success-green: #34a853;
+  --color-success-green: #047857;
 
   /* Light Theme Variables */
-  --color-bg-light: #ffffff;
+  --color-bg-light: #fbfbfa;
   --color-surface-light: #f8f9fa;
   --color-surface-lighter-light: #f1f3f4;
-  --color-text-primary-light: #202124;
-  --color-text-secondary-light: #5f6368;
+  --color-text-primary-light: #0f172a;
+  --color-text-secondary-light: #475569;
 }
 
 @layer base {

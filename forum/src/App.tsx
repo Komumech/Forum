@@ -3,6 +3,7 @@ import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import MeetingPage from './pages/MeetingPage';
 import IsolatedFeed from './pages/IsolatedFeed';
+import InvitePage from './pages/InvitePage';
 import { useAuth } from './context/AuthContext';
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Home />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/meeting/:id" element={<MeetingPage />} />
+        <Route path="/invite/:id" element={<InvitePage />} />
         <Route path="/isolated-feed/:room/:identity" element={<IsolatedFeed />} />
         <Route path="/feed/:room/:identity" element={<IsolatedFeed />} />
         <Route path="*" element={<Navigate to="/" replace />} />

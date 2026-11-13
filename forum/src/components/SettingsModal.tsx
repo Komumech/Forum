@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   X, 
   Mic, 
@@ -22,8 +22,16 @@ import {
   RefreshCw,
   SlidersHorizontal,
   Sparkles,
-  Palette
+  Palette,
+  Bell
 } from 'lucide-react';
+import {
+  getPushPreferences,
+  savePushPreferences,
+  getNotificationSupportStatus,
+  requestForumNotificationPermission,
+  triggerForumPushNotification
+} from '../utils/pushNotifications';
 import { VideoTrack } from '@livekit/components-react';
 import { Track, Participant } from 'livekit-client';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -97,6 +105,7 @@ interface SettingsModalProps {
   copyExportLinkAgain: (item: any) => void;
   revokeExportToken: (id: string) => void;
   copiedExportId: string | null;
+  initialCategory?: SettingsCategoryType;
 }
 
 // Material 3 Switch Component
@@ -109,8 +118,8 @@ function MaterialSwitch({ checked, onChange, disabled }: { checked: boolean; onC
       disabled={disabled}
       onClick={onChange}
       className={cn(
-        "w-11 h-6 rounded-full transition-colors relative inline-flex items-center shrink-0 cursor-pointer p-0.5 outline-none focus-visible:ring-1 focus-visible:ring-slate-500",
-        checked ? "bg-slate-900" : "bg-neutral-300",
+        "w-11 h-6 rounded-full transition-colors relative inline-flex items-center shrink-0 cursor-pointer p-0.5 outline-none focus-visible:ring-1 focus-visible:ring-emerald-700/50",
+        checked ? "bg-emerald-700" : "bg-neutral-300",
         disabled && "opacity-40 cursor-not-allowed"
       )}
     >
@@ -168,18 +177,30 @@ export default function SettingsModal({
   copyIsolatedFeedLink,
   copyExportLinkAgain,
   revokeExportToken,
-  copiedExportId
+  copiedExportId,
+  initialCategory
 }: SettingsModalProps) {
-  const [selectedCategory, setSelectedCategory] = useState<SettingsCategoryType>('video');
+  const [selectedCategory, setSelectedCategory] = useState<SettingsCategoryType>(initialCategory || 'video');
   const [mobileView, setMobileView] = useState<'categories' | 'detail'>('categories');
+
+  useEffect(() => {
+    if (initialCategory) {
+      setSelectedCategory(initialCategory);
+      if (isMobile) {
+        setMobileView('detail');
+      }
+    }
+  }, [initialCategory, isOpen, isMobile]);
+
   const [testAudioPlaying, setTestAudioPlaying] = useState(false);
   const [captionLanguage, setCaptionLanguage] = useState('en-US');
   const [reactionSounds, setReactionSounds] = useState(true);
   const [floatingReactions, setFloatingReactions] = useState(true);
   const [resolutionPreference, setResolutionPreference] = useState<'1080p' | '720p' | '360p'>('1080p');
+  const [pushPrefs, setPushPrefs] = useState(() => getPushPreferences());
+  const [notifPermission, setNotifPermission] = useState(() => getNotificationSupportStatus());
+  const [testPushSent, setTestPushSent] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  if (!isOpen) return null;
 
   const categories: Array<{ id: SettingsCategoryType; label: string; icon: React.ComponentType<any> }> = [
     { id: 'video', label: 'Video', icon: VideoIcon },
@@ -237,15 +258,143 @@ export default function SettingsModal({
     { value: 'zh-CN', label: 'Chinese (Simplified)', icon: <Globe size={16} /> }
   ];
 
-  const handleTestSpeaker = () => {
+  const [isTestingMic, setIsTestingMic] = useState(false);
+  const [micTestVolume, setMicTestVolume] = useState(0); // 0 to 100
+  const [micTestStatus, setMicTestStatus] = useState<string>('Ready to test');
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micAnimRef = useRef<number | null>(null);
+
+  const stopMicTest = useCallback(() => {
+    if (micAnimRef.current) {
+      cancelAnimationFrame(micAnimRef.current);
+      micAnimRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(t => t.stop());
+      micStreamRef.current = null;
+    }
+    if (micAudioCtxRef.current) {
+      try { micAudioCtxRef.current.close(); } catch {}
+      micAudioCtxRef.current = null;
+    }
+    setIsTestingMic(false);
+    setMicTestVolume(0);
+  }, []);
+
+  const startMicTest = async () => {
+    stopMicTest();
+    try {
+      setIsTestingMic(true);
+      setMicTestStatus('Listening...');
+
+      let stream: MediaStream;
+      try {
+        const constraints: MediaStreamConstraints = {
+          audio: selectedAudioId && selectedAudioId !== 'default' 
+            ? { deviceId: selectedAudioId } 
+            : true
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
+        const liveTrack = localParticipant?.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack;
+        if (liveTrack && liveTrack.readyState === 'live') {
+          const clonedTrack = liveTrack.clone();
+          clonedTrack.enabled = true;
+          stream = new MediaStream([clonedTrack]);
+        } else {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      }
+
+      // Ensure all tracks in test stream are explicitly active
+      stream.getAudioTracks().forEach(t => { t.enabled = true; });
+      micStreamRef.current = stream;
+
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      micAudioCtxRef.current = audioCtx;
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.55;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const loop = () => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i] * dataArray[i];
+        }
+        const rms = Math.sqrt(sum / dataArray.length);
+        const vol = Math.min(100, Math.round((rms / 128) * 100));
+        setMicTestVolume(vol);
+
+        if (vol > 15) {
+          setMicTestStatus('Voice detected (Crisp audio signal)');
+        } else if (vol > 3) {
+          setMicTestStatus('Sound detected');
+        } else {
+          setMicTestStatus('Listening... speak into your microphone');
+        }
+
+        micAnimRef.current = requestAnimationFrame(loop);
+      };
+
+      loop();
+    } catch (err: any) {
+      console.warn("Mic test error:", err);
+      setIsTestingMic(false);
+      setMicTestStatus('Could not access selected microphone. Check permissions.');
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopMicTest();
+    };
+  }, [stopMicTest]);
+
+  // If user changes microphone while test is running, re-test with new device
+  useEffect(() => {
+    if (isTestingMic) {
+      startMicTest();
+    }
+  }, [selectedAudioId]);
+
+  if (!isOpen) return null;
+
+  const handleTestSpeaker = async () => {
     try {
       setTestAudioPlaying(true);
-      const audio = new Audio('https://www.soundjay.com/buttons/beep-01a.mp3');
-      if (selectedSpeakerId && (audio as any).setSinkId) {
-        (audio as any).setSinkId(selectedSpeakerId).catch(() => {});
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioCtx();
+      if (selectedSpeakerId && (ctx as any).setSinkId) {
+        try { await (ctx as any).setSinkId(selectedSpeakerId); } catch {}
       }
-      audio.play().catch(() => {});
-      setTimeout(() => setTestAudioPlaying(false), 800);
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, now);
+      osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.18);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.14, now + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.65);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.68);
+      setTimeout(() => {
+        setTestAudioPlaying(false);
+        try { ctx.close(); } catch {}
+      }, 750);
     } catch {
       setTestAudioPlaying(false);
     }
@@ -288,7 +437,7 @@ export default function SettingsModal({
                   <button
                     type="button"
                     onClick={onFlipCamera}
-                    className="text-xs font-medium text-[#0b57d0] hover:text-[#0842a0] flex items-center gap-1.5 cursor-pointer"
+                    className="text-xs font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                   >
                     <RefreshCw size={13} />
                     <span>Flip camera</span>
@@ -385,6 +534,49 @@ export default function SettingsModal({
               />
             </div>
 
+            {/* Live Microphone Testing Section */}
+            <div className="p-3.5 bg-stone-50/80 rounded-2xl border border-neutral-200/80 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <Mic size={14} className={isTestingMic ? "text-emerald-700" : "text-slate-500"} />
+                    <span className="text-xs font-semibold text-slate-900 block truncate">Test Microphone</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 truncate mt-0.5">{micTestStatus}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={isTestingMic ? stopMicTest : startMicTest}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer whitespace-nowrap shadow-xs border shrink-0",
+                    isTestingMic
+                      ? "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100"
+                      : "bg-white border-neutral-300 text-slate-800 hover:bg-stone-50"
+                  )}
+                >
+                  {isTestingMic ? "Stop Test" : "Test Mic"}
+                </button>
+              </div>
+
+              {/* Dynamic VU Meter Level Bar */}
+              <div className="space-y-1">
+                <div className="h-2 w-full bg-neutral-200/80 rounded-lg overflow-hidden p-0.5">
+                  <div
+                    className={cn(
+                      "h-full rounded-md transition-all duration-75",
+                      micTestVolume > 60 ? "bg-amber-500" : "bg-emerald-600"
+                    )}
+                    style={{ width: `${isTestingMic ? Math.max(3, micTestVolume) : 0}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                  <span>Mute</span>
+                  <span>{isTestingMic ? `${micTestVolume}%` : 'Idle'}</span>
+                  <span>100%</span>
+                </div>
+              </div>
+            </div>
+
             {/* Noise Cancellation Toggle */}
             <div className="flex items-center justify-between py-2 border-t border-[#e0e2ec]">
               <div className="space-y-0.5 pr-4">
@@ -426,10 +618,10 @@ export default function SettingsModal({
                 <button
                   type="button"
                   onClick={handleTestSpeaker}
-                  className="px-4 py-2.5 border border-[#747775] hover:bg-[#1f1f1f]/5 text-[#0b57d0] rounded-full text-sm font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer shrink-0"
+                  className="px-4 py-2.5 border border-neutral-300 hover:bg-neutral-50 text-slate-800 rounded-xl text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer shrink-0 shadow-xs"
                 >
-                  <Volume2 size={16} className={testAudioPlaying ? "text-[#0b57d0]" : ""} />
-                  <span>{testAudioPlaying ? "Playing..." : "Test"}</span>
+                  <Volume2 size={15} className={testAudioPlaying ? "text-emerald-700" : ""} />
+                  <span>{testAudioPlaying ? "Playing..." : "Test Audio"}</span>
                 </button>
               </div>
             </div>
@@ -628,22 +820,22 @@ export default function SettingsModal({
             </div>
 
             {/* Active Feed Exports */}
-            <div className="space-y-3 pt-3 border-t border-[#e0e2ec]">
+            <div className="space-y-3 pt-3 border-t border-neutral-200/70">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-[#1f1f1f]">OBS Browser Source feeds</span>
+                <span className="text-sm font-medium text-slate-900">OBS Browser Source feeds</span>
                 <button
                   type="button"
                   onClick={() => copyIsolatedFeedLink(localParticipant)}
-                  className="text-xs font-medium text-[#0b57d0] hover:underline cursor-pointer"
+                  className="text-xs font-medium text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer whitespace-nowrap"
                 >
                   + Export my feed link
                 </button>
               </div>
 
               {feedExports.length === 0 ? (
-                <div className="p-4 bg-[#f8f9fa] rounded-xl border border-[#e0e2ec] text-center space-y-1">
-                  <p className="text-xs text-[#444746]">No exported feeds</p>
-                  <p className="text-[11px] text-[#747775]">
+                <div className="p-4 bg-stone-50 rounded-xl border border-neutral-200/70 text-center space-y-1">
+                  <p className="text-xs text-slate-700">No exported feeds</p>
+                  <p className="text-[11px] text-slate-500">
                     Export your camera stream or right-click any video tile in the call to generate a link for OBS.
                   </p>
                 </div>
@@ -652,25 +844,25 @@ export default function SettingsModal({
                   {feedExports.map((item) => (
                     <div
                       key={item.id}
-                      className="p-3 bg-white rounded-lg border border-[#e0e2ec] flex items-center justify-between gap-3 text-xs"
+                      className="p-3 bg-white rounded-xl border border-neutral-200/70 flex items-center justify-between gap-3 text-xs"
                     >
                       <div className="min-w-0">
-                        <span className="font-medium text-[#1f1f1f] truncate block">{item.participantName}</span>
-                        <span className="text-[11px] text-[#747775] font-mono truncate block">{item.token}</span>
+                        <span className="font-medium text-slate-900 truncate block">{item.participantName}</span>
+                        <span className="text-[11px] text-slate-500 font-mono truncate block">{item.token}</span>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
                           onClick={() => copyExportLinkAgain(item)}
-                          className="px-2.5 py-1 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-[#1f1f1f] rounded-md text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                          className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200/70 text-slate-800 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap"
                         >
-                          {copiedExportId === item.id ? <Check size={12} className="text-[#0b57d0]" /> : <Copy size={12} />}
+                          {copiedExportId === item.id ? <Check size={12} className="text-emerald-700" /> : <Copy size={12} />}
                           <span>{copiedExportId === item.id ? 'Copied' : 'Copy'}</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => revokeExportToken(item.id)}
-                          className="p-1 text-[#747775] hover:text-[#b3261e] rounded-md transition-colors cursor-pointer"
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                           title="Revoke Link"
                         >
                           <Trash2 size={14} />
@@ -718,6 +910,75 @@ export default function SettingsModal({
                 checked={showClock}
                 onChange={() => setShowClock(!showClock)}
               />
+            </div>
+
+            {/* Browser Push Notifications */}
+            <div className="space-y-3 py-3 border-t border-[#e0e2ec]">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5 pr-4">
+                  <div className="flex items-center gap-2">
+                    <Bell size={16} className="text-[#444746]" />
+                    <span className="text-sm font-medium text-[#1f1f1f]">Push notifications</span>
+                  </div>
+                  <p className="text-xs text-[#444746]">
+                    {notifPermission === 'granted'
+                      ? 'Alert for waiting room requests and scheduled meetings'
+                      : notifPermission === 'denied'
+                        ? 'Blocked in browser site settings'
+                        : notifPermission === 'unsupported'
+                          ? 'Not supported on this browser'
+                          : 'Allow desktop notifications from Forum'}
+                  </p>
+                </div>
+                {notifPermission === 'granted' ? (
+                  <MaterialSwitch
+                    checked={pushPrefs.enabled}
+                    onChange={() => {
+                      const next = { ...pushPrefs, enabled: !pushPrefs.enabled };
+                      setPushPrefs(next);
+                      savePushPreferences(next);
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    disabled={notifPermission === 'unsupported' || notifPermission === 'denied'}
+                    onClick={async () => {
+                      const res = await requestForumNotificationPermission();
+                      setNotifPermission(res);
+                      if (res === 'granted') {
+                        const next = { ...pushPrefs, enabled: true };
+                        setPushPrefs(next);
+                        savePushPreferences(next);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-colors cursor-pointer disabled:opacity-40 whitespace-nowrap"
+                  >
+                    Enable
+                  </button>
+                )}
+              </div>
+
+              {notifPermission === 'granted' && (
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await triggerForumPushNotification({
+                        title: 'Forum Notifications Active',
+                        body: 'You will receive alerts for waiting room visitors and meetings.',
+                        url: window.location.pathname,
+                        tag: `test-${Date.now()}`
+                      });
+                      setTestPushSent(true);
+                      setTimeout(() => setTestPushSent(false), 2500);
+                    }}
+                    className="text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer whitespace-nowrap"
+                  >
+                    {testPushSent ? 'Test notification sent' : 'Send test notification'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -880,7 +1141,7 @@ export default function SettingsModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-xl shadow-xs transition-colors cursor-pointer"
+            className="px-6 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-medium rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap"
           >
             Done
           </button>

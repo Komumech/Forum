@@ -159,6 +159,15 @@ export function useAIVideoAutoEnhancer(
   const lastGeminiCallRef = useRef<number>(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  const trackId =
+    trackRefOrMediaStream?.publication?.track?.mediaStreamTrack?.id ||
+    trackRefOrMediaStream?.mediaStreamTrack?.id ||
+    trackRefOrMediaStream?.id ||
+    null;
+
+  const trackIdRef = useRef<string | null>(trackId);
+  trackIdRef.current = trackId;
+
   useEffect(() => {
     if (!options || options.preset !== 'auto') return;
 
@@ -170,22 +179,20 @@ export function useAIVideoAutoEnhancer(
 
     const interval = setInterval(() => {
       try {
-        // Find active video element associated with local stream or any rendered video
         let videoEl: HTMLVideoElement | null = null;
         const videos = document.querySelectorAll('video');
-        
-        if (trackRefOrMediaStream?.publication?.track?.mediaStreamTrack) {
-          const trackId = trackRefOrMediaStream.publication.track.mediaStreamTrack.id;
+        const currentTrackId = trackIdRef.current;
+
+        if (currentTrackId) {
           for (let i = 0; i < videos.length; i++) {
             const v = videos[i];
-            if (v.srcObject && (v.srcObject as MediaStream).getTracks().some(t => t.id === trackId)) {
+            if (v.srcObject && (v.srcObject as MediaStream).getTracks().some(t => t.id === currentTrackId)) {
               videoEl = v;
               break;
             }
           }
         }
 
-        // Fallback: pick the first playing video element with valid dimensions
         if (!videoEl) {
           for (let i = 0; i < videos.length; i++) {
             const v = videos[i];
@@ -248,7 +255,6 @@ export function useAIVideoAutoEnhancer(
         const avgG = totalG / pixelCount;
         const avgB = totalB / pixelCount;
 
-        // Lighting & color condition detection with aggressive lowlight rescue
         let condition: AIAutoAnalysisState['condition'] = 'optimal';
         let targetBrightness = 125;
         let targetContrast = 110;
@@ -257,7 +263,6 @@ export function useAIVideoAutoEnhancer(
         let targetShadowLift = 8;
         let diagnosis = 'Balanced lighting & healthy skin tone calibration active.';
 
-        // Backlight detection: background is significantly brighter than face/center
         if (avgLuma > avgCenterLuma + 15 && avgCenterLuma < 135) {
           condition = 'backlit';
           targetBrightness = Math.min(160, Math.round(132 + (135 - avgCenterLuma) * 0.5));
@@ -266,7 +271,6 @@ export function useAIVideoAutoEnhancer(
           targetSaturation = 116;
           diagnosis = 'Backlit subject detected: lifting face midtones and shadow details.';
         } else if (avgLuma < 120) {
-          // Low light / normal indoor environment - boost with crystal clear visibility
           condition = 'lowlight';
           targetBrightness = Math.min(165, Math.round(135 + (120 - avgLuma) * 0.45));
           targetContrast = 116;
@@ -274,7 +278,6 @@ export function useAIVideoAutoEnhancer(
           targetSaturation = 118;
           diagnosis = 'Dim environment detected: actively brightening exposure & midtones.';
         } else if (avgLuma > 220) {
-          // Overexposed
           condition = 'overexposed';
           targetBrightness = 105;
           targetContrast = 108;
@@ -282,23 +285,20 @@ export function useAIVideoAutoEnhancer(
           targetSaturation = 105;
           diagnosis = 'High ambient glare detected: suppressing highlight blowout.';
         } else if (avgR > avgB * 1.35 && avgR > avgG * 1.15) {
-          // Warm tungsten bulb
           condition = 'warm_cast';
           targetBrightness = 130;
           targetContrast = 112;
           targetSaturation = 110;
-          targetWarmth = -4; // cool down slightly
+          targetWarmth = -4;
           diagnosis = 'Warm incandescent cast detected: balancing white point and cooling shadows.';
         } else if (avgB > avgR * 1.25) {
-          // Cool monitor / fluorescent
           condition = 'cool_cast';
           targetBrightness = 132;
           targetContrast = 110;
           targetSaturation = 116;
-          targetWarmth = 6; // warm up
+          targetWarmth = 6;
           diagnosis = 'Cool monitor glow detected: infusing warm daylight vibrancy.';
         } else {
-          // Optimal default: nice healthy radiance
           condition = 'optimal';
           targetBrightness = 128;
           targetContrast = 112;
@@ -308,7 +308,6 @@ export function useAIVideoAutoEnhancer(
           diagnosis = 'Balanced lighting & healthy skin tone calibration active.';
         }
 
-        // Smoothly interpolate current state towards targets
         setAutoState(prev => ({
           ...prev,
           condition,
@@ -321,7 +320,6 @@ export function useAIVideoAutoEnhancer(
           lastAnalyzedAt: Date.now(),
         }));
 
-        // Periodic deep Gemini AI analysis (every 20 seconds or upon significant scene transition)
         const now = Date.now();
         if (now - lastGeminiCallRef.current > 20000 && (condition === 'lowlight' || condition === 'backlit' || condition === 'warm_cast' || condition === 'cool_cast')) {
           lastGeminiCallRef.current = now;
@@ -360,7 +358,7 @@ export function useAIVideoAutoEnhancer(
     }, 1800);
 
     return () => clearInterval(interval);
-  }, [trackRefOrMediaStream, options?.preset]);
+  }, [trackId, options?.preset]);
 
   const filterStyle = getAIVideoFilterStyle(options, autoState);
 

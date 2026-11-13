@@ -1,5 +1,6 @@
 import { LocalVideoTrack } from 'livekit-client';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
+import { VIRTUAL_BG_ASSETS } from '../assets/covers';
 
 export type BackgroundMode = 'none' | 'blur' | 'image' | 'greenscreen' | 'color';
 
@@ -21,14 +22,12 @@ export const SOLID_STUDIO_COLORS: BackgroundPreset[] = [
   { id: 'clean_white', label: 'Radiant White', type: 'color', value: '#F8FAFC', previewColor: '#F8FAFC' },
 ];
 
-export const VIRTUAL_BG_PRESETS: BackgroundPreset[] = [
-  { id: 'office', label: 'Modern Office', type: 'image', value: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1200&q=80' },
-  { id: 'loft', label: 'Aesthetic Loft', type: 'image', value: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80' },
-  { id: 'library', label: 'Bookshelf Studio', type: 'image', value: 'https://images.unsplash.com/photo-1507842229452-947547ff57b7?auto=format&fit=crop&w=1200&q=80' },
-  { id: 'cafe', label: 'Warm Cafe', type: 'image', value: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80' },
-  { id: 'nature', label: 'Calm Nature', type: 'image', value: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=80' },
-  { id: 'minimal', label: 'Minimalist Gradient', type: 'image', value: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80' },
-];
+export const VIRTUAL_BG_PRESETS: BackgroundPreset[] = VIRTUAL_BG_ASSETS.map((asset) => ({
+  id: asset.id,
+  label: asset.label,
+  type: 'image',
+  value: asset.url,
+}));
 
 let activeCanvasTrack: MediaStreamTrack | null = null;
 let activeCanvasAnimation: number | null = null;

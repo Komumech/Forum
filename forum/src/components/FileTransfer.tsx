@@ -132,14 +132,14 @@ export function SendFileDialog({ isOpen, onClose, participants, defaultRecipient
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Recipient Selection */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-gray-700">
+            <label className="block text-xs font-medium text-slate-700">
               Send to
             </label>
             <div className="relative">
               <select
                 value={selectedRecipient}
                 onChange={(e) => setSelectedRecipient(e.target.value)}
-                className="w-full h-11 bg-[#f8f9fa] border border-gray-300 rounded-xl px-4 text-xs font-medium text-gray-900 focus:bg-white focus:border-[#0b57d0] focus:ring-1 focus:ring-[#0b57d0] outline-none transition-all cursor-pointer"
+                className="w-full h-11 bg-white border border-neutral-200 rounded-xl px-4 text-xs font-medium text-slate-900 focus:border-emerald-700/60 focus:ring-1 focus:ring-emerald-700/50 outline-none transition-colors cursor-pointer"
               >
                 <option value="everyone">Everyone in this call (Broadcast)</option>
                 {participants.map(p => (
@@ -153,7 +153,7 @@ export function SendFileDialog({ isOpen, onClose, participants, defaultRecipient
 
           {/* File Dropzone */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-gray-700">
+            <label className="block text-xs font-medium text-slate-700">
               Select or drop file
             </label>
             <div
@@ -162,9 +162,9 @@ export function SendFileDialog({ isOpen, onClose, participants, defaultRecipient
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
-                "border border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2",
-                dragOver ? "border-[#0b57d0] bg-[#f8f9fa]" : "border-gray-300 hover:border-[#0b57d0] bg-[#f8f9fa]",
-                selectedFile ? "border-solid border-gray-300 bg-white" : ""
+                "border border-dashed rounded-2xl p-6 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-2",
+                dragOver ? "border-emerald-700 bg-emerald-50/40" : "border-neutral-300 hover:border-emerald-700/60 bg-stone-50/60",
+                selectedFile ? "border-solid border-neutral-200 bg-white" : ""
               )}
             >
               <input
@@ -180,12 +180,12 @@ export function SendFileDialog({ isOpen, onClose, participants, defaultRecipient
 
               {selectedFile ? (
                 <div className="flex items-center gap-3 w-full p-2">
-                  <div className="w-10 h-10 bg-[#f1f3f4] rounded-xl flex items-center justify-center shrink-0 text-gray-700">
+                  <div className="w-10 h-10 bg-stone-100 rounded-xl flex items-center justify-center shrink-0 text-slate-700">
                     {getFileIcon(selectedFile.type, selectedFile.name)}
                   </div>
                   <div className="flex-1 text-left min-w-0">
-                    <p className="text-xs font-semibold text-gray-900 truncate">{selectedFile.name}</p>
-                    <p className="text-[11px] text-gray-500">{formatFileSize(selectedFile.size)}</p>
+                    <p className="text-xs font-semibold text-slate-900 truncate">{selectedFile.name}</p>
+                    <p className="text-[11px] text-slate-500">{formatFileSize(selectedFile.size)}</p>
                   </div>
                   <button
                     type="button"
@@ -193,20 +193,20 @@ export function SendFileDialog({ isOpen, onClose, participants, defaultRecipient
                       e.stopPropagation();
                       setSelectedFile(null);
                     }}
-                    className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"
+                    className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-stone-100 rounded-xl transition-colors"
                   >
                     <X size={16} />
                   </button>
                 </div>
               ) : (
                 <>
-                  <div className="w-10 h-10 rounded-full bg-[#f1f3f4] text-gray-700 flex items-center justify-center mb-1">
+                  <div className="w-10 h-10 rounded-xl bg-stone-100 text-slate-700 flex items-center justify-center mb-1">
                     <Paperclip size={18} />
                   </div>
-                  <p className="text-xs font-semibold text-gray-800">
+                  <p className="text-xs font-semibold text-slate-800">
                     Click to browse or drop file here
                   </p>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-[11px] text-slate-500">
                     Documents, images, slides, code, or archives
                   </p>
                 </>
@@ -218,14 +218,14 @@ export function SendFileDialog({ isOpen, onClose, participants, defaultRecipient
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2 rounded-full text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors cursor-pointer"
+              className="px-4 py-2 rounded-xl text-xs font-medium text-slate-700 bg-white border border-neutral-200 hover:border-slate-400 transition-colors cursor-pointer whitespace-nowrap"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!selectedFile || isSending}
-              className="inline-flex items-center gap-1.5 px-5 py-2 bg-[#f1f3f4] hover:bg-[#e2e7eb] text-gray-800 border border-gray-300/80 rounded-full font-medium text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-medium text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
             >
               <Send size={14} />
               <span>{isSending ? "Sending..." : "Send"}</span>
