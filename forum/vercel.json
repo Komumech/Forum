@@ -1,0 +1,26 @@
+{
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/invite-page.ts": {
+      "includeFiles": "dist/index.html"
+    },
+    "api/invite-og.ts": {
+      "includeFiles": "public/forum-logo.png"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/invite/:id",
+      "destination": "/api/invite-page?id=:id"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/((?!api/|assets/|.*\\..*).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
+import fs from "fs";
 import path from "path";
+import { fetchMeetingForInvite, renderInviteOgPng, injectInviteMetaHtml } from "./api/_inviteHelper";
 import {
   AccessToken,
   EgressClient,
@@ -459,16 +461,70 @@ Return ONLY the processed text replacement without introductory greetings or met
     }
   });
 
+  // Dynamic Invite OpenGraph Preview Image (Meeting Cover + Forum Icon in Bottom-Right)
+  app.get("/api/invite-og", async (req, res) => {
+    const roomId = String(req.query.id || "").trim();
+    if (!roomId) {
+      return res.status(400).send("Missing id");
+    }
+    try {
+      const imgBuffer = await renderInviteOgPng(roomId);
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=300");
+      return res.status(200).send(imgBuffer);
+    } catch (err) {
+      console.error("[Invite OG] Failed:", err);
+      return res.status(500).send("Failed to render preview image");
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
+
+    app.get("/invite/:id", async (req, res, next) => {
+      try {
+        const roomId = String(req.params.id || "").trim();
+        const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+        const host = req.headers["x-forwarded-host"] || req.headers.host || `localhost:${PORT}`;
+        const origin = `${proto}://${host}`;
+        const rawHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
+        const [transformed, meta] = await Promise.all([
+          vite.transformIndexHtml(req.originalUrl, rawHtml),
+          fetchMeetingForInvite(roomId),
+        ]);
+        const finalHtml = injectInviteMetaHtml(transformed, origin, roomId, meta);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.status(200).send(finalHtml);
+      } catch (err) {
+        return next(err);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
+
+    app.get("/invite/:id", async (req, res) => {
+      try {
+        const roomId = String(req.params.id || "").trim();
+        const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+        const host = req.headers["x-forwarded-host"] || req.headers.host || `localhost:${PORT}`;
+        const origin = `${proto}://${host}`;
+        const rawHtml = fs.readFileSync(path.join(distPath, "index.html"), "utf8");
+        const meta = await fetchMeetingForInvite(roomId);
+        const finalHtml = injectInviteMetaHtml(rawHtml, origin, roomId, meta);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.status(200).send(finalHtml);
+      } catch {
+        return res.sendFile(path.join(distPath, "index.html"));
+      }
+    });
+
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });

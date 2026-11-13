@@ -126,10 +126,34 @@ export default function MeetingPage() {
       return;
     }
     const emailLower = user.email?.toLowerCase();
-    updateDoc(doc(db, 'meetings', room), {
-      participants: arrayUnion(user.uid),
-      ...(emailLower ? { invitedEmails: arrayUnion(emailLower) } : {})
-    }).catch(() => {});
+    const inviteeName = user.displayName || user.email?.split('@')[0] || 'Participant';
+    const meetingRef = doc(db, 'meetings', room);
+    getDoc(meetingRef)
+      .then(async (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const existingAccepted: string[] = Array.isArray(data.acceptedUids) ? data.acceptedUids : [];
+        const wasAccepted = existingAccepted.includes(user.uid);
+        await updateDoc(meetingRef, {
+          participants: arrayUnion(user.uid),
+          acceptedUids: arrayUnion(user.uid),
+          acceptedNames: arrayUnion(inviteeName),
+          ...(emailLower ? { invitedEmails: arrayUnion(emailLower) } : {})
+        });
+        if (!wasAccepted && data.hostId && data.hostId !== user.uid) {
+          const nextCount = new Set([...existingAccepted, ...(Array.isArray(data.participants) ? data.participants : []), user.uid]).size;
+          await addDoc(collection(db, 'notifications'), {
+            userId: data.hostId,
+            type: 'meeting',
+            title: `Invite Accepted: ${data.title || room}`,
+            message: `${inviteeName} accepted your invite · ${nextCount} ${nextCount === 1 ? 'participant' : 'participants'} confirmed`,
+            roomId: room,
+            read: false,
+            createdAt: serverTimestamp(),
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, [searchParams, room, user]);
 
   useEffect(() => {

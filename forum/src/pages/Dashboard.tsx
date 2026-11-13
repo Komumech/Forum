@@ -19,7 +19,6 @@ import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { format, isToday, isTomorrow, parseISO } from 'date-fns';
 import { cn } from '../lib/utils';
 import { downloadICSFile, getGoogleCalendarUrl } from '../utils/calendarExport';
-import { MEETING_COVER_PRESETS, DEFAULT_MEETING_COVER } from '../assets/covers';
 import {
   getPushPreferences,
   savePushPreferences,
@@ -49,6 +48,36 @@ interface Meeting {
   type?: 'event' | 'task' | 'focus' | 'meeting';
   coverImage?: string;
   invitedEmails?: string[];
+  participants?: string[];
+  acceptedUids?: string[];
+  acceptedNames?: string[];
+}
+
+function getRoundedScheduleTime(offsetMins = 15): string {
+  const target = new Date(Date.now() + offsetMins * 60000);
+  const mins = target.getMinutes();
+  const rounded = Math.ceil(mins / 15) * 15;
+  target.setMinutes(rounded, 0, 0);
+  return format(target, 'HH:mm');
+}
+
+function getNextHourTime(): string {
+  const target = new Date();
+  target.setHours(target.getHours() + 1, 0, 0, 0);
+  return format(target, 'HH:mm');
+}
+
+function formatTimePreview(dateStr: string, timeStr: string, durationMins: number): string {
+  if (!dateStr || !timeStr) return '';
+  const start = new Date(`${dateStr}T${timeStr}`);
+  if (Number.isNaN(start.getTime())) return '';
+  const end = new Date(start.getTime() + durationMins * 60000);
+  const dayLabel = isToday(start)
+    ? 'Today'
+    : isTomorrow(start)
+      ? 'Tomorrow'
+      : format(start, 'EEE, MMM d');
+  return `${dayLabel} · ${format(start, 'h:mm a')} – ${format(end, 'h:mm a')}`;
 }
 
 function compressCoverImageFile(file: File): Promise<string> {
@@ -59,7 +88,7 @@ function compressCoverImageFile(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => reject(new Error('Invalid image file'));
       img.onload = () => {
-        const maxW = 800;
+        const maxW = 1200;
         const scale = img.width > maxW ? maxW / img.width : 1;
         const w = Math.max(1, Math.round(img.width * scale));
         const h = Math.max(1, Math.round(img.height * scale));
@@ -72,7 +101,7 @@ function compressCoverImageFile(file: File): Promise<string> {
           return;
         }
         ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.78));
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
       };
       img.src = String(reader.result);
     };
@@ -135,11 +164,13 @@ export default function Dashboard() {
     title: '', 
     description: '', 
     date: format(new Date(), 'yyyy-MM-dd'), 
-    time: format(new Date(), 'HH:mm'), 
+    time: getRoundedScheduleTime(15), 
+    durationMins: 30,
     recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'monthly',
-    coverImage: DEFAULT_MEETING_COVER,
+    coverImage: '',
     invitedEmails: ''
   });
+  const [showScheduleExtras, setShowScheduleExtras] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -202,12 +233,34 @@ export default function Dashboard() {
         const mRef = doc(db, 'meetings', roomId);
         const snap = await getDoc(mRef);
         if (snap.exists()) {
+          const data = snap.data();
+          const inviteeName = user.displayName || user.email?.split('@')[0] || 'Participant';
+          const currentAccepted: string[] = Array.isArray(data.acceptedUids) ? data.acceptedUids : [];
+          const wasAccepted = currentAccepted.includes(user.uid);
+          const isHostUser = data.hostId === user.uid;
+
           await updateDoc(mRef, {
             participants: arrayUnion(user.uid),
+            acceptedUids: arrayUnion(user.uid),
+            acceptedNames: arrayUnion(inviteeName),
             ...(emailLower ? { invitedEmails: arrayUnion(emailLower) } : {})
           });
+
+          if (!wasAccepted && !isHostUser && data.hostId) {
+            const updatedCount = new Set([...currentAccepted, user.uid]).size;
+            addDoc(collection(db, 'notifications'), {
+              userId: data.hostId,
+              type: 'meeting',
+              title: `Invite Accepted: ${data.title || roomId}`,
+              message: `${inviteeName} accepted your invite · ${updatedCount} ${updatedCount === 1 ? 'participant' : 'participants'} confirmed`,
+              roomId,
+              read: false,
+              createdAt: serverTimestamp(),
+            }).catch(() => {});
+          }
+
           setDashboardToast({
-            message: `Added "${snap.data()?.title || roomId}" to your Forum Calendar`,
+            message: `Added "${data?.title || roomId}" to your Forum Calendar`,
             type: 'success'
           });
           setActiveSidebarTab('calendar');
@@ -307,7 +360,7 @@ export default function Dashboard() {
   const [noteCopied, setNoteCopied] = useState(false);
   const [notesFilter, setNotesFilter] = useState<'all' | 'transcripts' | 'notes'>('all');
   const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
-  const [editMeetingForm, setEditMeetingForm] = useState({ title: '', description: '', date: '', time: '', coverImage: '' });
+  const [editMeetingForm, setEditMeetingForm] = useState({ title: '', description: '', date: '', time: '', durationMins: 30, coverImage: '' });
   const [contacts, setContacts] = useState<any[]>([]);
   const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [notes, setNotes] = useState<any[]>([]);
@@ -664,13 +717,18 @@ export default function Dashboard() {
   };
 
   const handleEditMeeting = (meeting: Meeting) => {
+    const rawMins = meeting.endTime
+      ? Math.round((meeting.endTime.getTime() - meeting.startTime.getTime()) / 60000)
+      : 30;
+    const durationMins = rawMins > 0 && rawMins <= 240 ? rawMins : 30;
     setEditingMeeting(meeting);
     setEditMeetingForm({
       title: meeting.title,
       description: meeting.description || '',
       date: format(meeting.startTime, 'yyyy-MM-dd'),
       time: format(meeting.startTime, 'HH:mm'),
-      coverImage: meeting.coverImage || DEFAULT_MEETING_COVER
+      durationMins,
+      coverImage: meeting.coverImage || ''
     });
   };
 
@@ -679,7 +737,8 @@ export default function Dashboard() {
     if (!user || !editingMeeting) return;
 
     const startTime = new Date(`${editMeetingForm.date}T${editMeetingForm.time}`);
-    const endTime = new Date(startTime.getTime() + (editingMeeting.endTime ? editingMeeting.endTime.getTime() - editingMeeting.startTime.getTime() : 3600000));
+    const durationMs = Math.max(15, editMeetingForm.durationMins || 30) * 60000;
+    const endTime = new Date(startTime.getTime() + durationMs);
     
     try {
       if (editingMeeting.isKomu) {
@@ -709,7 +768,7 @@ export default function Dashboard() {
             summary: editMeetingForm.title,
             description: editMeetingForm.description,
             start: { dateTime: startTime.toISOString() },
-            end: { dateTime: new Date(startTime.getTime() + 3600000).toISOString() }
+            end: { dateTime: endTime.toISOString() }
           })
         }).catch(err => console.warn("Google Sync Update failed:", err));
       }
@@ -718,8 +777,9 @@ export default function Dashboard() {
         title: editMeetingForm.title,
         description: editMeetingForm.description,
         notes: editMeetingForm.description,
-        coverImage: editMeetingForm.coverImage || DEFAULT_MEETING_COVER,
-        startTime: Timestamp.fromDate(startTime)
+        coverImage: editMeetingForm.coverImage || '',
+        startTime: Timestamp.fromDate(startTime),
+        endTime: Timestamp.fromDate(endTime)
       });
       setEditingMeeting(null);
       setDashboardToast({ message: 'Meeting updated', type: 'success' });
@@ -894,6 +954,8 @@ export default function Dashboard() {
     if (!user) return;
 
     const startTime = new Date(`${newMeeting.date}T${newMeeting.time}`);
+    const durationMs = Math.max(15, newMeeting.durationMins || 30) * 60000;
+    const endTime = new Date(startTime.getTime() + durationMs);
     const roomId = Math.random().toString(36).substring(2, 12);
     const parsedEmails = newMeeting.invitedEmails
       .split(/[\s,;]+/)
@@ -903,13 +965,14 @@ export default function Dashboard() {
     try {
       const hostEmail = user.email || "";
       const hostName = user.displayName || user.email?.split('@')[0] || 'Host';
-      const resolvedTitle = newMeeting.title || `Meeting ${roomId}`;
+      const resolvedTitle = newMeeting.title.trim() || `Meeting ${roomId}`;
 
       await setDoc(doc(db, 'meetings', roomId), {
         title: resolvedTitle,
         description: newMeeting.description,
         notes: newMeeting.description,
         startTime: Timestamp.fromDate(startTime),
+        endTime: Timestamp.fromDate(endTime),
         recurrence: newMeeting.recurrence,
         roomId,
         hostId: user.uid,
@@ -917,9 +980,11 @@ export default function Dashboard() {
         hostName,
         createdBy: hostEmail || hostName,
         participants: [user.uid],
+        acceptedUids: [user.uid],
+        acceptedNames: [hostName],
         invitedEmails: parsedEmails,
         isMeeting: true,
-        coverImage: newMeeting.coverImage || DEFAULT_MEETING_COVER,
+        coverImage: newMeeting.coverImage || '',
         createdAt: Timestamp.now()
       });
 
@@ -927,6 +992,7 @@ export default function Dashboard() {
         hostId: user.uid,
         hostEmail,
         hostName,
+        title: resolvedTitle,
         createdAt: Date.now(),
         lobby: false,
         admittedList: [user.uid, hostEmail, hostName].filter(Boolean)
@@ -942,19 +1008,21 @@ export default function Dashboard() {
       } catch {}
 
       setIsScheduling(false);
+      setShowScheduleExtras(false);
       setNewMeeting({ 
         title: '', 
         description: '', 
         date: format(new Date(), 'yyyy-MM-dd'), 
-        time: format(new Date(), 'HH:mm'), 
+        time: getRoundedScheduleTime(15), 
+        durationMins: 30,
         recurrence: 'none',
-        coverImage: DEFAULT_MEETING_COVER,
+        coverImage: '',
         invitedEmails: ''
       });
       setDashboardToast({
         message: parsedEmails.length > 0
-          ? `Meeting scheduled & calendar invite copied (${parsedEmails.length} invited)`
-          : 'Meeting scheduled & auto-calendar invite link copied',
+          ? `Meeting scheduled & invite link copied (${parsedEmails.length} invited)`
+          : 'Meeting scheduled & invite link copied',
         type: 'success'
       });
       setTimeout(() => setDashboardToast(null), 3500);
@@ -2834,19 +2902,19 @@ export default function Dashboard() {
               initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 12 }}
-              className="bg-white w-full max-w-md rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
+              className="bg-white w-full max-w-lg max-h-[90vh] rounded-2xl border border-neutral-200/80 shadow-md flex flex-col overflow-hidden"
             >
-              <div className="flex items-center justify-between">
+              <div className="px-6 sm:px-7 pt-6 pb-4 border-b border-neutral-100 flex items-center justify-between shrink-0">
                 <div>
                   <h3 className="text-xl font-light text-slate-900 tracking-tight">Edit Meeting</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Update scheduled conference details</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Update schedule or cover image</p>
                 </div>
                 <button onClick={() => setEditingMeeting(null)} className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer">
                   <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleUpdateMeeting} className="space-y-4">
+              <form onSubmit={handleUpdateMeeting} className="p-6 sm:p-7 space-y-5 overflow-y-auto custom-scroll">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-slate-700 block">Title</label>
                   <input 
@@ -2858,44 +2926,150 @@ export default function Dashboard() {
                     onChange={e => setEditMeetingForm(prev => ({ ...prev, title: e.target.value }))}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+
+                {/* Quick Date & Time Selection */}
+                <div className="space-y-3 p-3.5 bg-stone-50/70 border border-neutral-200/70 rounded-xl">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700 block">Date</label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-700">Date</label>
+                      <div className="flex items-center gap-1.5">
+                        {[
+                          { label: 'Today', date: format(new Date(), 'yyyy-MM-dd') },
+                          { label: 'Tomorrow', date: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd') },
+                          { label: 'Next Week', date: format(new Date(Date.now() + 7 * 86400000), 'yyyy-MM-dd') },
+                        ].map(item => (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={() => setEditMeetingForm(prev => ({ ...prev, date: item.date }))}
+                            className={cn(
+                              "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap",
+                              editMeetingForm.date === item.date
+                                ? "bg-slate-900 text-white"
+                                : "bg-white border border-neutral-200 text-slate-600 hover:border-slate-400"
+                            )}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <input 
                       type="date" 
                       required
-                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                      className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
                       value={editMeetingForm.date}
                       onChange={e => setEditMeetingForm(prev => ({ ...prev, date: e.target.value }))}
                     />
                   </div>
+
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700 block">Time</label>
-                    <input 
-                      type="time" 
-                      required
-                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
-                      value={editMeetingForm.time}
-                      onChange={e => setEditMeetingForm(prev => ({ ...prev, time: e.target.value }))}
-                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-700">Time & Duration</label>
+                      <span className="text-[11px] text-emerald-700 font-medium">
+                        {formatTimePreview(editMeetingForm.date, editMeetingForm.time, editMeetingForm.durationMins)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { label: 'In 15m', value: getRoundedScheduleTime(15) },
+                        { label: 'Next Hour', value: getNextHourTime() },
+                        { label: '9:00 AM', value: '09:00' },
+                        { label: '10:00 AM', value: '10:00' },
+                        { label: '12:00 PM', value: '12:00' },
+                        { label: '2:00 PM', value: '14:00' },
+                        { label: '4:00 PM', value: '16:00' },
+                      ].map(slot => (
+                        <button
+                          key={slot.label}
+                          type="button"
+                          onClick={() => setEditMeetingForm(prev => ({ ...prev, time: slot.value }))}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap",
+                            editMeetingForm.time === slot.value
+                              ? "bg-slate-900 text-white"
+                              : "bg-white border border-neutral-200 text-slate-600 hover:border-slate-400"
+                          )}
+                        >
+                          {slot.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5 pt-1">
+                      <input 
+                        type="time" 
+                        required
+                        className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                        value={editMeetingForm.time}
+                        onChange={e => setEditMeetingForm(prev => ({ ...prev, time: e.target.value }))}
+                      />
+                      <div className="grid grid-cols-4 gap-1">
+                        {[15, 30, 45, 60].map(mins => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => setEditMeetingForm(prev => ({ ...prev, durationMins: mins }))}
+                            className={cn(
+                              "rounded-xl text-[11px] font-medium border transition-colors cursor-pointer whitespace-nowrap",
+                              editMeetingForm.durationMins === mins
+                                ? "bg-emerald-50/80 text-emerald-800 border-emerald-200/80"
+                                : "bg-white border-neutral-200 text-slate-600 hover:border-slate-400"
+                            )}
+                          >
+                            {mins === 60 ? '1h' : `${mins}m`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-700 block">Description</label>
-                  <textarea 
-                    placeholder="Optional meeting agenda..."
-                    rows={2}
-                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors resize-none"
-                    value={editMeetingForm.description}
-                    onChange={e => setEditMeetingForm(prev => ({ ...prev, description: e.target.value }))}
-                  />
-                </div>
+
+                {/* Custom Cover Image Upload (No Placeholders) */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-slate-700">Cover Image</label>
-                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer whitespace-nowrap">
-                      <Upload size={13} />
-                      <span>Upload image</span>
+                    <label className="text-xs font-medium text-slate-700">Cover Image (Optional)</label>
+                    {editMeetingForm.coverImage && (
+                      <button
+                        type="button"
+                        onClick={() => setEditMeetingForm(prev => ({ ...prev, coverImage: '' }))}
+                        className="text-xs text-slate-500 hover:text-rose-600 transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Remove cover
+                      </button>
+                    )}
+                  </div>
+                  {editMeetingForm.coverImage ? (
+                    <div className="relative h-32 rounded-xl overflow-hidden border border-neutral-200 bg-stone-100">
+                      <img src={editMeetingForm.coverImage} alt="Meeting cover" className="w-full h-full object-cover" />
+                      <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 bg-white/95 px-2 py-1 rounded-lg border border-black/5 shadow-xs">
+                        <img src="/forum-logo.png" alt="Forum" className="w-4 h-4 object-contain" />
+                        <span className="text-[11px] font-semibold text-slate-900">Forum</span>
+                      </div>
+                      <label className="absolute top-2.5 right-2.5 px-2.5 py-1.5 bg-white/95 hover:bg-white text-slate-800 rounded-lg text-[11px] font-medium border border-black/5 shadow-xs cursor-pointer flex items-center gap-1.5 whitespace-nowrap">
+                        <Upload size={12} />
+                        <span>Replace</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const f = e.target.files?.[0];
+                            if (!f) return;
+                            try {
+                              const compressed = await compressCoverImageFile(f);
+                              setEditMeetingForm(prev => ({ ...prev, coverImage: compressed }));
+                            } catch {}
+                          }}
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <label className="flex items-center justify-between gap-3 px-4 py-3 bg-stone-50 hover:bg-stone-100/80 border border-dashed border-neutral-300 rounded-xl cursor-pointer transition-colors">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Upload size={15} className="text-slate-500 shrink-0" />
+                        <span className="text-xs text-slate-600 truncate">Upload a photo for WhatsApp & invite previews</span>
+                      </div>
+                      <span className="text-xs font-medium text-emerald-700 whitespace-nowrap">Choose image</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -2910,26 +3084,21 @@ export default function Dashboard() {
                         }}
                       />
                     </label>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {MEETING_COVER_PRESETS.map(preset => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => setEditMeetingForm(prev => ({ ...prev, coverImage: preset.url }))}
-                        className={cn(
-                          "relative h-12 rounded-xl overflow-hidden border-2 transition-all cursor-pointer",
-                          editMeetingForm.coverImage === preset.url
-                            ? "border-emerald-600 ring-2 ring-emerald-600/30"
-                            : "border-neutral-200 hover:border-slate-400"
-                        )}
-                      >
-                        <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
+                  )}
                 </div>
-                <div className="pt-2 flex items-center justify-end gap-2.5">
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-700 block">Agenda (Optional)</label>
+                  <textarea 
+                    placeholder="Add meeting agenda or notes..."
+                    rows={2}
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors resize-none"
+                    value={editMeetingForm.description}
+                    onChange={e => setEditMeetingForm(prev => ({ ...prev, description: e.target.value }))}
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-neutral-100">
                   <button 
                     type="button"
                     onClick={() => setEditingMeeting(null)}
@@ -3072,19 +3241,19 @@ export default function Dashboard() {
               initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 12 }}
-              className="bg-white w-full max-w-lg rounded-2xl border border-neutral-200/80 shadow-md p-6 sm:p-7 space-y-5 overflow-hidden"
+              className="bg-white w-full max-w-lg max-h-[90vh] rounded-2xl border border-neutral-200/80 shadow-md flex flex-col overflow-hidden"
             >
-              <div className="flex items-center justify-between">
+              <div className="px-6 sm:px-7 pt-6 pb-4 border-b border-neutral-100 flex items-center justify-between shrink-0">
                 <div>
                   <h3 className="text-xl font-light text-slate-900 tracking-tight">Schedule Meeting</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Set up an upcoming conference room</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Pick a time and share the link — calendar syncs automatically</p>
                 </div>
                 <button onClick={() => setIsScheduling(false)} className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer">
                   <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleSchedule} className="space-y-4">
+              <form onSubmit={handleSchedule} className="p-6 sm:p-7 space-y-5 overflow-y-auto custom-scroll">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-slate-700 block">Meeting Title</label>
                   <input 
@@ -3096,85 +3265,186 @@ export default function Dashboard() {
                     onChange={e => setNewMeeting(prev => ({ ...prev, title: e.target.value }))}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+
+                {/* Quick Date & Time Selection */}
+                <div className="space-y-3 p-3.5 bg-stone-50/70 border border-neutral-200/70 rounded-xl">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700 block">Date</label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-700">Date</label>
+                      <div className="flex items-center gap-1.5">
+                        {[
+                          { label: 'Today', date: format(new Date(), 'yyyy-MM-dd') },
+                          { label: 'Tomorrow', date: format(new Date(Date.now() + 86400000), 'yyyy-MM-dd') },
+                          { label: 'Next Week', date: format(new Date(Date.now() + 7 * 86400000), 'yyyy-MM-dd') },
+                        ].map(item => (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={() => setNewMeeting(prev => ({ ...prev, date: item.date }))}
+                            className={cn(
+                              "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap",
+                              newMeeting.date === item.date
+                                ? "bg-slate-900 text-white"
+                                : "bg-white border border-neutral-200 text-slate-600 hover:border-slate-400"
+                            )}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <input 
-                      type="date"
+                      type="date" 
                       required
-                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                      className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
                       value={newMeeting.date}
                       onChange={e => setNewMeeting(prev => ({ ...prev, date: e.target.value }))}
                     />
                   </div>
+
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-700 block">Time</label>
-                    <input 
-                      type="time"
-                      required
-                      className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
-                      value={newMeeting.time}
-                      onChange={e => setNewMeeting(prev => ({ ...prev, time: e.target.value }))}
-                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-700">Time & Duration</label>
+                      <span className="text-[11px] text-emerald-700 font-medium">
+                        {formatTimePreview(newMeeting.date, newMeeting.time, newMeeting.durationMins)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { label: 'In 15m', value: getRoundedScheduleTime(15) },
+                        { label: 'Next Hour', value: getNextHourTime() },
+                        { label: '9:00 AM', value: '09:00' },
+                        { label: '10:00 AM', value: '10:00' },
+                        { label: '12:00 PM', value: '12:00' },
+                        { label: '2:00 PM', value: '14:00' },
+                        { label: '4:00 PM', value: '16:00' },
+                      ].map(slot => (
+                        <button
+                          key={slot.label}
+                          type="button"
+                          onClick={() => setNewMeeting(prev => ({ ...prev, time: slot.value }))}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap",
+                            newMeeting.time === slot.value
+                              ? "bg-slate-900 text-white"
+                              : "bg-white border border-neutral-200 text-slate-600 hover:border-slate-400"
+                          )}
+                        >
+                          {slot.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2.5 pt-1">
+                      <input 
+                        type="time" 
+                        required
+                        className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors"
+                        value={newMeeting.time}
+                        onChange={e => setNewMeeting(prev => ({ ...prev, time: e.target.value }))}
+                      />
+                      <div className="grid grid-cols-4 gap-1">
+                        {[15, 30, 45, 60].map(mins => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => setNewMeeting(prev => ({ ...prev, durationMins: mins }))}
+                            className={cn(
+                              "rounded-xl text-[11px] font-medium border transition-colors cursor-pointer whitespace-nowrap",
+                              newMeeting.durationMins === mins
+                                ? "bg-emerald-50/80 text-emerald-800 border-emerald-200/80"
+                                : "bg-white border-neutral-200 text-slate-600 hover:border-slate-400"
+                            )}
+                          >
+                            {mins === 60 ? '1h' : `${mins}m`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-700 block">Recurrence</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { id: 'none', label: 'Once' },
-                      { id: 'daily', label: 'Daily' },
-                      { id: 'weekly', label: 'Weekly' },
-                      { id: 'monthly', label: 'Monthly' },
-                    ].map(option => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setNewMeeting(prev => ({ ...prev, recurrence: option.id as any }))}
-                        className={cn(
-                          "py-2 px-2.5 rounded-xl text-xs font-medium transition-colors border text-center cursor-pointer whitespace-nowrap",
-                          newMeeting.recurrence === option.id 
-                            ? "bg-slate-900 text-white border-slate-900 shadow-xs" 
-                            : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
-                        )}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-700 block">Description (Optional)</label>
-                  <textarea 
-                    placeholder="Add meeting agenda or notes..."
-                    rows={2}
-                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors resize-none"
-                    value={newMeeting.description}
-                    onChange={e => setNewMeeting(prev => ({ ...prev, description: e.target.value }))}
-                  />
                 </div>
 
                 {/* Invite Attendees */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-700 block">Invite Attendees (Optional Emails)</label>
+                  <label className="text-xs font-medium text-slate-700 block">Invite Attendees (Optional)</label>
                   <input
                     type="text"
                     placeholder="teammate@company.com, partner@studio.io"
-                    className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 transition-colors"
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 transition-colors"
                     value={newMeeting.invitedEmails}
                     onChange={e => setNewMeeting(prev => ({ ...prev, invitedEmails: e.target.value }))}
                   />
+                  {contacts.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {contacts.slice(0, 6).map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            if (!c.email) return;
+                            setNewMeeting(prev => {
+                              const current = prev.invitedEmails.split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+                              if (current.includes(c.email.toLowerCase())) return prev;
+                              return {
+                                ...prev,
+                                invitedEmails: prev.invitedEmails ? `${prev.invitedEmails}, ${c.email}` : c.email
+                              };
+                            });
+                          }}
+                          className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg text-[11px] font-medium transition-colors cursor-pointer truncate max-w-[160px]"
+                        >
+                          + {c.displayName || c.email}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {/* Cover Image Picker */}
+                {/* Cover Image Upload Only (No Placeholders) */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-slate-700">Meeting Cover Image</label>
-                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer whitespace-nowrap">
-                      <Upload size={13} />
-                      <span>Upload photo</span>
+                    <label className="text-xs font-medium text-slate-700">Cover Image (Optional)</label>
+                    {newMeeting.coverImage && (
+                      <button
+                        type="button"
+                        onClick={() => setNewMeeting(prev => ({ ...prev, coverImage: '' }))}
+                        className="text-xs text-slate-500 hover:text-rose-600 transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        Remove cover
+                      </button>
+                    )}
+                  </div>
+                  {newMeeting.coverImage ? (
+                    <div className="relative h-32 rounded-xl overflow-hidden border border-neutral-200 bg-stone-100">
+                      <img src={newMeeting.coverImage} alt="Meeting cover" className="w-full h-full object-cover" />
+                      <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5 bg-white/95 px-2 py-1 rounded-lg border border-black/5 shadow-xs">
+                        <img src="/forum-logo.png" alt="Forum" className="w-4 h-4 object-contain" />
+                        <span className="text-[11px] font-semibold text-slate-900">Forum</span>
+                      </div>
+                      <label className="absolute top-2.5 right-2.5 px-2.5 py-1.5 bg-white/95 hover:bg-white text-slate-800 rounded-lg text-[11px] font-medium border border-black/5 shadow-xs cursor-pointer flex items-center gap-1.5 whitespace-nowrap">
+                        <Upload size={12} />
+                        <span>Replace</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                              const compressed = await compressCoverImageFile(file);
+                              setNewMeeting(prev => ({ ...prev, coverImage: compressed }));
+                            } catch {}
+                          }}
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <label className="flex items-center justify-between gap-3 px-4 py-3 bg-stone-50 hover:bg-stone-100/80 border border-dashed border-neutral-300 rounded-xl cursor-pointer transition-colors">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Upload size={15} className="text-slate-500 shrink-0" />
+                        <span className="text-xs text-slate-600 truncate">Upload a photo for WhatsApp & invite previews</span>
+                      </div>
+                      <span className="text-xs font-medium text-emerald-700 whitespace-nowrap">Choose image</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -3189,37 +3459,70 @@ export default function Dashboard() {
                         }}
                       />
                     </label>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {MEETING_COVER_PRESETS.map(preset => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => setNewMeeting(prev => ({ ...prev, coverImage: preset.url }))}
-                        className={cn(
-                          "relative h-14 rounded-xl overflow-hidden border-2 transition-all cursor-pointer group text-left",
-                          newMeeting.coverImage === preset.url
-                            ? "border-emerald-600 ring-2 ring-emerald-600/30"
-                            : "border-neutral-200 hover:border-slate-400"
-                        )}
-                      >
-                        <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
-                        <span className="absolute bottom-1 left-1.5 text-[9px] font-semibold text-white drop-shadow">
-                          {preset.label}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  )}
                   <input
                     type="url"
                     value={newMeeting.coverImage?.startsWith('data:') ? '' : (newMeeting.coverImage || '')}
                     onChange={(e) => setNewMeeting(prev => ({ ...prev, coverImage: e.target.value }))}
-                    placeholder="Or paste custom cover image URL..."
-                    className="w-full px-3 py-1.5 bg-stone-50 border border-neutral-200 rounded-xl text-[11px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-700"
+                    placeholder="Or paste an image URL..."
+                    className="w-full px-3 py-1.5 bg-white border border-neutral-200 rounded-xl text-[11px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50"
                   />
                 </div>
 
-                <div className="pt-2 flex items-center justify-end gap-2.5">
+                {/* Collapsible Agenda & Repeat Schedule */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowScheduleExtras(prev => !prev)}
+                    className="text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <ChevronDown size={14} className={cn("transition-transform", showScheduleExtras && "rotate-180")} />
+                    <span>{showScheduleExtras ? 'Hide agenda & repeat schedule' : 'Add agenda & repeat schedule'}</span>
+                  </button>
+
+                  {showScheduleExtras && (
+                    <div className="mt-3 space-y-3 pt-3 border-t border-neutral-100">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-slate-700 block">Recurrence</label>
+                        <div className="grid grid-cols-4 gap-2">
+                          {[
+                            { id: 'none', label: 'Once' },
+                            { id: 'daily', label: 'Daily' },
+                            { id: 'weekly', label: 'Weekly' },
+                            { id: 'monthly', label: 'Monthly' },
+                          ].map(option => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => setNewMeeting(prev => ({ ...prev, recurrence: option.id as any }))}
+                              className={cn(
+                                "py-2 px-2.5 rounded-xl text-xs font-medium transition-colors border text-center cursor-pointer whitespace-nowrap",
+                                newMeeting.recurrence === option.id 
+                                  ? "bg-slate-900 text-white border-slate-900 shadow-xs" 
+                                  : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
+                              )}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-slate-700 block">Agenda (Optional)</label>
+                        <textarea 
+                          placeholder="Add meeting agenda or notes..."
+                          rows={2}
+                          className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 transition-colors resize-none"
+                          value={newMeeting.description}
+                          onChange={e => setNewMeeting(prev => ({ ...prev, description: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-neutral-100">
                   <button 
                     type="button"
                     onClick={() => setIsScheduling(false)}
@@ -3229,9 +3532,9 @@ export default function Dashboard() {
                   </button>
                   <button 
                     type="submit"
-                    className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
+                    className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs whitespace-nowrap cursor-pointer"
                   >
-                    Schedule Meeting
+                    Schedule & Copy Link
                   </button>
                 </div>
               </form>
@@ -3242,7 +3545,15 @@ export default function Dashboard() {
 
       {/* Send Calendar Invite Modal */}
       <AnimatePresence>
-        {inviteModalMeeting && (
+        {inviteModalMeeting && (() => {
+          const liveInviteMeeting = meetings.find(m => m.id === inviteModalMeeting.id) || inviteModalMeeting;
+          const confirmedIds = new Set<string>([
+            ...(Array.isArray(liveInviteMeeting.acceptedUids) ? liveInviteMeeting.acceptedUids : []),
+            ...(Array.isArray(liveInviteMeeting.participants) ? liveInviteMeeting.participants : []),
+          ]);
+          const confirmedNames = Array.isArray(liveInviteMeeting.acceptedNames) ? liveInviteMeeting.acceptedNames : [];
+
+          return (
           <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4 sm:p-6">
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 12 }}
@@ -3253,7 +3564,10 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <div className="min-w-0 pr-3">
                   <h3 className="text-xl font-light text-slate-900 tracking-tight truncate">Invite to Meeting</h3>
-                  <p className="text-xs text-slate-500 mt-0.5 truncate">{inviteModalMeeting.title}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 truncate">
+                    {liveInviteMeeting.title}
+                    {confirmedIds.size > 0 && ` · ${confirmedIds.size} ${confirmedIds.size === 1 ? 'participant' : 'participants'} confirmed`}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -3264,23 +3578,29 @@ export default function Dashboard() {
                 </button>
               </div>
 
+              {confirmedNames.length > 0 && (
+                <div className="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-200/60 rounded-xl px-3.5 py-2.5">
+                  <span className="font-medium">Confirmed:</span> {confirmedNames.join(', ')}
+                </div>
+              )}
+
               {/* Direct Auto-Calendar Invite Link */}
               <div className="space-y-2 p-3.5 bg-stone-50 rounded-xl border border-neutral-200/70">
                 <p className="text-xs font-medium text-slate-800">Auto-Calendar Invite Link</p>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Anyone who opens this link has the meeting automatically added to their Forum Calendar.
+                  Opening this link shows your meeting preview card on WhatsApp and syncs it to Forum Calendar.
                 </p>
                 <div className="flex items-center gap-2 pt-1">
                   <input
                     type="text"
                     readOnly
-                    value={`${window.location.origin}/invite/${inviteModalMeeting.roomId}`}
+                    value={`${window.location.origin}/invite/${liveInviteMeeting.roomId}`}
                     className="flex-1 min-w-0 px-3 py-1.5 bg-white border border-neutral-200 rounded-lg text-[11px] font-mono text-slate-700 outline-none"
                   />
                   <button
                     type="button"
                     onClick={() => {
-                      const url = `${window.location.origin}/invite/${inviteModalMeeting.roomId}`;
+                      const url = `${window.location.origin}/invite/${liveInviteMeeting.roomId}`;
                       navigator.clipboard.writeText(url);
                       setInviteLinkCopied(true);
                       setTimeout(() => setInviteLinkCopied(false), 2000);
@@ -3302,10 +3622,10 @@ export default function Dashboard() {
                   const list = inviteEmailInput.split(/[\s,;]+/).filter(Boolean);
                   const sentCount = await sendMeetingInviteToEmails(
                     {
-                      id: inviteModalMeeting.id,
-                      roomId: inviteModalMeeting.roomId,
-                      title: inviteModalMeeting.title,
-                      hostName: inviteModalMeeting.hostName
+                      id: liveInviteMeeting.id,
+                      roomId: liveInviteMeeting.roomId,
+                      title: liveInviteMeeting.title,
+                      hostName: liveInviteMeeting.hostName
                     },
                     list
                   );
@@ -3361,7 +3681,7 @@ export default function Dashboard() {
 
                 <div className="pt-2 flex items-center justify-between border-t border-neutral-100">
                   <a
-                    href={`mailto:?subject=${encodeURIComponent(`Forum Invite: ${inviteModalMeeting.title}`)}&body=${encodeURIComponent(`You're invited to ${inviteModalMeeting.title} on Forum.\n\nAdd to Forum Calendar & Join:\n${window.location.origin}/invite/${inviteModalMeeting.roomId}`)}`}
+                    href={`mailto:?subject=${encodeURIComponent(`Forum Invite: ${liveInviteMeeting.title}`)}&body=${encodeURIComponent(`You're invited to ${liveInviteMeeting.title} on Forum.\n\nAdd to Forum Calendar & Join:\n${window.location.origin}/invite/${liveInviteMeeting.roomId}`)}`}
                     className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900"
                   >
                     <Mail size={14} />
@@ -3378,7 +3698,8 @@ export default function Dashboard() {
               </form>
             </motion.div>
           </div>
-        )}
+          );
+        })()}
       </AnimatePresence>
     </div>
   );
@@ -3451,6 +3772,13 @@ function MeetingCard({ meeting, onJoin, onInvite, onEdit, onDelete }: { meeting:
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const meetingUrl = `${window.location.origin}/meeting/${meeting.roomId}`;
+  const confirmedCount = new Set([
+    ...(Array.isArray(meeting.acceptedUids) ? meeting.acceptedUids : []),
+    ...(Array.isArray(meeting.participants) ? meeting.participants : []),
+  ]).size;
+  const confirmedTooltip = Array.isArray(meeting.acceptedNames) && meeting.acceptedNames.length > 0
+    ? `Confirmed: ${meeting.acceptedNames.join(', ')}`
+    : undefined;
 
   const handleExportICS = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -3508,6 +3836,11 @@ function MeetingCard({ meeting, onJoin, onInvite, onEdit, onDelete }: { meeting:
             {isMeetingToday && (
               <span className="text-[11px] font-semibold text-emerald-700">
                 · Today
+              </span>
+            )}
+            {confirmedCount > 0 && (
+              <span title={confirmedTooltip} className="text-[11px] font-medium text-slate-500 flex items-center gap-1 tabular-nums">
+                · <Users size={11} className="text-slate-400" /> {confirmedCount} {confirmedCount === 1 ? 'attending' : 'attending'}
               </span>
             )}
             {meeting.isKomu && (
