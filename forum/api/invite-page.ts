@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { fetchMeetingForInvite, injectInviteMetaHtml } from './_inviteHelper';
+import { fetchMeetingForInvite, injectInviteMetaHtml } from './_inviteHelper.js';
 
 async function loadBaseIndexHtml(origin: string): Promise<string> {
   const candidates = [
