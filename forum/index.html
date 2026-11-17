@@ -4,11 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- Title & Primary Meta -->
-    <title>Komu — Video Meetings & Workspace</title>
-    <meta name="description" content="A comprehensive communication platform for video meetings, scheduling, and workspace collaboration." />
-
-
+    <title>Forum — Browser Video Meetings, Shared Notes & Whiteboards</title>
+    <meta name="description" content="Start browser-based video meetings with collaborative whiteboards and shared notes. Guests can join from a link without installing an app." />
+    <link rel="canonical" href="https://komu-forum.vercel.app/" />
 
     <link rel="icon" type="image/x-icon" href="https://komuhost.vercel.app/favicon.ico" />
     <link rel="shortcut icon" href="https://komuhost.vercel.app/favicon.ico" />
@@ -17,19 +15,37 @@
     <!-- Open Graph / Facebook / WhatsApp / LinkedIn -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://komu-forum.vercel.app/" />
-    <meta property="og:title" content="Komu — Video Meetings & Workspace" />
-    <meta property="og:description" content="A comprehensive communication platform for video meetings, scheduling, and workspace collaboration." />
-    <meta property="og:image" content="https://komuhost.vercel.app/favicon.ico" />
+    <meta property="og:title" content="Forum — Browser Video Meetings, Shared Notes & Whiteboards" />
+    <meta property="og:description" content="Start browser-based video meetings with collaborative whiteboards and shared notes. Guests can join from a link without installing an app." />
+    <meta property="og:image" content="https://komuhost.vercel.app/people.png" />
 
     <!-- Twitter Cards -->
-    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:url" content="https://komu-forum.vercel.app/" />
-    <meta name="twitter:title" content="Komu — Video Meetings & Workspace" />
-    <meta name="twitter:description" content="A comprehensive communication platform for video meetings, scheduling, and workspace collaboration." />
-    <meta name="twitter:image" content="https://komuhost.vercel.app/favicon.ico" />
+    <meta name="twitter:title" content="Forum — Browser Video Meetings, Shared Notes & Whiteboards" />
+    <meta name="twitter:description" content="Start browser-based video meetings with collaborative whiteboards and shared notes. Guests can join from a link without installing an app." />
+    <meta name="twitter:image" content="https://komuhost.vercel.app/people.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Forum",
+        "applicationCategory": "CommunicationApplication",
+        "operatingSystem": "Any device with a modern web browser",
+        "url": "https://komu-forum.vercel.app/",
+        "description": "Browser-based video meetings with collaborative whiteboards and shared notes."
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main>
+        <h1>Browser video meetings with shared notes and whiteboards</h1>
+        <p>Forum brings video calls and collaborative meeting tools together in your browser. Guests can join from a link without installing an app.</p>
+        <p><a href="/resources/">Explore practical guides to online meetings and collaboration</a></p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

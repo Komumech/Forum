@@ -229,6 +229,7 @@ export default function Home() {
             <a href="#features" className="hover:text-slate-900 transition-colors">Features</a>
             <a href="#workspace" className="hover:text-slate-900 transition-colors">Workspace</a>
             <a href="#faq" className="hover:text-slate-900 transition-colors">FAQ</a>
+            <a href="/resources/" className="hover:text-slate-900 transition-colors">Guides</a>
             <button type="button" onClick={() => navigate('/count')} className="hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap">Counter</button>
           </nav>
         </div>
@@ -809,6 +810,7 @@ export default function Home() {
             <a href="#features" className="hover:text-gray-900 transition-colors">Features</a>
             <a href="#workspace" className="hover:text-gray-900 transition-colors">Workspace</a>
             <a href="#faq" className="hover:text-gray-900 transition-colors">FAQ</a>
+            <a href="/resources/" className="hover:text-gray-900 transition-colors">Guides</a>
             <button type="button" onClick={() => navigate('/count')} className="hover:text-gray-900 transition-colors cursor-pointer whitespace-nowrap">Meetings Count</button>
             <a href="mailto:komumech@gmail.com" className="hover:text-gray-900 transition-colors">Contact</a>
           </div>
