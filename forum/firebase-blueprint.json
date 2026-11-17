@@ -6,9 +6,71 @@
       "type": "object",
       "properties": {
         "hostId": { "type": "string", "description": "UID of the meeting host" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "When the room was created" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the room was created" },
+        "stageOverlay": {
+          "type": "object",
+          "description": "Live stage media/template broadcast overlay state"
+        },
+        "sessionCount": { "type": "number", "description": "Tracked session count for reusable rooms such as PMI rooms" },
+        "archivedSessionCount": { "type": "number", "description": "Count of archived sessions beyond the rolling sessionLogs map" },
+        "sessionLogs": { "type": "object", "description": "Map of tracked LiveKit room session IDs to start/lastActive timestamps" }
       },
       "required": ["hostId", "createdAt"]
+    },
+    "RoomSession": {
+      "title": "RoomSession",
+      "description": "Individual conference session instance inside a reusable room (e.g. PMI)",
+      "type": "object",
+      "properties": {
+        "sessionSid": { "type": "string" },
+        "roomId": { "type": "string" },
+        "isPmi": { "type": "boolean" },
+        "startedAtMs": { "type": "number" },
+        "lastActiveAtMs": { "type": "number" }
+      },
+      "required": ["sessionSid", "roomId", "startedAtMs"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and real-time presence status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "isOnline": { "type": "boolean" },
+        "status": { "type": "string", "description": "available | busy | away | in_meeting | offline" },
+        "previousStatus": { "type": "string" },
+        "currentRoomId": { "type": "string" },
+        "inMeetingHeartbeat": { "type": "number" },
+        "lastSeen": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "status"]
+    },
+    "ChatTab": {
+      "title": "ChatTab",
+      "description": "Custom in-meeting chat tab metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "name"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Message scoped to a specific in-meeting chat tab",
+      "type": "object",
+      "properties": {
+        "tabId": { "type": "string" },
+        "sender": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["tabId", "sender", "message", "timestamp"]
     },
     "AdmittedUser": {
       "title": "AdmittedUser",
@@ -50,6 +112,7 @@
       "properties": {
         "title": { "type": "string" },
         "roomId": { "type": "string" },
+        "sessionSid": { "type": "string" },
         "filename": { "type": "string" },
         "durationSeconds": { "type": "number" },
         "mode": { "type": "string" },
@@ -115,6 +178,39 @@
       },
       "required": ["columnId", "title"]
     },
+    "StageDocumentPage": {
+      "title": "StageDocumentPage",
+      "description": "Paginated slide or media page shared on the live meeting stage",
+      "type": "object",
+      "properties": {
+        "pageNumber": { "type": "number" },
+        "kind": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "heading": { "type": "string" },
+        "text": { "type": "string" }
+      },
+      "required": ["pageNumber", "kind"]
+    },
+    "MeetingFeedback": {
+      "title": "MeetingFeedback",
+      "description": "Post-meeting participant rating and qualitative feedback",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "sessionSid": { "type": "string" },
+        "meetingTitle": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "isGuest": { "type": "boolean" },
+        "createdAtMs": { "type": "number" },
+        "category": { "type": "string", "description": "meeting_rating | error_report" },
+        "errorContext": { "type": "string", "description": "Optional error details or source screen for error reports" }
+      },
+      "required": ["roomId", "rating"]
+    },
     "Clip": {
       "title": "Clip",
       "description": "Saved video clip metadata",
@@ -130,9 +226,29 @@
     }
   },
   "firestore": {
+    "/userProfiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles and real-time presence status"
+    },
     "/rooms/{roomId}": {
       "schema": "Room",
-      "description": "Meeting room metadata"
+      "description": "Meeting room metadata and stage overlay"
+    },
+    "/rooms/{roomId}/sessions/{sessionId}": {
+      "schema": "RoomSession",
+      "description": "Individual meeting session instances hosted in this room"
+    },
+    "/rooms/{roomId}/stageDocs/{docId}/pages/{pageNumber}": {
+      "schema": "StageDocumentPage",
+      "description": "Paginated document slides and stage media frames"
+    },
+    "/rooms/{roomId}/chatTabs/{tabId}": {
+      "schema": "ChatTab",
+      "description": "Custom chat tabs inside a meeting room"
+    },
+    "/rooms/{roomId}/chatMessages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages belonging to custom meeting chat tabs"
     },
     "/rooms/{roomId}/admitted/{userId}": {
       "schema": "AdmittedUser",
@@ -153,6 +269,10 @@
     "/meetings/{meetingId}": {
       "schema": "Meeting",
       "description": "Scheduled meetings"
+    },
+    "/meetingFeedback/{feedbackId}": {
+      "schema": "MeetingFeedback",
+      "description": "Post-meeting ratings and feedback submissions"
     },
     "/recordings/{recordingId}": {
       "schema": "Recording",

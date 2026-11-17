@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 
 const FIREBASE_PROJECT_ID = 'forum-8f34e';
 const FIRESTORE_DB_ID = '(default)';
@@ -161,7 +162,6 @@ function loadForumLogoBuffer(): Buffer | null {
 }
 
 export async function renderInviteOgPng(roomId: string): Promise<Buffer> {
-  const { default: sharp } = await import('sharp');
   const width = 1200;
   const height = 630;
   const meta = await fetchMeetingForInvite(roomId);

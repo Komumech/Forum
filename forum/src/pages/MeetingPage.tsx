@@ -18,9 +18,10 @@ import {
   ConnectionQualityIndicator,
   useVisualStableUpdate,
   useMediaDevices,
+  useRoomContext,
 } from '@livekit/components-react';
 import { isMobileBrowser } from '@livekit/components-core';
-import { Track, ConnectionState, Participant, VideoPresets, AudioPresets, ScreenSharePresets, LocalVideoTrack } from 'livekit-client';
+import { Track, ConnectionState, Participant, VideoPresets, AudioPresets, ScreenSharePresets, LocalVideoTrack, LocalAudioTrack, RoomEvent } from 'livekit-client';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, Hand, 
   MonitorUp, MonitorOff, MoreVertical, Info, Users, MessageSquare,
@@ -30,7 +31,7 @@ import {
   ChevronUp, ChevronLeft, ChevronRight, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard,
   Radio, Maximize2, Minimize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download,
   SwitchCamera, Wand2, SlidersHorizontal, Volume2, Bot, Loader2,
-  Image as ImageIcon, Lock, Key, Crown, HelpCircle, BarChart2
+  Image as ImageIcon, Lock, Key, Crown, HelpCircle, BarChart2, Layers, PictureInPicture2
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
 import { SharedFileItem, SendFileDialog, SharedFileCard, FilesPanel } from '../components/FileTransfer';
@@ -43,6 +44,8 @@ import ClipsBasic from '../components/ClipsBasic';
 import DuplicateSessionModal from '../components/DuplicateSessionModal';
 import HostKeyModal from '../components/HostKeyModal';
 import BreakoutRoomControls, { BreakoutRoomConfig } from '../components/BreakoutRoomControls';
+import DraggableEdgeSnapCard from '../components/DraggableEdgeSnapCard';
+import MeetingPictureInPicture, { MeetingPictureInPictureHandle } from '../components/MeetingPictureInPicture';
 import { useDeviceManager } from '../hooks/useDeviceManager';
 import { MeetingCompositeRecorder, RecorderParticipantSnapshot } from '../utils/meetingRecorder';
 import { AIVideoEnhanceOptions, DEFAULT_AI_VIDEO_ENHANCE, getAIVideoFilterStyle, useAIVideoAutoEnhancer, AIEnhancementFilterDefs } from '../utils/mediaEnhancer';
@@ -51,13 +54,39 @@ import { useVoiceActivity } from '../hooks/useVoiceActivity';
 import { applyBackgroundEffect, BackgroundMode, VIRTUAL_BG_PRESETS } from '../utils/backgroundProcessor';
 import { DEFAULT_MEETING_COVER } from '../assets/covers';
 import { triggerForumPushNotification } from '../utils/pushNotifications';
+import {
+  AudioSoundMode,
+  PerformancePreset,
+  PerformanceAudioOptions,
+  PERFORMANCE_PRESET_CONFIGS,
+  getSavedAudioSoundMode,
+  saveAudioSoundMode,
+  getSavedPerformanceAudioOptions,
+  savePerformanceAudioOptions,
+  getCaptureOptionsForSoundMode,
+  ForumAudioSmoothingProcessor,
+} from '../utils/audioSmoothing';
+import {
+  StageOverlayState,
+  DEFAULT_STAGE_OVERLAY,
+  StageStudioPanel,
+} from '../components/StreamMediaOverlay';
+import StagePresentationCard from '../components/StagePresentationCard';
+import PostMeetingFeedbackView from '../components/PostMeetingFeedbackView';
+import { SendErrorFeedbackButton } from '../components/ErrorFeedbackModal';
 import { useAuth } from '../context/AuthContext';
-import { db, auth, komuDb, komuAuth } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { db, auth, komuDb, komuAuth, firebaseConfig } from '../firebase';
+import { onAuthStateChanged, onIdTokenChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, orderBy, runTransaction, arrayUnion } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
+
+const ROOM_TRACK_SOURCES = [
+  { source: Track.Source.Camera, withPlaceholder: true },
+  { source: Track.Source.ScreenShare, withPlaceholder: false },
+];
+const ROOM_TRACK_OPTIONS = { onlySubscribed: true };
 
 export default function MeetingPage() {
   const { id: room } = useParams();
@@ -74,9 +103,25 @@ export default function MeetingPage() {
   const [isReady, setIsReady] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting' | 'participants' | 'notes' | 'whiteboard' | 'files' | 'host_controls' | 'tools' | 'qa' | 'polls' | 'canvas' | 'breakout' | 'clips' | null>(null);
+  const [activeTab, setActiveTab] = useState<'info' | 'users' | 'chat' | 'settings' | 'waiting' | 'participants' | 'notes' | 'whiteboard' | 'files' | 'host_controls' | 'tools' | 'qa' | 'polls' | 'canvas' | 'breakout' | 'clips' | 'stage' | null>(null);
   const [isKomuToolsOpen, setIsKomuToolsOpen] = useState(false);
   const [meetingDetails, setMeetingDetails] = useState<any>(null);
+  const [postMeetingFeedback, setPostMeetingFeedback] = useState<{
+    roomId: string;
+    sessionSid?: string;
+    meetingTitle: string;
+    destination: string;
+    transcriptSnapshot?: string;
+    participants?: string[];
+    initialAiSummary?: string;
+  } | null>(null);
+  const sessionSummaryDataRef = useRef<{
+    sessionSid?: string;
+    transcriptSnapshot: string;
+    participants: string[];
+    initialAiSummary?: string;
+  }>({ transcriptSnapshot: '', participants: [] });
+  const intentionalExitRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -242,11 +287,33 @@ export default function MeetingPage() {
       localStorage.setItem('forum_guest_username', name.trim());
     } catch (e) {}
 
-    // Update presence to Busy in background if user is authenticated
+    // Update live presence to In Meeting if user is authenticated (preserve previous non-meeting status)
     if (user) {
-      setDoc(doc(db, 'userProfiles', user.uid), { status: 'busy' }, { merge: true }).catch(err => {
-        console.warn("Could not update user profile status:", err);
-      });
+      getDoc(doc(db, 'userProfiles', user.uid))
+        .then((snap) => {
+          const curStatus = snap.exists() ? snap.data()?.status : 'available';
+          const prevStatus =
+            curStatus && curStatus !== 'in_meeting' && curStatus !== 'offline'
+              ? curStatus
+              : snap.data()?.previousStatus && snap.data()?.previousStatus !== 'in_meeting'
+                ? snap.data()?.previousStatus
+                : 'available';
+          return setDoc(
+            doc(db, 'userProfiles', user.uid),
+            {
+              status: 'in_meeting',
+              previousStatus: prevStatus,
+              currentRoomId: room,
+              inMeetingHeartbeat: Date.now(),
+              isOnline: true,
+              lastSeen: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        })
+        .catch((err) => {
+          console.warn("Could not update user profile status:", err);
+        });
     }
 
     console.log(`[MeetingPage] Attempting to join room: ${room} as ${name}`);
@@ -356,6 +423,8 @@ export default function MeetingPage() {
       }
 
       console.log(`[MeetingPage] Token received successfully, connecting to LiveKit...`);
+      intentionalExitRef.current = false;
+      setPostMeetingFeedback(null);
       setToken(tokenData.token);
       setIsReady(true);
 
@@ -373,6 +442,26 @@ export default function MeetingPage() {
       setIsJoining(false);
     }
   };
+
+  if (postMeetingFeedback) {
+    return (
+      <PostMeetingFeedbackView
+        roomId={postMeetingFeedback.roomId}
+        sessionSid={postMeetingFeedback.sessionSid}
+        meetingTitle={postMeetingFeedback.meetingTitle}
+        user={user}
+        transcriptSnapshot={postMeetingFeedback.transcriptSnapshot}
+        participants={postMeetingFeedback.participants}
+        initialAiSummary={postMeetingFeedback.initialAiSummary}
+        onLogin={login}
+        onDone={() => {
+          const dest = postMeetingFeedback.destination;
+          setPostMeetingFeedback(null);
+          navigate(dest);
+        }}
+      />
+    );
+  }
 
   if (!isReady) {
     return (
@@ -494,8 +583,9 @@ export default function MeetingPage() {
 
               <form onSubmit={(e) => { e.preventDefault(); handleJoin(); }} className="space-y-4">
                 {joinError && (
-                  <div className="p-3 bg-red-50 border border-red-200/80 rounded-xl text-xs text-red-700 font-normal leading-relaxed">
-                    {joinError}
+                  <div className="p-3 bg-red-50 border border-red-200/80 rounded-xl text-xs text-red-700 font-normal leading-relaxed space-y-2">
+                    <p>{joinError}</p>
+                    <SendErrorFeedbackButton errorMessage={joinError} source="Join Meeting" />
                   </div>
                 )}
 
@@ -584,23 +674,52 @@ export default function MeetingPage() {
             VideoPresets.h360
           ],
           videoEncoding: {
-            maxBitrate: 3_500_000,
+            maxBitrate: 4_500_000,
             maxFramerate: 30,
           },
+          screenShareEncoding: {
+            maxBitrate: 5_000_000,
+            maxFramerate: 30,
+          },
+          screenShareSimulcastLayers: [
+            ScreenSharePresets.h1080fps30,
+            ScreenSharePresets.h720fps15,
+          ],
+          degradationPreference: 'maintain-resolution',
           audioPreset: AudioPresets.musicHighQualityStereo,
           dtx: false,
           red: true,
           stopMicTrackOnMute: false,
         },
-        audioCaptureDefaults: {
-          autoGainControl: true,
-          echoCancellation: true,
-          noiseSuppression: true,
-          channelCount: 2,
-          sampleRate: 48000,
+        audioCaptureDefaults: getCaptureOptionsForSoundMode(getSavedAudioSoundMode(), true, true)
+      }}
+      onDisconnected={() => {
+        if (!intentionalExitRef.current) {
+          if (user?.uid) {
+            setDoc(
+              doc(db, 'userProfiles', user.uid),
+              {
+                status: 'available',
+                currentRoomId: null,
+                inMeetingHeartbeat: null,
+                isOnline: true,
+                lastSeen: new Date().toISOString(),
+              },
+              { merge: true }
+            ).catch(() => {});
+          }
+          setPostMeetingFeedback({
+            roomId: room || '',
+            meetingTitle: meetingDetails?.title || `Room ${room || ''}`,
+            destination: user ? '/dashboard' : '/',
+            transcriptSnapshot: sessionSummaryDataRef.current.transcriptSnapshot,
+            participants: sessionSummaryDataRef.current.participants,
+            initialAiSummary: sessionSummaryDataRef.current.initialAiSummary,
+          });
+          setIsReady(false);
+          setToken('');
         }
       }}
-      onDisconnected={() => navigate('/')}
       className="h-full w-full"
     >
       <div className="flex flex-col h-full relative">
@@ -620,6 +739,22 @@ export default function MeetingPage() {
           setActiveTab={setActiveTab}
           meetingDetails={meetingDetails}
           onRecordingChange={setIsRecording}
+          sessionSummaryDataRef={sessionSummaryDataRef}
+          onExitToFeedback={(destination: string, summaryData) => {
+            intentionalExitRef.current = true;
+            const resolved = summaryData || sessionSummaryDataRef.current;
+            setPostMeetingFeedback({
+              roomId: room || '',
+              sessionSid: resolved.sessionSid,
+              meetingTitle: meetingDetails?.title || `Room ${room || ''}`,
+              destination,
+              transcriptSnapshot: resolved.transcriptSnapshot,
+              participants: resolved.participants,
+              initialAiSummary: resolved.initialAiSummary,
+            });
+            setIsReady(false);
+            setToken('');
+          }}
         />
       </div>
     </LiveKitRoom>
@@ -690,13 +825,33 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam, activeTab, setActiveTab, meetingDetails, onRecordingChange }: { room: string, videoDevices: any[], audioDevices: any[], speakerDevices: any[], initialBg: 'none' | 'blur' | 'image', initialMic: boolean, initialCam: boolean, activeTab: any, setActiveTab: (t: any) => void, meetingDetails: any, onRecordingChange?: (recording: boolean) => void }) {
+function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, initialBg, initialMic, initialCam, activeTab, setActiveTab, meetingDetails, onRecordingChange, sessionSummaryDataRef, onExitToFeedback }: { room: string, videoDevices: any[], audioDevices: any[], speakerDevices: any[], initialBg: 'none' | 'blur' | 'image', initialMic: boolean, initialCam: boolean, activeTab: any, setActiveTab: (t: any) => void, meetingDetails: any, onRecordingChange?: (recording: boolean) => void, sessionSummaryDataRef?: React.MutableRefObject<{ sessionSid?: string; transcriptSnapshot: string; participants: string[]; initialAiSummary?: string }>, onExitToFeedback?: (destination: string, summaryData?: { sessionSid?: string; transcriptSnapshot: string; participants: string[]; initialAiSummary?: string }) => void }) {
   const navigate = useNavigate();
   const { user, loading, komuUser } = useAuth();
+  const lkRoom = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
   const { chatMessages, send: sendChat } = useChat();
   const connectionState = useConnectionState();
+  const safeSendData = useCallback(
+    (
+      sendFn: ((payload: Uint8Array, options?: { reliable?: boolean }) => Promise<void>) | undefined,
+      data: unknown,
+      reliable = true
+    ) => {
+      if (!sendFn || lkRoom?.state !== ConnectionState.Connected) return;
+      try {
+        const bytes =
+          data instanceof Uint8Array
+            ? data
+            : typeof data === 'string'
+              ? new TextEncoder().encode(data)
+              : new TextEncoder().encode(JSON.stringify(data));
+        Promise.resolve(sendFn(bytes, { reliable })).catch(() => {});
+      } catch {}
+    },
+    [lkRoom]
+  );
   const { send: sendHandRaise, message: handRaiseMessage } = useDataChannel("hand-raise");
   const { send: sendReactionData, message: reactionMessage } = useDataChannel("reaction");
   
@@ -745,13 +900,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         setTimeout(() => setToastMessage(null), 4000);
       } else if (data.action === 'decline-waiting' && (data.targetIdentity === myId || data.targetIdentity === myBase)) {
         setToastMessage("Your request to join was declined by the host");
-        setTimeout(() => navigate(user ? '/dashboard' : '/'), 1800);
+        setTimeout(() => requestExitWithRecordingGuard(user ? '/dashboard' : '/'), 1200);
       } else if (data.action === 'remove-participant' && (data.targetIdentity === myId || data.targetIdentity === myBase)) {
         setToastMessage("You have been removed from the meeting by the host");
-        setTimeout(() => navigate(user ? '/dashboard' : '/'), 1800);
+        setTimeout(() => requestExitWithRecordingGuard(user ? '/dashboard' : '/'), 1200);
       } else if (data.action === 'end-meeting') {
         setToastMessage("The meeting has been ended by the host");
-        setTimeout(() => navigate(user ? '/dashboard' : '/'), 1800);
+        setTimeout(() => requestExitWithRecordingGuard(user ? '/dashboard' : '/'), 900);
       }
     } catch (e) {
       console.warn("Host control error:", e);
@@ -792,6 +947,45 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [latestRecording, setLatestRecording] = useState<LatestRecordingInfo | null>(null);
   const meetingRecorderRef = useRef<MeetingCompositeRecorder | null>(null);
   const latestRecordingUrlRef = useRef<string | null>(null);
+  const [autoDownloadRecording, setAutoDownloadRecording] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const saved = localStorage.getItem('forum_auto_download_recording_v1');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const autoDownloadRecordingRef = useRef(autoDownloadRecording);
+  autoDownloadRecordingRef.current = autoDownloadRecording;
+  const recordingStatusRef = useRef(recordingStatus);
+  recordingStatusRef.current = recordingStatus;
+  const isExitingAfterRecordingRef = useRef(false);
+  const hasDownloadedTranscriptRef = useRef(false);
+  const cachedIdTokenRef = useRef<string | null>(null);
+  const transcriptAutoDownloadHelpersRef = useRef<{
+    saveKeepalive: () => void;
+    downloadFile: () => void;
+  }>({ saveKeepalive: () => {}, downloadFile: () => {} });
+
+  useEffect(() => {
+    const unsub = onIdTokenChanged(komuAuth, async (u) => {
+      if (!u) {
+        cachedIdTokenRef.current = null;
+        return;
+      }
+      try {
+        cachedIdTokenRef.current = await u.getIdToken();
+      } catch {}
+    });
+    return () => unsub();
+  }, []);
+  const [isSavingRecordingBeforeExit, setIsSavingRecordingBeforeExit] = useState(false);
+  const [recordingExitModal, setRecordingExitModal] = useState<{
+    open: boolean;
+    destination: string;
+    isEndForAll?: boolean;
+  } | null>(null);
   const [webinarMode, setWebinarMode] = useState(false);
   const [panelists, setPanelists] = useState<string[]>([]);
   const [displayNames, setDisplayNames] = useState<Record<string, string>>({});
@@ -818,6 +1012,378 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const sessionTokenRef = useRef<string>(Math.random().toString(36).substring(2) + Date.now().toString(36));
   const sessionKeyRef = useRef<string>('');
 
+  // Sound Smoothing & Live Performance Mode + Stage Media Overlay State
+  const [audioSoundMode, setAudioSoundMode] = useState<AudioSoundMode>(() => getSavedAudioSoundMode());
+  const [performanceAudioOptions, setPerformanceAudioOptions] = useState<PerformanceAudioOptions>(() =>
+    getSavedPerformanceAudioOptions()
+  );
+  const audioSmoothCtxRef = useRef<AudioContext | null>(null);
+  const audioSmoothProcessorRef = useRef<ForumAudioSmoothingProcessor | null>(null);
+  const [stageOverlay, setStageOverlay] = useState<StageOverlayState>(DEFAULT_STAGE_OVERLAY);
+  const stageOverlayRef = useRef<StageOverlayState>(stageOverlay);
+  stageOverlayRef.current = stageOverlay;
+
+  const buildCompactStagePayload = useCallback(
+    (overlay: StageOverlayState, overrideActive?: boolean) => {
+      const effectiveActive = overrideActive !== undefined ? overrideActive : overlay.active;
+      return JSON.parse(
+        JSON.stringify({
+          ...overlay,
+          active: effectiveActive,
+          document: overlay.document
+            ? {
+                ...overlay.document,
+                inlinePages:
+                  overlay.document.pageStorage === 'firestore'
+                    ? undefined
+                    : overlay.document.inlinePages,
+              }
+            : null,
+        })
+      );
+    },
+    []
+  );
+
+  const { send: sendStageOverlayData } = useDataChannel("stage-overlay", (msg) => {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(msg.payload));
+      if (!parsed || typeof parsed !== 'object') return;
+
+      if (parsed.type === 'request-stage-state') {
+        const cur = stageOverlayRef.current;
+        const myId = localParticipant?.identity;
+        const isMyPresentation =
+          cur.presenterIdentity === myId || (!cur.presenterIdentity && isHostRef.current);
+        if (cur.active && cur.broadcastToParticipants !== false && isMyPresentation) {
+          const payload = buildCompactStagePayload(cur, true);
+          const encoded = new TextEncoder().encode(JSON.stringify(payload));
+          if (encoded.byteLength < 55000) {
+            safeSendData(sendStageOverlayData, encoded, true);
+          }
+        }
+        return;
+      }
+
+      if (typeof parsed.active === 'boolean') {
+        if (parsed.broadcastToParticipants === false && parsed.active) {
+          return;
+        }
+        const cur = stageOverlayRef.current;
+        if (
+          typeof cur.updatedAt === 'number' &&
+          typeof parsed.updatedAt === 'number' &&
+          parsed.updatedAt < cur.updatedAt
+        ) {
+          return;
+        }
+        setStageOverlay(parsed);
+      }
+    } catch {}
+  });
+
+  const updateStageOverlay = useCallback(async (next: StageOverlayState) => {
+    setStageOverlay(next);
+    const shouldBroadcast = next.active && next.broadcastToParticipants !== false;
+    const compactPayload = buildCompactStagePayload(next, shouldBroadcast);
+    try {
+      const encoded = new TextEncoder().encode(JSON.stringify(compactPayload));
+      if (encoded.byteLength < 55000) {
+        safeSendData(sendStageOverlayData, encoded, true);
+      }
+    } catch {}
+    if (room) {
+      setDoc(doc(db, 'rooms', room), { stageOverlay: compactPayload }, { merge: true }).catch(() => {});
+    }
+  }, [room, sendStageOverlayData, safeSendData, buildCompactStagePayload]);
+
+  // Multi-Tab Chat & Plain-Text Meeting Activity Log State
+  interface ChatTabItem {
+    id: string;
+    name: string;
+    createdBy?: string;
+    createdAt: number;
+  }
+  interface ExtendedChatMessage {
+    id: string;
+    tabId: string;
+    senderIdentity?: string;
+    senderName: string;
+    text: string;
+    timestamp: number;
+    isSystem?: boolean;
+  }
+  const [chatTabs, setChatTabs] = useState<ChatTabItem[]>([
+    { id: 'general', name: 'General', createdAt: 0 }
+  ]);
+  const [activeChatTabId, setActiveChatTabId] = useState<string>('general');
+  const [isAddingChatTab, setIsAddingChatTab] = useState(false);
+  const [newChatTabName, setNewChatTabName] = useState('');
+  const [customTabMessages, setCustomTabMessages] = useState<ExtendedChatMessage[]>([]);
+  const [activityLogs, setActivityLogs] = useState<ExtendedChatMessage[]>([]);
+
+  const appendActivityLog = useCallback((text: string) => {
+    setActivityLogs((prev) => {
+      const recent = prev[prev.length - 1];
+      if (recent && recent.text === text && Date.now() - recent.timestamp < 2500) {
+        return prev;
+      }
+      return [
+        ...prev.slice(-80),
+        {
+          id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          tabId: 'general',
+          senderName: '',
+          text,
+          timestamp: Date.now(),
+          isSystem: true,
+        },
+      ];
+    });
+  }, []);
+
+  const { send: sendMultiChatData } = useDataChannel("multi-chat", (msg) => {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(msg.payload));
+      if (parsed.type === 'create-tab' && parsed.tab?.id) {
+        setChatTabs((prev) => (prev.some((t) => t.id === parsed.tab.id) ? prev : [...prev, parsed.tab]));
+      } else if (parsed.type === 'close-tab' && parsed.tabId && parsed.tabId !== 'general') {
+        setChatTabs((prev) => prev.filter((t) => t.id !== parsed.tabId));
+        setActiveChatTabId((cur) => (cur === parsed.tabId ? 'general' : cur));
+      } else if (parsed.type === 'tab-message' && parsed.msg?.id) {
+        setCustomTabMessages((prev) => (prev.some((m) => m.id === parsed.msg.id) ? prev : [...prev, parsed.msg]));
+        if (parsed.msg.senderIdentity !== localParticipant?.identity && activeTab !== 'chat') {
+          if (typeof document !== 'undefined' && document.hidden) {
+            void triggerForumPushNotification({
+              title: `${parsed.msg.senderName} in Chat`,
+              body: parsed.msg.text,
+              url: window.location.pathname,
+              tag: `chat-${room}`
+            });
+          } else {
+            setToastMessage(`${parsed.msg.senderName}: ${parsed.msg.text.slice(0, 60)}`);
+            setTimeout(() => setToastMessage(null), 3500);
+          }
+        }
+      }
+    } catch {}
+  });
+
+  // Real user presence status inside active meeting (In Meeting + 25s heartbeat -> restore previous status on exit)
+  const previousUserStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!user?.uid) return;
+    let active = true;
+    getDoc(doc(db, 'userProfiles', user.uid))
+      .then((snap) => {
+        if (!active) return;
+        const data = snap.exists() ? snap.data() : undefined;
+        const st = data?.status;
+        if (st && st !== 'in_meeting' && st !== 'offline') {
+          previousUserStatusRef.current = st;
+        } else if (data?.previousStatus && data.previousStatus !== 'in_meeting' && data.previousStatus !== 'offline') {
+          previousUserStatusRef.current = data.previousStatus;
+        } else {
+          previousUserStatusRef.current = 'available';
+        }
+        return setDoc(doc(db, 'userProfiles', user.uid), {
+          status: 'in_meeting',
+          previousStatus: previousUserStatusRef.current,
+          currentRoomId: room || null,
+          inMeetingHeartbeat: Date.now(),
+          isOnline: true,
+          lastSeen: new Date().toISOString()
+        }, { merge: true });
+      })
+      .catch(() => {});
+
+    const heartbeatTimer = setInterval(() => {
+      if (!active || !user?.uid) return;
+      setDoc(doc(db, 'userProfiles', user.uid), {
+        status: 'in_meeting',
+        currentRoomId: room || null,
+        inMeetingHeartbeat: Date.now(),
+        isOnline: true,
+        lastSeen: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    }, 25_000);
+
+    const handleMeetingUnload = () => {
+      if (!user?.uid) return;
+      const restoreStatus = previousUserStatusRef.current || 'available';
+      void setDoc(doc(db, 'userProfiles', user.uid), {
+        status: restoreStatus,
+        currentRoomId: null,
+        inMeetingHeartbeat: null,
+        isOnline: true,
+        lastSeen: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    };
+    window.addEventListener('beforeunload', handleMeetingUnload);
+
+    return () => {
+      active = false;
+      clearInterval(heartbeatTimer);
+      window.removeEventListener('beforeunload', handleMeetingUnload);
+      const restoreStatus = previousUserStatusRef.current || 'available';
+      setDoc(doc(db, 'userProfiles', user.uid), {
+        status: restoreStatus,
+        currentRoomId: null,
+        inMeetingHeartbeat: null,
+        isOnline: true,
+        lastSeen: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    };
+  }, [user?.uid, room]);
+
+  const toggleAutoDownloadRecording = useCallback((next: boolean) => {
+    setAutoDownloadRecording(next);
+    autoDownloadRecordingRef.current = next;
+    try {
+      localStorage.setItem('forum_auto_download_recording_v1', String(next));
+    } catch {}
+  }, []);
+
+  const stopAndSaveRecordingNow = useCallback(async () => {
+    const recorder = meetingRecorderRef.current;
+    meetingRecorderRef.current = null;
+    setRecordingStatus('idle');
+    recordingStatusRef.current = 'idle';
+    onRecordingChange?.(false);
+    if (room) {
+      updateDoc(doc(db, 'rooms', room), { recordingStatus: 'idle' }).catch(() => {});
+    }
+    if (!recorder) return null;
+
+    const result = await recorder.stop(room);
+    if (latestRecordingUrlRef.current) {
+      URL.revokeObjectURL(latestRecordingUrlRef.current);
+    }
+    latestRecordingUrlRef.current = result.url;
+    setLatestRecording({
+      url: result.url,
+      filename: result.filename,
+      durationSeconds: result.durationSeconds,
+      mode: result.mode,
+    });
+    const a = document.createElement('a');
+    a.href = result.url;
+    a.download = result.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    addDoc(collection(db, 'recordings'), {
+      title: `${meetingDetails?.title || room} ${result.mode === 'audio' ? 'Audio' : 'Recording'}`,
+      roomId: room,
+      ...(activeSessionSidRef.current ? { sessionSid: activeSessionSidRef.current } : {}),
+      filename: result.filename,
+      durationSeconds: result.durationSeconds,
+      mode: result.mode,
+      participants: user?.uid ? [user.uid] : [],
+      createdBy: user?.uid || localParticipant?.identity || 'guest',
+      createdAt: serverTimestamp()
+    }).catch(() => {});
+
+    appendActivityLog('Recording stopped and downloaded');
+    return result;
+  }, [room, meetingDetails?.title, user?.uid, localParticipant?.identity, onRecordingChange, appendActivityLog]);
+
+  const executeExitAction = useCallback(async (destination: string, isEndForAll?: boolean) => {
+    isExitingAfterRecordingRef.current = true;
+    if (isEndForAll && room) {
+      safeSendData(sendHostControl, { action: 'end-meeting' }, true);
+      try {
+        await updateDoc(doc(db, 'rooms', room), { status: 'ended' });
+      } catch {}
+      try {
+        await updateDoc(doc(db, 'meetings', room), { status: 'ended' });
+      } catch {}
+    }
+
+    // Flush any pending interim/buffered transcripts cleanly before leaving and auto-download
+    try {
+      await flushTranscriptBeforeExitRef.current();
+    } catch {}
+    transcriptAutoDownloadHelpersRef.current.saveKeepalive();
+    transcriptAutoDownloadHelpersRef.current.downloadFile();
+
+    // Update active session end timestamp before leaving
+    if (room && activeSessionSidRef.current) {
+      const safeSid = activeSessionSidRef.current;
+      const endedMs = Date.now();
+      updateDoc(doc(db, 'rooms', room), {
+        [`sessionLogs.${safeSid}.lastActiveAtMs`]: endedMs,
+      }).catch(() => {});
+      updateDoc(doc(db, 'rooms', room, 'sessions', safeSid), {
+        lastActiveAtMs: endedMs,
+      }).catch(() => {});
+    }
+
+    if (user?.uid) {
+      const restoreStatus = previousUserStatusRef.current || 'available';
+      try {
+        await setDoc(doc(db, 'userProfiles', user.uid), {
+          status: restoreStatus,
+          currentRoomId: null,
+          inMeetingHeartbeat: null,
+          isOnline: true,
+          lastSeen: new Date().toISOString()
+        }, { merge: true });
+      } catch {}
+    }
+
+    onExitToFeedback?.(destination, sessionSummaryDataRef?.current);
+    try {
+      await lkRoom?.disconnect();
+    } catch {}
+    if (!onExitToFeedback) {
+      navigate(destination);
+    }
+  }, [room, sendHostControl, safeSendData, user?.uid, lkRoom, navigate, onExitToFeedback, sessionSummaryDataRef]);
+
+  const requestExitWithRecordingGuard = useCallback(async (destination: string, isEndForAll = false) => {
+    if (recordingStatusRef.current !== 'idle' && meetingRecorderRef.current) {
+      if (autoDownloadRecordingRef.current) {
+        setIsSavingRecordingBeforeExit(true);
+        try {
+          await stopAndSaveRecordingNow();
+        } finally {
+          setIsSavingRecordingBeforeExit(false);
+        }
+        await executeExitAction(destination, isEndForAll);
+      } else {
+        setRecordingExitModal({ open: true, destination, isEndForAll });
+      }
+      return;
+    }
+    await executeExitAction(destination, isEndForAll);
+  }, [stopAndSaveRecordingNow, executeExitAction]);
+
+  // Auto-save transcript & auto-download transcript + recording on abrupt page close, refresh, or navigation
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      transcriptAutoDownloadHelpersRef.current.saveKeepalive();
+      if (recordingStatusRef.current !== 'idle' && !isExitingAfterRecordingRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    const handlePageHide = () => {
+      transcriptAutoDownloadHelpersRef.current.saveKeepalive();
+      transcriptAutoDownloadHelpersRef.current.downloadFile();
+      if (recordingStatusRef.current !== 'idle' && !isExitingAfterRecordingRef.current && autoDownloadRecordingRef.current) {
+        meetingRecorderRef.current?.flushBestEffortDownload(room);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [room]);
+
   // Recording elapsed timer
   useEffect(() => {
     if (recordingStatus === 'idle') {
@@ -831,15 +1397,24 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     return () => clearInterval(timer);
   }, [recordingStatus]);
 
-  // Clean up media recorder resources on unmount
+  // Save/download transcript & flush active recording on SPA unmount (e.g. Browser Back), then clean up resources
   useEffect(() => {
     return () => {
+      transcriptAutoDownloadHelpersRef.current.saveKeepalive();
+      transcriptAutoDownloadHelpersRef.current.downloadFile();
+      if (recordingStatusRef.current !== 'idle' && !isExitingAfterRecordingRef.current && autoDownloadRecordingRef.current) {
+        meetingRecorderRef.current?.flushBestEffortDownload(room);
+      }
       meetingRecorderRef.current?.cleanup();
       if (latestRecordingUrlRef.current) {
         URL.revokeObjectURL(latestRecordingUrlRef.current);
       }
+      if (audioSmoothCtxRef.current) {
+        audioSmoothCtxRef.current.close().catch(() => {});
+        audioSmoothCtxRef.current = null;
+      }
     };
-  }, []);
+  }, [room]);
 
   const getLiveAudioTracks = useCallback((): MediaStreamTrack[] => {
     const seenIds = new Set<string>();
@@ -885,6 +1460,90 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     const base = identity.split('#')[0];
     return displayNames[identity] || displayNames[base] || base;
   }, [displayNames]);
+
+  // Plain-text meeting activity logs (join, leave, recording, sharing)
+  const getDisplayNameRef = useRef(getDisplayName);
+  getDisplayNameRef.current = getDisplayName;
+  const selfJoinedLoggedRef = useRef(false);
+
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connected) return;
+    if (!selfJoinedLoggedRef.current) {
+      selfJoinedLoggedRef.current = true;
+      appendActivityLog('You joined the meeting');
+    }
+    if (!stageOverlayRef.current.active) {
+      safeSendData(sendStageOverlayData, { type: 'request-stage-state' }, true);
+      const retryTimer = setTimeout(() => {
+        if (!stageOverlayRef.current.active) {
+          safeSendData(sendStageOverlayData, { type: 'request-stage-state' }, true);
+        }
+      }, 1200);
+      return () => clearTimeout(retryTimer);
+    }
+  }, [connectionState, appendActivityLog, safeSendData, sendStageOverlayData]);
+
+  useEffect(() => {
+    if (!lkRoom) return;
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    const onJoined = (p: Participant) => {
+      if (p.identity.startsWith('OBS_Viewer_')) return;
+      appendActivityLog(`${getDisplayNameRef.current(p.identity)} joined`);
+
+      const cur = stageOverlayRef.current;
+      const myId = localParticipant?.identity;
+      const isMyPresentation =
+        cur.presenterIdentity === myId || (!cur.presenterIdentity && isHostRef.current);
+      if (cur.active && cur.broadcastToParticipants !== false && isMyPresentation) {
+        const rebroadcast = () => {
+          const latest = stageOverlayRef.current;
+          if (!latest.active || latest.broadcastToParticipants === false) return;
+          const payload = buildCompactStagePayload(latest, true);
+          const encoded = new TextEncoder().encode(JSON.stringify(payload));
+          if (encoded.byteLength < 55000) {
+            safeSendData(sendStageOverlayData, encoded, true);
+          }
+        };
+        timeouts.push(setTimeout(rebroadcast, 500));
+        timeouts.push(setTimeout(rebroadcast, 1500));
+      }
+    };
+    const onLeft = (p: Participant) => {
+      if (p.identity.startsWith('OBS_Viewer_')) return;
+      appendActivityLog(`${getDisplayNameRef.current(p.identity)} left`);
+    };
+    lkRoom.on(RoomEvent.ParticipantConnected, onJoined);
+    lkRoom.on(RoomEvent.ParticipantDisconnected, onLeft);
+    return () => {
+      timeouts.forEach(clearTimeout);
+      lkRoom.off(RoomEvent.ParticipantConnected, onJoined);
+      lkRoom.off(RoomEvent.ParticipantDisconnected, onLeft);
+    };
+  }, [lkRoom, appendActivityLog, localParticipant?.identity, buildCompactStagePayload, safeSendData, sendStageOverlayData]);
+
+  // Track unread incoming General LiveKit chat notifications when chat panel is closed
+  const lastProcessedChatTsRef = useRef<number>(Date.now());
+  useEffect(() => {
+    if (chatMessages.length === 0) return;
+    const latest = chatMessages[chatMessages.length - 1];
+    if (!latest || latest.timestamp <= lastProcessedChatTsRef.current) return;
+    lastProcessedChatTsRef.current = latest.timestamp;
+    if (latest.from?.identity === localParticipant?.identity) return;
+    const sender = getDisplayNameRef.current(latest.from?.identity);
+    if (activeTab !== 'chat') {
+      if (typeof document !== 'undefined' && document.hidden) {
+        void triggerForumPushNotification({
+          title: `${sender} in Chat`,
+          body: latest.message,
+          url: window.location.pathname,
+          tag: `chat-${room}`
+        });
+      } else {
+        setToastMessage(`${sender}: ${latest.message.slice(0, 60)}`);
+        setTimeout(() => setToastMessage(null), 3500);
+      }
+    }
+  }, [chatMessages, localParticipant?.identity, activeTab, room]);
 
   // Live participant snapshot ref for MeetingCompositeRecorder (7-sec speaker avatar & waveform)
   const recorderParticipantsRef = useRef<RecorderParticipantSnapshot[]>([]);
@@ -1045,14 +1704,138 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     }
     
     if (initialCam && parsed?.videoOffOnJoin !== true) {
-      localParticipant.setCameraEnabled(true).catch(err => {
+      localParticipant.setCameraEnabled(true, {
+        resolution: VideoPresets.h1080.resolution,
+      }).catch(err => {
         console.warn("Could not enable camera on join:", err?.message || err);
       });
     }
   }, [localParticipant, connectionState, initialMic, initialCam, user]);
 
-  // Waiting Room Logic
+  // Waiting Room Logic & Accurate Per-Session Counter (supports repeated PMI calls)
   const initializedRoomRef = useRef(false);
+  const activeSessionSidRef = useRef<string>('');
+  const registeredSessionSidsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connected || !lkRoom || !room) return;
+    let cancelled = false;
+    let heartbeatTimer: any = null;
+
+    const registerActiveSession = async () => {
+      let rawSid = '';
+      try {
+        rawSid = (await lkRoom.getSid()) || '';
+      } catch {}
+      if (!rawSid && !cancelled) {
+        await new Promise((r) => setTimeout(r, 1200));
+        try {
+          rawSid = (await lkRoom.getSid()) || '';
+        } catch {}
+      }
+      if (cancelled) return;
+
+      const safeSid = (rawSid || `s_${room}_${Math.floor(Date.now() / (10 * 60_000))}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+      activeSessionSidRef.current = safeSid;
+      if (sessionSummaryDataRef?.current) {
+        sessionSummaryDataRef.current.sessionSid = safeSid;
+      }
+
+      const roomRef = doc(db, 'rooms', room);
+      const sessionRef = doc(db, 'rooms', room, 'sessions', safeSid);
+
+      if (!registeredSessionSidsRef.current.has(safeSid)) {
+        registeredSessionSidsRef.current.add(safeSid);
+        try {
+          await runTransaction(db, async (tx) => {
+            const sessionSnap = await tx.get(sessionRef);
+            const roomSnap = await tx.get(roomRef);
+            const nowMs = Date.now();
+
+            if (!sessionSnap.exists()) {
+              tx.set(sessionRef, {
+                sessionSid: safeSid,
+                roomId: room,
+                isPmi: room.startsWith('pmi-'),
+                startedAtMs: nowMs,
+                lastActiveAtMs: nowMs,
+              });
+            } else {
+              tx.update(sessionRef, { lastActiveAtMs: nowMs });
+            }
+
+            const existingData = roomSnap.exists() ? roomSnap.data() : {};
+            const prevLogs: Record<string, { startedAtMs: number; lastActiveAtMs: number }> =
+              existingData?.sessionLogs && typeof existingData.sessionLogs === 'object'
+                ? { ...existingData.sessionLogs }
+                : {};
+            let archivedCount = Number(existingData?.archivedSessionCount || 0);
+
+            if (!prevLogs[safeSid]) {
+              prevLogs[safeSid] = { startedAtMs: nowMs, lastActiveAtMs: nowMs };
+            } else {
+              prevLogs[safeSid] = {
+                ...prevLogs[safeSid],
+                lastActiveAtMs: nowMs,
+              };
+            }
+
+            // Cap rolling map at 400 newest entries to keep room doc lightweight
+            const entries = Object.entries(prevLogs);
+            if (entries.length > 400) {
+              entries.sort((a, b) => (a[1]?.startedAtMs || 0) - (b[1]?.startedAtMs || 0));
+              const overflow = entries.length - 400;
+              archivedCount += overflow;
+              const trimmedLogs: Record<string, { startedAtMs: number; lastActiveAtMs: number }> = {};
+              entries.slice(overflow).forEach(([k, v]) => {
+                trimmedLogs[k] = v;
+              });
+              tx.set(
+                roomRef,
+                {
+                  sessionLogs: trimmedLogs,
+                  archivedSessionCount: archivedCount,
+                  sessionCount: archivedCount + Object.keys(trimmedLogs).length,
+                },
+                { merge: true }
+              );
+            } else {
+              tx.set(
+                roomRef,
+                {
+                  sessionLogs: prevLogs,
+                  archivedSessionCount: archivedCount,
+                  sessionCount: archivedCount + entries.length,
+                },
+                { merge: true }
+              );
+            }
+          });
+        } catch (err) {
+          console.warn('[MeetingPage] Session tracking notice:', err);
+          registeredSessionSidsRef.current.delete(safeSid);
+        }
+      }
+
+      heartbeatTimer = setInterval(() => {
+        if (cancelled || !activeSessionSidRef.current) return;
+        const ts = Date.now();
+        updateDoc(roomRef, {
+          [`sessionLogs.${safeSid}.lastActiveAtMs`]: ts,
+        }).catch(() => {});
+        updateDoc(sessionRef, {
+          lastActiveAtMs: ts,
+        }).catch(() => {});
+      }, 90_000);
+    };
+
+    void registerActiveSession();
+
+    return () => {
+      cancelled = true;
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    };
+  }, [connectionState, lkRoom, room, sessionSummaryDataRef]);
 
   useEffect(() => {
     if (!localParticipant || !room || loading) return;
@@ -1224,6 +2007,28 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         if (data.breakoutEndsAt !== undefined) setBreakoutEndsAt(data.breakoutEndsAt);
         if (data.broadcastBanner !== undefined) setBroadcastBanner(data.broadcastBanner);
         if (data.selectedAnswerers && Array.isArray(data.selectedAnswerers)) setSelectedAnswerers(data.selectedAnswerers);
+        if (data.stageOverlay && typeof data.stageOverlay === 'object') {
+          const incoming = data.stageOverlay as StageOverlayState;
+          const cur = stageOverlayRef.current;
+          const isMyPrivatePreview =
+            cur.active &&
+            cur.broadcastToParticipants === false &&
+            (!cur.presenterIdentity || cur.presenterIdentity === myIdentity) &&
+            incoming.broadcastToParticipants === false;
+          const isStale =
+            typeof cur.updatedAt === 'number' &&
+            typeof incoming.updatedAt === 'number' &&
+            incoming.updatedAt < cur.updatedAt;
+          const isSameTimestampFromSelf =
+            typeof cur.updatedAt === 'number' &&
+            incoming.updatedAt === cur.updatedAt &&
+            incoming.presenterIdentity === myIdentity;
+          if (!isMyPrivatePreview && !isStale && !isSameTimestampFromSelf) {
+            if (!(incoming.broadcastToParticipants === false && incoming.active)) {
+              setStageOverlay(incoming);
+            }
+          }
+        }
 
         // Host transfer detection
         if (data.hostId && user?.uid && data.hostId === user.uid && !isHostRef.current) {
@@ -1241,7 +2046,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         // Meeting ended detection
         if (data.status === 'ended') {
           setToastMessage("The meeting has been ended by the host");
-          setTimeout(() => navigate(user ? '/dashboard' : '/'), 1800);
+          setTimeout(() => void requestExitWithRecordingGuard(user ? '/dashboard' : '/'), 900);
         }
         
         if (!isHostRef.current) {
@@ -1320,10 +2125,31 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       }
     }, () => {});
 
+    const unsubTabs = onSnapshot(collection(db, 'rooms', room, 'chatTabs'), (snap) => {
+      const remoteTabs: ChatTabItem[] = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      setChatTabs([{ id: 'general', name: 'General', createdAt: 0 }, ...remoteTabs.filter((t) => t.id !== 'general')]);
+    }, () => {});
+
+    const unsubTabMsgs = onSnapshot(collection(db, 'rooms', room, 'chatMessages'), (snap) => {
+      const msgs: ExtendedChatMessage[] = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      setCustomTabMessages((prev) => {
+        const map = new Map<string, ExtendedChatMessage>();
+        prev.forEach((m) => map.set(m.id, m));
+        msgs.forEach((m) => map.set(m.id, m));
+        return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
+      });
+    }, () => {});
+
     return () => {
       unsubRoom();
       unsubAdmit();
       unsubSession();
+      unsubTabs();
+      unsubTabMsgs();
     };
   }, [localParticipant, room, user, loading, meetingDetails]);
 
@@ -1383,14 +2209,14 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       }, { merge: true });
       
       // 4. Send direct data channel broadcast
-      sendAdmit(new TextEncoder().encode(JSON.stringify({
+      safeSendData(sendAdmit, {
         action: 'admit',
         identity: participantIdentity,
         baseName
-      })), { reliable: true });
+      }, true);
 
       // Direct fallback string
-      sendAdmit(new TextEncoder().encode("admitted"), { reliable: true });
+      safeSendData(sendAdmit, "admitted", true);
     } catch (err) {
       console.error("Admit user error:", err);
     }
@@ -1399,10 +2225,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const declineUser = (p: { sid: string; identity: string }) => {
     if (!room || !hasAdminAuthority || !p.identity) return;
     setAdmittedSids(prev => new Set(prev).add(p.sid));
-    sendHostControl(new TextEncoder().encode(JSON.stringify({
+    safeSendData(sendHostControl, {
       action: 'decline-waiting',
       targetIdentity: p.identity
-    })), { reliable: true });
+    }, true);
     setToastMessage(`Declined ${getDisplayName(p.identity)}`);
     setTimeout(() => setToastMessage(null), 2500);
   };
@@ -1432,8 +2258,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         admittedList: arrayUnion(...allIdentities)
       }, { merge: true });
 
-      sendAdmit(new TextEncoder().encode(JSON.stringify({ action: 'admit-all' })), { reliable: true });
-      sendAdmit(new TextEncoder().encode("admitted"), { reliable: true });
+      safeSendData(sendAdmit, { action: 'admit-all' }, true);
+      safeSendData(sendAdmit, "admitted", true);
     } catch (err) {
       console.error("Admit all users error:", err);
     }
@@ -1442,18 +2268,13 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [selectedAudioId, setSelectedAudioId] = useState<string>("");
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<string>("");
 
-  const rawTracks = useTracks(
-    [
-      { source: Track.Source.Camera, withPlaceholder: true },
-      { source: Track.Source.ScreenShare, withPlaceholder: false },
-    ],
-    { onlySubscribed: true },
-  );
+  const rawTracks = useTracks(ROOM_TRACK_SOURCES, ROOM_TRACK_OPTIONS);
 
   const lastSpotlightChangeRef = useRef<number>(0);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(false);
-  const [transcriptions, setTranscriptions] = useState<{ id: string, identity: string, text: string, timestamp: number }[]>([]);
+  const MAX_TRANSCRIPT_BLOCK_CHARS = 380;
+  const [transcriptions, setTranscriptions] = useState<{ id: string; identity: string; speaker?: string; timeLabel?: string; text: string; timestamp: number }[]>([]);
   const [localTranscript, setLocalTranscript] = useState("");
   const [activeCaption, setActiveCaption] = useState<{ identity: string; text: string; isLocal?: boolean } | null>(null);
   const captionTimeoutRef = useRef<any>(null);
@@ -1471,6 +2292,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   }, []);
   const [isMicMenuOpen, setIsMicMenuOpen] = useState(false);
   const [isCamMenuOpen, setIsCamMenuOpen] = useState(false);
+  const [isScreenMenuOpen, setIsScreenMenuOpen] = useState(false);
   const recognitionRef = useRef<any>(null);
   const [raisedHands, setRaisedHands] = useState<Record<string, boolean>>({});
   const [chatInput, setChatInput] = useState("");
@@ -1479,6 +2301,22 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [isSwapped, setIsSwapped] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const mobilePipStageRef = useRef<HTMLDivElement>(null);
+  const pipRef = useRef<MeetingPictureInPictureHandle>(null);
+  const [isPiPActive, setIsPiPActive] = useState(false);
+  const [autoPipOnTabLeave, setAutoPipOnTabLeave] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('forum_auto_pip_v1') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const toggleAutoPipOnTabLeave = useCallback((next: boolean) => {
+    setAutoPipOnTabLeave(next);
+    try {
+      localStorage.setItem('forum_auto_pip_v1', next ? 'true' : 'false');
+    } catch {}
+  }, []);
 
   const tracks = useVisualStableUpdate(rawTracks, 16);
   const [isMobile, setIsMobile] = useState(() => {
@@ -1524,8 +2362,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   }, [localTranscript]);
   const [transcriptNoteId, setTranscriptNoteId] = useState<string | null>(null);
   const transcriptNoteIdRef = useRef<string | null>(null);
+  const transcriptBlocksRef = useRef<{ id: string; identity: string; speaker: string; timeLabel: string; text: string; timestamp: number }[]>([]);
+  const existingTranscriptPrefixRef = useRef<string>('');
+  const transcriptSessionStartRef = useRef<string>(new Date().toLocaleString());
+  const hasLoadedExistingTranscriptRef = useRef<boolean>(false);
+  const hasCreatedTranscriptDocRef = useRef<boolean>(false);
+  const isSyncingTranscriptRef = useRef<boolean>(false);
+  const transcriptNeedsResyncRef = useRef<boolean>(false);
+  const transcriptDirtyRef = useRef<boolean>(false);
+  const lastCommittedSpeechRef = useRef<{ speaker: string; text: string; at: number } | null>(null);
   const isCreatingTranscriptRef = useRef(false);
-  const transcriptQueueRef = useRef<string[]>([]);
   const transcriptBufferRef = useRef<string[]>([]);
   const lastFlushTimeRef = useRef<number>(0);
   const flushIntervalRef = useRef<any>(null);
@@ -1540,9 +2386,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [aiVideoOptions, setAiVideoOptions] = useState<AIVideoEnhanceOptions>(DEFAULT_AI_VIDEO_ENHANCE);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showParticipantNames, setShowParticipantNames] = useState(true);
-  const [autoGainControl, setAutoGainControl] = useState(true);
   const [showClock, setShowClock] = useState(true);
-  const [selectedResolution, setSelectedResolution] = useState<'360p' | '720p'>('720p');
+  const [selectedResolution, setSelectedResolution] = useState<'360p' | '720p' | '1080p'>('1080p');
   const [selectedBg, setSelectedBg] = useState<BackgroundMode>((initialBg as BackgroundMode) || 'none');
   const [selectedBgImage, setSelectedBgImage] = useState(VIRTUAL_BG_PRESETS[0]?.value || DEFAULT_MEETING_COVER);
   const [customBgImage, setCustomBgImage] = useState<string | null>(null);
@@ -1552,9 +2397,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   // Apply Virtual Background / Blur to Local Camera Video Track
   useEffect(() => {
-    let isCancelled = false;
     const updateBackgroundEffect = async () => {
-      if (!localParticipant) return;
+      if (!localParticipant || !localParticipant.isCameraEnabled) return;
       const camPub = localParticipant.getTrackPublication(Track.Source.Camera);
       const camTrack = camPub?.videoTrack as LocalVideoTrack | undefined;
       if (!camTrack) return;
@@ -1563,6 +2407,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         await applyBackgroundEffect(camTrack, selectedBg, {
           imageUrl: customBgImage || selectedBgImage,
           colorHex: selectedBg === 'greenscreen' ? '#00FF00' : selectedBgImage,
+          chromaKeyHex: selectedBg === 'greenscreen' ? '#00FF00' : selectedBgImage,
           blurRadius: 14,
         });
       } catch (err) {
@@ -1573,6 +2418,21 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     updateBackgroundEffect();
   }, [selectedBg, selectedBgImage, customBgImage, localParticipant, localParticipant?.isCameraEnabled]);
 
+  const [streamProfile, setStreamProfile] = useState<'standard' | 'high'>('high');
+
+  const getCameraVideoPreset = useCallback((res: '360p' | '720p' | '1080p', highPerf: boolean) => {
+    const base =
+      res === '1080p'
+        ? VideoPresets.h1080.resolution
+        : res === '720p'
+          ? VideoPresets.h720.resolution
+          : VideoPresets.h360.resolution;
+    return {
+      ...base,
+      frameRate: highPerf && res !== '360p' ? 60 : 30,
+    };
+  }, []);
+
   const handleFlipCamera = async () => {
     const nextFacing = facingMode === 'user' ? 'environment' : 'user';
     setFacingMode(nextFacing);
@@ -1580,7 +2440,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       try {
         await localParticipant.setCameraEnabled(true, {
           facingMode: nextFacing,
-          resolution: VideoPresets.h1080.resolution,
+          resolution: getCameraVideoPreset(selectedResolution, streamProfile === 'high'),
         });
         setToastMessage(`Switched to ${nextFacing === 'user' ? 'Front' : 'Back'} Camera`);
         setTimeout(() => setToastMessage(null), 2500);
@@ -1612,7 +2472,6 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     isLocal: boolean;
   } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [streamProfile, setStreamProfile] = useState<'standard' | 'high'>('standard');
   const [copiedExportId, setCopiedExportId] = useState<string | null>(null);
   const [hostConfirmModal, setHostConfirmModal] = useState<{
     type: 'remove-participant' | 'end-meeting';
@@ -1626,9 +2485,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     { publication: { track: { mediaStreamTrack: localCameraTrack } } },
     aiVideoOptions
   );
-  const [liveFps, setLiveFps] = useState<number>(30);
-  const [liveResolution, setLiveResolution] = useState<string>("1280 × 720");
-  const [liveBitrate, setLiveBitrate] = useState<string>("1.8 Mbps");
+  const [liveFps, setLiveFps] = useState<number>(60);
+  const [liveResolution, setLiveResolution] = useState<string>("1920 × 1080");
+  const [liveBitrate, setLiveBitrate] = useState<string>("~4.5 Mbps");
 
   // Shared In-Call Files State
   const [sharedFiles, setSharedFiles] = useState<SharedFileItem[]>([]);
@@ -1793,10 +2652,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           timestamp: Date.now()
         });
 
+        if (lkRoom?.state !== ConnectionState.Connected) {
+          throw new Error('Room disconnected during file send');
+        }
         await sendFilePayload(new TextEncoder().encode(metaPayload), { reliable: true });
 
         // 2. Stream chunk sequence
         for (let i = 0; i < totalChunks; i++) {
+          if (lkRoom?.state !== ConnectionState.Connected) {
+            throw new Error('Room disconnected during file send');
+          }
           const chunk = base64String.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
           const chunkPayload = JSON.stringify({
             type: 'file-chunk',
@@ -1822,7 +2687,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           fileId,
           targetIdentity
         });
-        await sendFilePayload(new TextEncoder().encode(completePayload), { reliable: true });
+        if (lkRoom?.state === ConnectionState.Connected) {
+          await sendFilePayload(new TextEncoder().encode(completePayload), { reliable: true });
+        }
 
         setSharedFiles(prev => prev.map(f => f.id === fileId ? { ...f, status: 'completed', progress: 100 } : f));
         setToastMessage(`Sent "${file.name}" successfully`);
@@ -1853,6 +2720,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   });
 
   const handleBroadcastWorkspace = useCallback(async (data: any) => {
+    if (lkRoom?.state !== ConnectionState.Connected) return;
     try {
       const payloadText = JSON.stringify(data);
       const encoded = new TextEncoder().encode(payloadText);
@@ -1860,7 +2728,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     } catch (err) {
       console.warn("Failed to broadcast workspace sync payload:", err);
     }
-  }, [sendWorkspacePayload]);
+  }, [sendWorkspacePayload, lkRoom]);
 
   // Sync active isolated feed exports from Firestore
   useEffect(() => {
@@ -1897,7 +2765,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         } else {
           setLiveFps(streamProfile === 'high' ? 60 : 30);
         }
-        setLiveBitrate(streamProfile === 'high' ? '~3.5 Mbps' : '~1.8 Mbps');
+        setLiveBitrate(streamProfile === 'high' ? '~4.5 Mbps' : '~1.8 Mbps');
       } else {
         setLiveResolution(streamProfile === 'high' ? '1920 × 1080' : '1280 × 720');
         setLiveFps(streamProfile === 'high' ? 60 : 30);
@@ -2078,194 +2946,581 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   const bgImages = VIRTUAL_BG_PRESETS.map(p => ({ id: p.id, url: p.value, label: p.label }));
 
-  // Transcript Auto-save Logic with Buffering
-  const flushTranscriptBuffer = useCallback(async () => {
-    if (!transcriptNoteIdRef.current || transcriptBufferRef.current.length === 0) return;
-    
-    const linesToFlush = [...transcriptBufferRef.current];
-    transcriptBufferRef.current = [];
-    
-    try {
-      const noteRef = doc(komuDb, 'notes', transcriptNoteIdRef.current);
-      await runTransaction(komuDb, async (transaction) => {
-        const snap = await transaction.get(noteRef);
-        if (snap.exists()) {
-          const currentBody = snap.data().body || "";
-          transaction.update(noteRef, {
-            body: currentBody + linesToFlush.join(""),
-            type: 'transcript',
-            updatedAt: serverTimestamp()
-          });
-        }
-      });
-      lastFlushTimeRef.current = Date.now();
-    } catch (err) {
-      console.error("[MeetingPage] Failed to flush transcript buffer:", err);
-      // Put back in queue if it failed
-      transcriptBufferRef.current = [...linesToFlush, ...transcriptBufferRef.current];
+  // Clean formatted speaker attribution & Transcript Auto-save Logic
+  const getMySpeakerName = useCallback(() => {
+    const raw = localParticipant?.identity;
+    if (raw) {
+      const resolved = getDisplayName(raw);
+      if (resolved && resolved !== 'Participant') return resolved;
     }
-  }, []);
+    if (user?.displayName) return user.displayName;
+    if (typeof window !== 'undefined') {
+      const guestStored = localStorage.getItem('forum_guest_username');
+      if (guestStored?.trim()) return guestStored.trim();
+    }
+    return 'Speaker';
+  }, [localParticipant?.identity, getDisplayName, user?.displayName]);
 
-  const appendToTranscriptNote = useCallback(async (speaker: string, text: string) => {
+  const guestTranscriptKey = room ? `forum_guest_transcript_${room}` : '';
+  const fullTranscriptLogRef = useRef<string>('');
+
+  const persistGuestTranscriptLocal = useCallback((bodyText: string) => {
+    if (!guestTranscriptKey || typeof window === 'undefined') return;
+    try {
+      const title = `Meeting Transcript: ${meetingDetails?.title || room} (${format(new Date(), 'PP')})`;
+      localStorage.setItem(
+        guestTranscriptKey,
+        JSON.stringify({
+          title,
+          roomId: room,
+          body: bodyText,
+          updatedAt: Date.now(),
+        })
+      );
+    } catch {}
+  }, [guestTranscriptKey, meetingDetails?.title, room]);
+
+  const safeRoomKey = (room || 'room').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  const getTranscriptTitleAndHeader = useCallback(() => {
+    const title = `Meeting Transcript: ${meetingDetails?.title || room} (${format(new Date(), 'PP')})`;
+    const header = `# ${title}\n**Date:** ${transcriptSessionStartRef.current}\n**Room:** ${room}\n\n## Live Transcript\n`;
+    return { title, header };
+  }, [meetingDetails?.title, room]);
+
+  const buildCompleteTranscriptText = useCallback((includeInterim = true) => {
+    const { header } = getTranscriptTitleAndHeader();
+    const baseHeader = existingTranscriptPrefixRef.current
+      ? `${existingTranscriptPrefixRef.current.trimEnd()}\n`
+      : header;
+
+    const blocks = transcriptBlocksRef.current.map((b) => ({ ...b }));
+    const interimClean = includeInterim ? localTranscriptRef.current.replace(/\s+/g, ' ').trim() : '';
+    if (interimClean) {
+      const mySpeaker = getMySpeakerName();
+      const now = Date.now();
+      const ts = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const last = blocks[blocks.length - 1];
+      if (
+        last &&
+        last.speaker === mySpeaker &&
+        now - last.timestamp < 120_000 &&
+        last.text.length + 1 + interimClean.length <= MAX_TRANSCRIPT_BLOCK_CHARS
+      ) {
+        if (!(interimClean.length > 4 && last.text.toLowerCase().endsWith(interimClean.toLowerCase()))) {
+          blocks[blocks.length - 1] = {
+            ...last,
+            text: `${last.text} ${interimClean}`.trim(),
+          };
+        }
+      } else {
+        blocks.push({
+          id: 'interim',
+          identity: localParticipant?.identity || mySpeaker,
+          speaker: mySpeaker,
+          timeLabel: ts,
+          text: interimClean,
+          timestamp: now,
+        });
+      }
+    }
+
+    const formattedBlocks = blocks
+      .map((b) => `\n**[${b.timeLabel}] ${b.speaker}:** ${b.text}\n`)
+      .join('');
+
+    return `${baseHeader}${formattedBlocks}`;
+  }, [getTranscriptTitleAndHeader, getMySpeakerName, localParticipant?.identity]);
+
+  const flushTranscriptBuffer = useCallback(async () => {
     const activeUser = user || komuUser;
-    if (!autoSaveTranscriptRef.current || !activeUser || !text.trim()) return;
+    if (!activeUser) return;
+    if (!transcriptDirtyRef.current && transcriptBlocksRef.current.length === 0) return;
+
+    if (isSyncingTranscriptRef.current) {
+      transcriptNeedsResyncRef.current = true;
+      return;
+    }
+
+    const deterministicId = transcriptNoteIdRef.current || `transcript_${activeUser.uid}_${safeRoomKey}`;
+    isSyncingTranscriptRef.current = true;
 
     try {
-      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const line = `\n[${timestamp}] ${speaker}: ${text.trim()}`;
+      do {
+        transcriptNeedsResyncRef.current = false;
+        transcriptDirtyRef.current = false;
 
-      if (transcriptNoteIdRef.current) {
-        transcriptBufferRef.current.push(line);
-        
-        // Flush frequently (every 3 seconds) so short meetings or quick exits still persist cleanly
-        if (Date.now() - lastFlushTimeRef.current > 3000) {
-          void flushTranscriptBuffer();
+        if (!hasLoadedExistingTranscriptRef.current) {
+          try {
+            const snap = await getDoc(doc(komuDb, 'notes', deterministicId));
+            if (snap.exists()) {
+              hasCreatedTranscriptDocRef.current = true;
+              const existingBody = (snap.data()?.body || '').trimEnd();
+              if (existingBody && !existingTranscriptPrefixRef.current) {
+                existingTranscriptPrefixRef.current = existingBody;
+              }
+            }
+          } catch {}
+          hasLoadedExistingTranscriptRef.current = true;
         }
-      } else if (!isCreatingTranscriptRef.current) {
-        isCreatingTranscriptRef.current = true;
-        const title = `Meeting Transcript: ${meetingDetails?.title || room} (${format(new Date(), 'PP')})`;
-        const initialBody = `Meeting started at ${new Date().toLocaleString()}${line}`;
-        
-        const newDoc = await addDoc(collection(komuDb, 'notes'), {
+
+        const { title } = getTranscriptTitleAndHeader();
+        const canonicalBody = buildCompleteTranscriptText(false);
+        fullTranscriptLogRef.current = canonicalBody;
+
+        const payload: Record<string, any> = {
           uid: activeUser.uid,
-          title: title,
-          body: initialBody + transcriptQueueRef.current.join(""),
+          title,
+          body: canonicalBody,
           type: 'transcript',
+          roomId: room || '',
           isArchive: false,
           isTrash: false,
-          createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-          color: '#ffffff'
-        });
-        
-        transcriptNoteIdRef.current = newDoc.id;
-        setTranscriptNoteId(newDoc.id);
-        transcriptQueueRef.current = [];
-        isCreatingTranscriptRef.current = false;
+          color: '#ffffff',
+        };
+        if (!hasCreatedTranscriptDocRef.current) {
+          payload.createdAt = serverTimestamp();
+        }
+
+        await setDoc(doc(komuDb, 'notes', deterministicId), payload, { merge: true });
+        hasCreatedTranscriptDocRef.current = true;
+        transcriptNoteIdRef.current = deterministicId;
+        setTranscriptNoteId(deterministicId);
         lastFlushTimeRef.current = Date.now();
-      } else {
-        // Queue messages while creating
-        transcriptQueueRef.current.push(line);
-      }
+      } while (transcriptNeedsResyncRef.current);
     } catch (err) {
-      console.error("Failed to auto-save transcript to note:", err);
+      console.error("[MeetingPage] Failed to sync transcript note:", err);
+      transcriptDirtyRef.current = true;
+    } finally {
+      isSyncingTranscriptRef.current = false;
+    }
+  }, [user, komuUser, safeRoomKey, getTranscriptTitleAndHeader, buildCompleteTranscriptText, room]);
+
+  const createTranscriptNoteDocIfNeeded = useCallback(async () => {
+    const activeUser = user || komuUser;
+    if (!activeUser || isCreatingTranscriptRef.current) return;
+    const deterministicId = `transcript_${activeUser.uid}_${safeRoomKey}`;
+    if (transcriptNoteIdRef.current === deterministicId && hasCreatedTranscriptDocRef.current) return;
+
+    isCreatingTranscriptRef.current = true;
+    try {
+      const noteRef = doc(komuDb, 'notes', deterministicId);
+      if (!hasLoadedExistingTranscriptRef.current) {
+        try {
+          const snap = await getDoc(noteRef);
+          if (snap.exists()) {
+            hasCreatedTranscriptDocRef.current = true;
+            const existingBody = (snap.data()?.body || '').trimEnd();
+            if (existingBody && !existingTranscriptPrefixRef.current) {
+              existingTranscriptPrefixRef.current = existingBody;
+            }
+          }
+        } catch {}
+        hasLoadedExistingTranscriptRef.current = true;
+      }
+
+      const { title } = getTranscriptTitleAndHeader();
+      const canonicalBody = buildCompleteTranscriptText(false);
+      fullTranscriptLogRef.current = canonicalBody;
+
+      const payload: Record<string, any> = {
+        uid: activeUser.uid,
+        title,
+        body: canonicalBody,
+        type: 'transcript',
+        roomId: room || '',
+        isArchive: false,
+        isTrash: false,
+        updatedAt: serverTimestamp(),
+        color: '#ffffff',
+      };
+      if (!hasCreatedTranscriptDocRef.current) {
+        payload.createdAt = serverTimestamp();
+      }
+      await setDoc(noteRef, payload, { merge: true });
+      hasCreatedTranscriptDocRef.current = true;
+      transcriptNoteIdRef.current = deterministicId;
+      setTranscriptNoteId(deterministicId);
+      lastFlushTimeRef.current = Date.now();
+    } catch (err) {
+      console.error("[MeetingPage] Failed to create single transcript note:", err);
+    } finally {
       isCreatingTranscriptRef.current = false;
     }
-  }, [user, komuUser, meetingDetails?.title, room, flushTranscriptBuffer]);
+  }, [user, komuUser, safeRoomKey, getTranscriptTitleAndHeader, buildCompleteTranscriptText, room]);
 
-  // Minimalist AI Note-Taking & Summaries State
-  const [isAiNoteTakingActive, setIsAiNoteTakingActive] = useState(false);
+  // Create/attach the single background transcript doc once connected (no duplicates)
+  useEffect(() => {
+    if (!autoSaveTranscript || !(user || komuUser) || connectionState !== ConnectionState.Connected) return;
+    if (!transcriptNoteIdRef.current && !isCreatingTranscriptRef.current) {
+      void createTranscriptNoteDocIfNeeded();
+    }
+  }, [autoSaveTranscript, user, komuUser, connectionState, createTranscriptNoteDocIfNeeded]);
+
+  const appendToTranscriptNote = useCallback(async (speaker: string, text: string, identityArg?: string) => {
+    const cleanText = text.replace(/\s+/g, ' ').trim();
+    if (!autoSaveTranscriptRef.current || !cleanText) return;
+
+    const cleanSpeaker = speaker && speaker !== 'You' ? speaker : getMySpeakerName();
+    const now = Date.now();
+    const prevCommit = lastCommittedSpeechRef.current;
+    if (
+      prevCommit &&
+      prevCommit.speaker === cleanSpeaker &&
+      now - prevCommit.at < 2500 &&
+      (prevCommit.text.toLowerCase() === cleanText.toLowerCase() ||
+        (cleanText.length > 5 && prevCommit.text.toLowerCase().endsWith(cleanText.toLowerCase())))
+    ) {
+      return;
+    }
+    lastCommittedSpeechRef.current = { speaker: cleanSpeaker, text: cleanText, at: now };
+
+    const resolvedIdentity = identityArg || localParticipant?.identity || cleanSpeaker;
+    const timeLabel = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const chunks: string[] = [];
+    if (cleanText.length <= MAX_TRANSCRIPT_BLOCK_CHARS) {
+      chunks.push(cleanText);
+    } else {
+      let remaining = cleanText;
+      while (remaining.length > MAX_TRANSCRIPT_BLOCK_CHARS) {
+        let splitIdx = remaining.lastIndexOf('. ', MAX_TRANSCRIPT_BLOCK_CHARS);
+        if (splitIdx < MAX_TRANSCRIPT_BLOCK_CHARS * 0.4) {
+          splitIdx = remaining.lastIndexOf(' ', MAX_TRANSCRIPT_BLOCK_CHARS);
+        }
+        if (splitIdx <= 0) splitIdx = MAX_TRANSCRIPT_BLOCK_CHARS;
+        chunks.push(remaining.slice(0, splitIdx + 1).trim());
+        remaining = remaining.slice(splitIdx + 1).trim();
+      }
+      if (remaining) chunks.push(remaining);
+    }
+
+    const blocks = transcriptBlocksRef.current;
+    for (const piece of chunks) {
+      const currentLast = blocks[blocks.length - 1];
+      const canMerge = Boolean(
+        currentLast &&
+        currentLast.speaker === cleanSpeaker &&
+        now - currentLast.timestamp < 120_000 &&
+        currentLast.text.length + 1 + piece.length <= MAX_TRANSCRIPT_BLOCK_CHARS
+      );
+
+      if (canMerge) {
+        if (!(piece.length > 4 && currentLast.text.toLowerCase().endsWith(piece.toLowerCase()))) {
+          blocks[blocks.length - 1] = {
+            ...currentLast,
+            text: `${currentLast.text} ${piece}`.trim(),
+            timestamp: now,
+          };
+        }
+      } else {
+        blocks.push({
+          id: `tb_${now}_${Math.random().toString(36).slice(2, 7)}`,
+          identity: resolvedIdentity,
+          speaker: cleanSpeaker,
+          timeLabel,
+          text: piece,
+          timestamp: now,
+        });
+      }
+    }
+
+    setTranscriptions([...blocks.slice(-80)]);
+
+    const fullBody = buildCompleteTranscriptText(false);
+    fullTranscriptLogRef.current = fullBody;
+    hasDownloadedTranscriptRef.current = false;
+    transcriptDirtyRef.current = true;
+    persistGuestTranscriptLocal(fullBody);
+
+    const activeUser = user || komuUser;
+    if (!activeUser) return;
+
+    if (Date.now() - lastFlushTimeRef.current > 550) {
+      void flushTranscriptBuffer();
+    }
+  }, [user, komuUser, localParticipant?.identity, getMySpeakerName, buildCompleteTranscriptText, persistGuestTranscriptLocal, flushTranscriptBuffer]);
+
+  const persistTranscriptKeepalive = useCallback((includeInterim = true) => {
+    if (!autoSaveTranscriptRef.current) return;
+    const bodyText = buildCompleteTranscriptText(includeInterim);
+    const hasSpokenLines =
+      transcriptBlocksRef.current.length > 0 ||
+      Boolean(localTranscriptRef.current.trim()) ||
+      bodyText.includes('**[');
+    if (!hasSpokenLines) return;
+
+    persistGuestTranscriptLocal(bodyText);
+
+    const activeUser = user || komuUser;
+    if (!activeUser?.uid) return;
+
+    const deterministicId = transcriptNoteIdRef.current || `transcript_${activeUser.uid}_${safeRoomKey}`;
+    const { title } = getTranscriptTitleAndHeader();
+
+    // Always write a local recovery entry synchronously in case browser kills network before completion
+    try {
+      const raw = localStorage.getItem('forum_pending_transcript_sync_v1');
+      const existing = raw ? JSON.parse(raw) : {};
+      existing[deterministicId] = {
+        docId: deterministicId,
+        uid: activeUser.uid,
+        title,
+        body: bodyText,
+        roomId: room || '',
+        updatedAt: Date.now(),
+      };
+      localStorage.setItem('forum_pending_transcript_sync_v1', JSON.stringify(existing));
+    } catch {}
+
+    const token = cachedIdTokenRef.current;
+    if (!token) return;
+
+    const dbId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
+    const url =
+      `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${encodeURIComponent(dbId)}/documents/notes/${encodeURIComponent(deterministicId)}` +
+      `?updateMask.fieldPaths=uid&updateMask.fieldPaths=title&updateMask.fieldPaths=body&updateMask.fieldPaths=type&updateMask.fieldPaths=roomId&updateMask.fieldPaths=isArchive&updateMask.fieldPaths=isTrash&updateMask.fieldPaths=updatedAt`;
+
+    const payload = JSON.stringify({
+      fields: {
+        uid: { stringValue: activeUser.uid },
+        title: { stringValue: title },
+        body: { stringValue: bodyText },
+        type: { stringValue: 'transcript' },
+        roomId: { stringValue: room || '' },
+        isArchive: { booleanValue: false },
+        isTrash: { booleanValue: false },
+        updatedAt: { timestampValue: new Date().toISOString() },
+      },
+    });
+
+    try {
+      void fetch(url, {
+        method: 'PATCH',
+        keepalive: payload.length <= 60000,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: payload,
+      }).then((res) => {
+        if (res.ok) {
+          try {
+            const raw = localStorage.getItem('forum_pending_transcript_sync_v1');
+            if (raw) {
+              const map = JSON.parse(raw);
+              delete map[deterministicId];
+              if (Object.keys(map).length === 0) {
+                localStorage.removeItem('forum_pending_transcript_sync_v1');
+              } else {
+                localStorage.setItem('forum_pending_transcript_sync_v1', JSON.stringify(map));
+              }
+            }
+          } catch {}
+        }
+      }).catch(() => {});
+    } catch {}
+  }, [buildCompleteTranscriptText, persistGuestTranscriptLocal, user, komuUser, safeRoomKey, getTranscriptTitleAndHeader, room]);
+
+  const downloadTranscriptFileIfNeeded = useCallback(() => {
+    if (hasDownloadedTranscriptRef.current || !autoSaveTranscriptRef.current) return;
+    const bodyText = buildCompleteTranscriptText(true);
+    const hasSpokenLines =
+      transcriptBlocksRef.current.length > 0 ||
+      Boolean(localTranscriptRef.current.trim()) ||
+      bodyText.includes('**[');
+    if (!hasSpokenLines) return;
+
+    hasDownloadedTranscriptRef.current = true;
+    try {
+      const blob = new Blob([bodyText], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `forum-transcript-${safeRoomKey}-${Date.now()}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      hasDownloadedTranscriptRef.current = false;
+    }
+  }, [buildCompleteTranscriptText, safeRoomKey]);
+
+  transcriptAutoDownloadHelpersRef.current = {
+    saveKeepalive: () => persistTranscriptKeepalive(true),
+    downloadFile: downloadTranscriptFileIfNeeded,
+  };
+
+  const flushTranscriptBeforeExit = useCallback(async () => {
+    const pendingInterim = localTranscriptRef.current.trim();
+    if (pendingInterim) {
+      const speakerName = getMySpeakerName();
+      localTranscriptRef.current = "";
+      setLocalTranscript("");
+      await appendToTranscriptNote(speakerName, pendingInterim, localParticipant?.identity);
+    }
+    if (transcriptDirtyRef.current) {
+      await flushTranscriptBuffer();
+    }
+  }, [getMySpeakerName, localParticipant?.identity, appendToTranscriptNote, flushTranscriptBuffer]);
+
+  const flushTranscriptBeforeExitRef = useRef(flushTranscriptBeforeExit);
+  flushTranscriptBeforeExitRef.current = flushTranscriptBeforeExit;
+
+  // AI Meeting Summary State (Uses AI on-demand / end-of-meeting — NOT live background polling)
   const [isAiSummarizing, setIsAiSummarizing] = useState(false);
   const [aiSummaryStatus, setAiSummaryStatus] = useState<string | null>(null);
-  const aiNoteIdRef = useRef<string | null>(null);
-  const lastAiSummaryLengthRef = useRef<number>(0);
-
-  const generateAiMeetingSummary = async (formatType: 'summary' | 'action_items' | 'full_notes' = 'summary') => {
-    setIsAiSummarizing(true);
-    setAiSummaryStatus("Generating AI summary with Gemini...");
+  const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
+  const [lastAiSyncedAt, setLastAiSyncedAt] = useState<number | null>(null);
+  const [generatedAiNote, setGeneratedAiNote] = useState<string>(() => {
+    if (typeof window === 'undefined' || !room) return '';
     try {
-      const transcriptLines: string[] = [];
-      transcriptions.forEach(t => {
-        transcriptLines.push(`${t.identity.split('#')[0]}: ${t.text}`);
-      });
-      if (localTranscript) {
-        transcriptLines.push(`You: ${localTranscript}`);
-      }
-      if (transcriptBufferRef.current.length > 0) {
-        transcriptLines.push(...transcriptBufferRef.current);
-      }
-      chatMessages.forEach(c => {
-        transcriptLines.push(`[Chat] ${c.from?.identity?.split('#')[0] || 'User'}: ${c.message}`);
-      });
+      return localStorage.getItem(`forum_guest_ai_notes_${room}`) || '';
+    } catch {
+      return '';
+    }
+  });
 
-      const transcriptContent = transcriptLines.join("\n") || `Meeting discussions in room: ${room}`;
-      const participantsList = [localParticipant?.identity?.split('#')[0] || 'Host', ...remoteParticipants.map(p => p.identity.split('#')[0])];
+  const buildMeetingTranscriptSnapshot = useCallback(() => {
+    const mySpeaker = getMySpeakerName();
+    const transcriptLines: string[] = [];
+    transcriptions.forEach((t) => {
+      const speakerLabel =
+        t.identity === localParticipant?.identity || t.identity === 'You'
+          ? mySpeaker
+          : getDisplayName(t.identity);
+      const tsLabel = new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      transcriptLines.push(`[${tsLabel}] ${speakerLabel}: ${t.text}`);
+    });
+    if (localTranscriptRef.current.trim()) {
+      transcriptLines.push(`[Live] ${mySpeaker}: ${localTranscriptRef.current.trim()}`);
+    }
+    if (transcriptBufferRef.current.length > 0) {
+      transcriptLines.push(...transcriptBufferRef.current);
+    }
+    chatMessages.forEach((c) => {
+      transcriptLines.push(`[Chat] ${getDisplayName(c.from?.identity)}: ${c.message}`);
+    });
+
+    const participantsList = Array.from(
+      new Set([mySpeaker, ...remoteParticipants.map((p) => getDisplayName(p.identity))].filter(Boolean))
+    );
+
+    const transcriptSnapshot =
+      transcriptLines.join("\n").trim() ||
+      fullTranscriptLogRef.current.trim() ||
+      `Meeting session "${meetingDetails?.title || room}" in room ${room}. Participants present: ${participantsList.join(', ')}.`;
+
+    return { transcriptSnapshot, participantsList };
+  }, [getMySpeakerName, transcriptions, localParticipant?.identity, getDisplayName, chatMessages, remoteParticipants, meetingDetails?.title, room]);
+
+  useEffect(() => {
+    if (!sessionSummaryDataRef) return;
+    const { transcriptSnapshot, participantsList } = buildMeetingTranscriptSnapshot();
+    sessionSummaryDataRef.current = {
+      sessionSid: activeSessionSidRef.current || undefined,
+      transcriptSnapshot,
+      participants: participantsList,
+      initialAiSummary: generatedAiNote || undefined,
+    };
+  }, [sessionSummaryDataRef, buildMeetingTranscriptSnapshot, generatedAiNote]);
+
+  const persistAiNoteToFirestore = useCallback(async (noteText: string) => {
+    if (!noteText.trim()) return;
+    try {
+      if (room) localStorage.setItem(`forum_guest_ai_notes_${room}`, noteText);
+    } catch {}
+
+    const activeUser = user || komuUser;
+    if (!activeUser?.uid) {
+      setLastAiSyncedAt(Date.now());
+      return;
+    }
+
+    const summaryDocId = `summary_${activeUser.uid}_${safeRoomKey}`;
+    const title = `AI Summary: ${meetingDetails?.title || room} (${format(new Date(), 'PP')})`;
+    await setDoc(doc(komuDb, 'notes', summaryDocId), {
+      uid: activeUser.uid,
+      title,
+      body: noteText,
+      type: 'summary',
+      roomId: room || '',
+      isArchive: false,
+      isTrash: false,
+      updatedAt: serverTimestamp(),
+      color: '#ffffff'
+    }, { merge: true });
+    setLastAiSyncedAt(Date.now());
+  }, [user, komuUser, meetingDetails?.title, room, safeRoomKey]);
+
+  const generateAiMeetingSummary = useCallback(async (
+    formatType: 'summary' | 'action_items' | 'full_notes' = 'summary'
+  ) => {
+    if (isAiSummarizing) return;
+    setIsAiSummarizing(true);
+    setAiSummaryError(null);
+    setAiSummaryStatus("Generating AI meeting summary…");
+    try {
+      const { transcriptSnapshot, participantsList } = buildMeetingTranscriptSnapshot();
 
       const res = await fetch('/api/ai/meeting-notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          transcript: transcriptContent,
+          transcript: transcriptSnapshot,
+          existingNotes: generatedAiNote || undefined,
           meetingTitle: meetingDetails?.title || `Meeting ${room}`,
           participants: participantsList,
           formatType
         })
       });
 
-      if (!res.ok) throw new Error(`AI meeting notes error: ${res.status}`);
-      const data = await res.json();
-      const generatedNote = data.result || data.summary || "No notes generated.";
-
-      if (komuUser?.uid) {
-        const title = `AI Meeting Notes: ${meetingDetails?.title || room} (${new Date().toLocaleDateString()})`;
-        if (aiNoteIdRef.current) {
-          try {
-            await updateDoc(doc(komuDb, 'notes', aiNoteIdRef.current), {
-              body: generatedNote,
-              updatedAt: serverTimestamp()
-            });
-          } catch (e) {
-            const docRef = await addDoc(collection(komuDb, 'notes'), {
-              uid: komuUser.uid,
-              title,
-              body: generatedNote,
-              type: 'text',
-              isArchive: false,
-              isTrash: false,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              color: '#ffffff'
-            });
-            aiNoteIdRef.current = docRef.id;
-          }
-        } else {
-          const docRef = await addDoc(collection(komuDb, 'notes'), {
-            uid: komuUser.uid,
-            title,
-            body: generatedNote,
-            type: 'text',
-            isArchive: false,
-            isTrash: false,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            color: '#ffffff'
-          });
-          aiNoteIdRef.current = docRef.id;
-        }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `AI summary failed (HTTP ${res.status})`);
       }
 
-      setToastMessage(formatType === 'action_items' ? "Action items extracted" : "AI summary updated");
+      const generatedNote = data.result || data.summary || data.notes || "";
+      if (!generatedNote) {
+        throw new Error("Gemini returned an empty AI summary response.");
+      }
+
+      setGeneratedAiNote(generatedNote);
+      setAiSummaryError(null);
+      await persistAiNoteToFirestore(generatedNote);
+
+      setToastMessage(
+        formatType === 'action_items'
+          ? "Action items generated & saved"
+          : "AI meeting summary generated & saved"
+      );
       setTimeout(() => setToastMessage(null), 3000);
       setAiSummaryStatus(null);
-    } catch (err) {
-      console.warn("AI summary error:", err);
-      setToastMessage("AI summary generated");
-      setTimeout(() => setToastMessage(null), 2500);
+    } catch (err: any) {
+      const msg = err?.message || "Could not generate AI meeting summary right now.";
+      console.warn("AI summary error:", msg);
+      setAiSummaryError(msg);
       setAiSummaryStatus(null);
     } finally {
       setIsAiSummarizing(false);
     }
-  };
+  }, [
+    isAiSummarizing,
+    buildMeetingTranscriptSnapshot,
+    generatedAiNote,
+    meetingDetails?.title,
+    room,
+    persistAiNoteToFirestore,
+  ]);
 
-  // Background auto-capture when AI Note Taking is active
-  useEffect(() => {
-    if (!isAiNoteTakingActive) return;
-    const interval = setInterval(() => {
-      const currentLength = transcriptions.length + (localTranscript ? 1 : 0) + chatMessages.length;
-      if (currentLength > lastAiSummaryLengthRef.current && currentLength > 2) {
-        lastAiSummaryLengthRef.current = currentLength;
-        generateAiMeetingSummary('full_notes');
-      }
-    }, 45000);
-    return () => clearInterval(interval);
-  }, [isAiNoteTakingActive, transcriptions.length, localTranscript, chatMessages.length]);
-
-  // Periodic flush & guaranteed flush on tab hide / unload / unmount
+  // Periodic background flush & guaranteed keepalive save on tab hide / unload / unmount
   useEffect(() => {
     if (autoSaveTranscript) {
       flushIntervalRef.current = setInterval(() => {
         void flushTranscriptBuffer();
-      }, 4500);
+      }, 1500);
     } else {
       if (flushIntervalRef.current) clearInterval(flushIntervalRef.current);
       void flushTranscriptBuffer();
@@ -2273,38 +3528,43 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
     const handleVisibilityOrUnload = () => {
       if (document.visibilityState === 'hidden') {
+        transcriptAutoDownloadHelpersRef.current.saveKeepalive();
         void flushTranscriptBuffer();
       }
     };
-    const handleUnload = () => {
-      void flushTranscriptBuffer();
-    };
     document.addEventListener('visibilitychange', handleVisibilityOrUnload);
-    window.addEventListener('beforeunload', handleUnload);
 
     return () => {
       if (flushIntervalRef.current) clearInterval(flushIntervalRef.current);
       document.removeEventListener('visibilitychange', handleVisibilityOrUnload);
-      window.removeEventListener('beforeunload', handleUnload);
-      void flushTranscriptBuffer();
+      transcriptAutoDownloadHelpersRef.current.saveKeepalive();
+      void flushTranscriptBeforeExitRef.current();
     };
   }, [autoSaveTranscript, flushTranscriptBuffer]);
 
-  // Live Captions & Auto-Transcript SpeechRecognition with resilient restart and partial flush on mute
+  const getMySpeakerNameRef = useRef(getMySpeakerName);
+  getMySpeakerNameRef.current = getMySpeakerName;
+  const appendToTranscriptNoteRef = useRef(appendToTranscriptNote);
+  appendToTranscriptNoteRef.current = appendToTranscriptNote;
+
+  // Live Captions & Always-On Background Transcript SpeechRecognition (No AI required)
   useEffect(() => {
-    const shouldTranscribe = (isCaptionsEnabled || autoSaveTranscript || activeTab === 'notes') && localParticipant?.isMicrophoneEnabled;
+    const shouldTranscribe = (autoSaveTranscript || isCaptionsEnabled) && localParticipant?.isMicrophoneEnabled;
     if (!shouldTranscribe) {
       if (localTranscriptRef.current.trim()) {
         const pending = localTranscriptRef.current.trim();
+        const mySpeaker = getMySpeakerNameRef.current();
+        localTranscriptRef.current = "";
         setLocalTranscript("");
-        void appendToTranscriptNote("You", pending);
-        setTranscriptions(prev => [
-          ...prev.slice(-40),
-          { id: `t_${Date.now()}_${Math.random()}`, identity: 'You', text: pending, timestamp: Date.now() }
-        ]);
+        void appendToTranscriptNoteRef.current(mySpeaker, pending, localParticipant?.identity);
       }
       if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch {}
+        try {
+          recognitionRef.current.onresult = null;
+          recognitionRef.current.onend = null;
+          recognitionRef.current.onerror = null;
+          recognitionRef.current.abort();
+        } catch {}
         recognitionRef.current = null;
       }
       void flushTranscriptBuffer();
@@ -2321,8 +3581,24 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     let recognition: any = null;
     let restartTimeout: any = null;
     let retryCount = 0;
+    let sessionInterim = '';
 
-    const scheduleRestart = (baseMs = 450) => {
+    const commitPendingInterim = () => {
+      const leftover = (sessionInterim || localTranscriptRef.current).replace(/\s+/g, ' ').trim();
+      if (!leftover) return;
+      sessionInterim = '';
+      localTranscriptRef.current = '';
+      setLocalTranscript('');
+      const mySpeaker = getMySpeakerNameRef.current();
+      void appendToTranscriptNoteRef.current(mySpeaker, leftover, localParticipant?.identity);
+      safeSendData(sendTranscription, {
+        text: leftover,
+        identity: localParticipant?.identity,
+        isFinal: true
+      }, true);
+    };
+
+    const scheduleRestart = (baseMs = 350) => {
       if (isDestroyed) return;
       if (restartTimeout) clearTimeout(restartTimeout);
       const delay = Math.min(baseMs * Math.pow(1.4, retryCount), 3000);
@@ -2335,7 +3611,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
       try {
         if (recognition) {
-          try { recognition.abort(); } catch {}
+          try {
+            recognition.onresult = null;
+            recognition.onend = null;
+            recognition.onerror = null;
+            recognition.abort();
+          } catch {}
         }
 
         recognition = new SpeechRecognition();
@@ -2349,36 +3630,44 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           let interimTranscript = '';
 
           for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const chunk = event.results[i][0]?.transcript || '';
             if (event.results[i].isFinal) {
-              finalTranscript += event.results[i][0].transcript;
+              finalTranscript += chunk;
             } else {
-              interimTranscript += event.results[i][0].transcript;
+              interimTranscript += chunk;
             }
           }
 
-          const currentSpeech = (finalTranscript || interimTranscript).trim();
-          if (currentSpeech) {
-            setLocalTranscript(currentSpeech);
+          const mySpeaker = getMySpeakerNameRef.current();
+          const cleanedFinal = finalTranscript.replace(/\s+/g, ' ').trim();
+          const cleanedInterim = interimTranscript.replace(/\s+/g, ' ').trim();
+
+          if (cleanedFinal) {
+            sessionInterim = '';
+            void appendToTranscriptNoteRef.current(mySpeaker, cleanedFinal, localParticipant?.identity);
+            safeSendData(sendTranscription, {
+              text: cleanedFinal,
+              identity: localParticipant?.identity,
+              isFinal: true
+            }, true);
+          }
+
+          // Preserve live interim words cleanly — never wipe interim when final also arrived
+          sessionInterim = cleanedInterim;
+          localTranscriptRef.current = cleanedInterim;
+          setLocalTranscript(cleanedInterim);
+
+          const captionSpeech = cleanedInterim || cleanedFinal;
+          if (captionSpeech) {
             if (isCaptionsEnabled) {
-              showSingleCaption("You", currentSpeech, true);
+              showSingleCaption(mySpeaker, captionSpeech, true);
             }
-
-            try {
-              sendTranscription(new TextEncoder().encode(JSON.stringify({
-                text: currentSpeech,
-                identity: localParticipant.identity,
-                isFinal: finalTranscript !== ''
-              })), { reliable: true });
-            } catch {}
-
-            if (finalTranscript.trim() !== '') {
-              const cleaned = finalTranscript.trim();
-              void appendToTranscriptNote("You", cleaned);
-              setTranscriptions(prev => [
-                ...prev.slice(-40),
-                { id: `t_${Date.now()}_${Math.random()}`, identity: 'You', text: cleaned, timestamp: Date.now() }
-              ]);
-              setLocalTranscript("");
+            if (cleanedInterim) {
+              safeSendData(sendTranscription, {
+                text: cleanedInterim,
+                identity: localParticipant?.identity,
+                isFinal: false
+              }, true);
             }
           }
         };
@@ -2386,17 +3675,20 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         recognition.onerror = (event: any) => {
           if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
             console.warn("Speech recognition blocked by permissions:", event.error);
+            commitPendingInterim();
             isDestroyed = true;
             return;
           }
           if (event.error === 'aborted' || event.error === 'no-speech' || event.error === 'network' || event.error === 'audio-capture') {
-            scheduleRestart(700);
+            commitPendingInterim();
+            scheduleRestart(600);
           }
         };
 
         recognition.onend = () => {
+          commitPendingInterim();
           if (!isDestroyed) {
-            scheduleRestart(350);
+            scheduleRestart(250);
           }
         };
 
@@ -2404,7 +3696,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         recognitionRef.current = recognition;
       } catch (err) {
         console.warn("Speech recognition restart scheduled:", err);
-        scheduleRestart(1000);
+        scheduleRestart(900);
       }
     };
 
@@ -2413,12 +3705,18 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     return () => {
       isDestroyed = true;
       if (restartTimeout) clearTimeout(restartTimeout);
+      commitPendingInterim();
       if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch {}
+        try {
+          recognitionRef.current.onresult = null;
+          recognitionRef.current.onend = null;
+          recognitionRef.current.onerror = null;
+          recognitionRef.current.abort();
+        } catch {}
         recognitionRef.current = null;
       }
     };
-  }, [isCaptionsEnabled, autoSaveTranscript, activeTab, localParticipant?.isMicrophoneEnabled]);
+  }, [isCaptionsEnabled, autoSaveTranscript, localParticipant?.isMicrophoneEnabled, localParticipant?.identity]);
 
   // Handle Incoming Transcriptions
   const { send: sendTranscription } = useDataChannel("transcription", (msg) => {
@@ -2429,65 +3727,98 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         showSingleCaption(speakerLabel, payload.text, false);
       }
 
-      if (payload.isFinal) {
-        appendToTranscriptNote(speakerLabel, payload.text);
-        setTranscriptions(prev => [
-          ...prev.slice(-20),
-          {
-            id: `r_${Date.now()}_${Math.random()}`,
-            identity: payload.identity,
-            text: payload.text,
-            timestamp: Date.now()
-          }
-        ]);
+      if (payload.isFinal && payload.text) {
+        void appendToTranscriptNoteRef.current(speakerLabel, payload.text, payload.identity);
       }
     } catch {}
   });
 
-  // Apply Background Effects (Blur, Green Screen Chroma Key, Studio Colors, Virtual Images)
+  // Apply Camera Device, Resolution & Profile Settings safely
+  const prevCamSettingsRef = useRef<{ videoId: string; res: string; profile: string } | null>(null);
   useEffect(() => {
-    const applyProcessor = async () => {
-      if (!localParticipant || !localParticipant.isCameraEnabled) return;
-      
-      const track = localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack as LocalVideoTrack;
-      if (!track) return;
-
-      const bgSource = customBgImage || selectedBgImage;
-      await applyBackgroundEffect(track, selectedBg, {
-        imageUrl: bgSource,
-        colorHex: selectedBgImage,
-        chromaKeyHex: selectedBgImage,
-        blurRadius: 12
+    const cur = { videoId: selectedVideoId, res: selectedResolution, profile: streamProfile };
+    const prev = prevCamSettingsRef.current;
+    prevCamSettingsRef.current = cur;
+    if (!prev) return;
+    if (prev.videoId === cur.videoId && prev.res === cur.res && prev.profile === cur.profile) return;
+    if (localParticipant?.isCameraEnabled) {
+      localParticipant.setCameraEnabled(true, {
+        ...(selectedVideoId && selectedVideoId !== 'default' ? { deviceId: selectedVideoId } : {}),
+        facingMode,
+        resolution: getCameraVideoPreset(selectedResolution, streamProfile === 'high'),
+      }).catch(err => {
+        console.warn("Could not switch camera settings:", err?.message || err);
       });
+    }
+  }, [selectedVideoId, selectedResolution, streamProfile, localParticipant, facingMode, getCameraVideoPreset]);
+
+  useEffect(() => {
+    saveAudioSoundMode(audioSoundMode);
+    if (audioSmoothProcessorRef.current) {
+      audioSmoothProcessorRef.current.setMode(audioSoundMode);
+    }
+  }, [audioSoundMode]);
+
+  useEffect(() => {
+    savePerformanceAudioOptions(performanceAudioOptions);
+    if (audioSmoothProcessorRef.current) {
+      audioSmoothProcessorRef.current.setPerformanceOptions(performanceAudioOptions);
+    }
+  }, [performanceAudioOptions]);
+
+  useEffect(() => {
+    if (!localParticipant || !isMicEnabled) return;
+    let cancelled = false;
+
+    const applyAudioSetup = async () => {
+      const audioOpts = getCaptureOptionsForSoundMode(
+        audioSoundMode,
+        noiseCancellation,
+        echoCancellation,
+        selectedAudioId && selectedAudioId !== 'default' ? selectedAudioId : undefined
+      );
+      try {
+        await localParticipant.setMicrophoneEnabled(true, audioOpts);
+      } catch (err: any) {
+        console.warn("Could not apply audio device/filter settings:", err?.message || err);
+        return;
+      }
+
+      if (cancelled) return;
+      const micPub = localParticipant.getTrackPublication(Track.Source.Microphone);
+      const audioTrack = micPub?.audioTrack as LocalAudioTrack | undefined;
+      if (!audioTrack) return;
+
+      try {
+        if (!audioSmoothCtxRef.current || audioSmoothCtxRef.current.state === 'closed') {
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          audioSmoothCtxRef.current = new AudioCtx({ latencyHint: 'interactive', sampleRate: 48000 });
+        }
+        if (audioSmoothCtxRef.current.state === 'suspended') {
+          await audioSmoothCtxRef.current.resume().catch(() => {});
+        }
+        (audioTrack as any).setAudioContext?.(audioSmoothCtxRef.current);
+
+        if (!audioSmoothProcessorRef.current) {
+          audioSmoothProcessorRef.current = new ForumAudioSmoothingProcessor(audioSoundMode, performanceAudioOptions);
+        } else {
+          audioSmoothProcessorRef.current.setMode(audioSoundMode);
+          audioSmoothProcessorRef.current.setPerformanceOptions(performanceAudioOptions);
+        }
+
+        if (audioTrack.getProcessor() !== audioSmoothProcessorRef.current) {
+          await audioTrack.setProcessor(audioSmoothProcessorRef.current as any);
+        }
+      } catch (procErr) {
+        console.warn("[AudioSmoothing] Web Audio processor fallback:", procErr);
+      }
     };
 
-    applyProcessor();
-  }, [selectedBg, selectedBgImage, customBgImage, localParticipant, localParticipant?.isCameraEnabled]);
-
-  // Apply Device Changes & Settings safely
-  useEffect(() => {
-    if (selectedVideoId && selectedVideoId !== 'default' && localParticipant?.isCameraEnabled) {
-      localParticipant.setCameraEnabled(true, { deviceId: selectedVideoId }).catch(err => {
-        console.warn("Could not switch video device:", err?.message || err);
-      });
-    }
-  }, [selectedVideoId, localParticipant]);
-
-  useEffect(() => {
-    if (localParticipant && isMicEnabled) {
-      const audioOpts: any = { 
-        noiseSuppression: noiseCancellation,
-        echoCancellation: echoCancellation,
-        autoGainControl: autoGainControl,
-      };
-      if (selectedAudioId && selectedAudioId !== 'default') {
-        audioOpts.deviceId = selectedAudioId;
-      }
-      localParticipant.setMicrophoneEnabled(true, audioOpts).catch(err => {
-        console.warn("Could not apply audio device/filter settings:", err?.message || err);
-      });
-    }
-  }, [selectedAudioId, noiseCancellation, echoCancellation, autoGainControl, localParticipant, isMicEnabled]);
+    void applyAudioSetup();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAudioId, noiseCancellation, echoCancellation, audioSoundMode, localParticipant, isMicEnabled, localParticipant?.isMicrophoneEnabled]);
 
   const sendReaction = (emoji: string) => {
     const id = Date.now();
@@ -2497,7 +3828,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       setReactions(prev => prev.filter(r => r.id !== id));
     }, 4000);
     // Send to others via reaction data channel
-    sendReactionData(new TextEncoder().encode(JSON.stringify({ type: 'reaction', emoji })), { reliable: true });
+    safeSendData(sendReactionData, { type: 'reaction', emoji }, true);
   };
 
   useEffect(() => {
@@ -2533,23 +3864,19 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
+  }, [chatMessages, customTabMessages, activityLogs, activeChatTabId]);
 
   const toggleHandRaise = () => {
     if (connectionState !== ConnectionState.Connected) return;
     const newState = !isHandRaised;
     setIsHandRaised(newState);
     setRaisedHands(prev => ({ ...prev, [localParticipant.identity]: newState }));
-    try {
-      sendHandRaise(new TextEncoder().encode(JSON.stringify({
-        type: 'hand-raise',
-        raised: newState,
-        identity: localParticipant.identity,
-        displayName: localParticipant.identity.split('#')[0],
-      })), { reliable: true });
-    } catch (err) {
-      console.error("Failed to send hand-raise data", err);
-    }
+    safeSendData(sendHandRaise, {
+      type: 'hand-raise',
+      raised: newState,
+      identity: localParticipant.identity,
+      displayName: localParticipant.identity.split('#')[0],
+    }, true);
   };
 
   const getTrackKey = useCallback((t?: TrackReferenceOrPlaceholder | null) => {
@@ -2628,33 +3955,82 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     return "grid-cols-4";
   }, [visibleTracks.length, isMobile]);
 
-  const mobilePrimaryTrack = useMemo(() => {
-    if (!visibleTracks.length) return null;
-    return visibleTracks.find(t => getTrackKey(t) === mobilePrimaryIdentity || t.participant.identity === mobilePrimaryIdentity) || visibleTracks[0];
-  }, [visibleTracks, mobilePrimaryIdentity, getTrackKey]);
+  type StageTileItem =
+    | { kind: 'track'; key: string; trackRef: TrackReferenceOrPlaceholder }
+    | { kind: 'stage_card'; key: 'stage-presentation-card'; overlay: StageOverlayState };
 
-  const mobileSecondaryTrack = useMemo(() => {
-    if (!visibleTracks.length) return null;
-    return visibleTracks.find(t => getTrackKey(t) !== getTrackKey(mobilePrimaryTrack)) || visibleTracks[1] || null;
-  }, [visibleTracks, mobilePrimaryTrack, getTrackKey]);
+  const stageItems = useMemo<StageTileItem[]>(() => {
+    const trackItems: StageTileItem[] = processedTracks.map((t) => ({
+      kind: 'track',
+      key: getTrackKey(t),
+      trackRef: t,
+    }));
+
+    if (!stageOverlay.active) return trackItems;
+
+    const stageItem: StageTileItem = {
+      kind: 'stage_card',
+      key: 'stage-presentation-card',
+      overlay: stageOverlay,
+    };
+
+    // Place pinned items first; otherwise keep Stage Card and Screen Shares at top of presentation priority
+    const combined = [stageItem, ...trackItems];
+    return combined.sort((a, b) => {
+      const aPinned = pinnedIdentities.has(a.key) || (a.kind === 'track' && pinnedIdentities.has(a.trackRef.participant.identity)) ? 1 : 0;
+      const bPinned = pinnedIdentities.has(b.key) || (b.kind === 'track' && pinnedIdentities.has(b.trackRef.participant.identity)) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      const aPri = a.kind === 'stage_card' ? 2 : a.trackRef.source === Track.Source.ScreenShare ? 1 : 0;
+      const bPri = b.kind === 'stage_card' ? 2 : b.trackRef.source === Track.Source.ScreenShare ? 1 : 0;
+      return bPri - aPri;
+    });
+  }, [processedTracks, stageOverlay, getTrackKey, pinnedIdentities]);
+
+  const visibleStageItems = useMemo(() => {
+    const MAX_TILES = isMobile ? 6 : 12;
+    if (stageItems.length <= MAX_TILES) return stageItems;
+    return stageItems.slice(0, MAX_TILES - 1);
+  }, [stageItems, isMobile]);
+
+  const extraStageItemCount = Math.max(0, stageItems.length - visibleStageItems.length);
+
+  const mobilePrimaryItem = useMemo(() => {
+    if (!visibleStageItems.length) return null;
+    return (
+      visibleStageItems.find((item) =>
+        item.key === mobilePrimaryIdentity ||
+        (item.kind === 'track' && item.trackRef.participant.identity === mobilePrimaryIdentity)
+      ) || visibleStageItems[0]
+    );
+  }, [visibleStageItems, mobilePrimaryIdentity]);
+
+  const mobileSecondaryItem = useMemo(() => {
+    if (!visibleStageItems.length || !mobilePrimaryItem) return null;
+    return visibleStageItems.find((item) => item.key !== mobilePrimaryItem.key) || visibleStageItems[1] || null;
+  }, [visibleStageItems, mobilePrimaryItem]);
+
+  const twoTileKeys =
+    visibleStageItems.length === 2
+      ? `${visibleStageItems[0]?.key || ''}|${visibleStageItems[1]?.key || ''}`
+      : '';
 
   useEffect(() => {
-    if (!isMobile || visibleTracks.length !== 2) return;
-    const keys = visibleTracks.map(t => getTrackKey(t));
+    if (!isMobile || !twoTileKeys) return;
+    const keys = twoTileKeys.split('|');
     if (!mobilePrimaryIdentity || !keys.includes(mobilePrimaryIdentity)) {
       setMobilePrimaryIdentity(keys[0]);
     }
-  }, [isMobile, visibleTracks, mobilePrimaryIdentity, getTrackKey]);
+  }, [isMobile, twoTileKeys, mobilePrimaryIdentity]);
 
   const computedLayout = useMemo(() => {
-    const someoneIsSharing = processedTracks.some(t => t.source === Track.Source.ScreenShare);
+    const someoneIsSharing = processedTracks.some(t => t.source === Track.Source.ScreenShare) || stageOverlay.active;
     if (layoutMode === 'auto') {
       if (pinnedIdentities.size > 0 || someoneIsSharing) return 'sidebar';
       if (spotlightIdentity) return 'imo';
       return 'tiled';
     }
     return layoutMode;
-  }, [layoutMode, pinnedIdentities.size, processedTracks, spotlightIdentity]);
+  }, [layoutMode, pinnedIdentities.size, processedTracks, spotlightIdentity, stageOverlay.active]);
 
   // IMO View Spotlight Logic: minimum 1 minute hold (never runs in Grid view)
   useEffect(() => {
@@ -2748,42 +4124,55 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   }, [processedTracks, activeSpeakerIdentity]);
 
   const isSidebarOpenOnDesktop = !isMobile && !isMobileLandscape && !!activeTab && activeTab !== 'settings' && !isWorkspaceMaximized;
-  const sidebarWidthStyle = isSidebarOpenOnDesktop ? (activeTab === 'whiteboard' ? '56vw' : '380px') : '0px';
+  const sidebarWidthStyle = isSidebarOpenOnDesktop
+    ? activeTab === 'whiteboard'
+      ? '56vw'
+      : activeTab === 'stage'
+        ? '480px'
+        : '380px'
+    : '0px';
 
-  const sidebarStageFocusTrack = useMemo(() => {
+  const sidebarStageFocusItem = useMemo(() => {
     if (sidebarStagePinnedIdentity) {
-      const found = visibleTracks.find(t => getTrackKey(t) === sidebarStagePinnedIdentity || t.participant.identity === sidebarStagePinnedIdentity);
+      const found = visibleStageItems.find(
+        (item) => item.key === sidebarStagePinnedIdentity || (item.kind === 'track' && item.trackRef.participant.identity === sidebarStagePinnedIdentity)
+      );
       if (found) return found;
     }
-    const screenTrack = visibleTracks.find(t => t.source === Track.Source.ScreenShare);
-    if (screenTrack) return screenTrack;
+    const stageCard = visibleStageItems.find((item) => item.kind === 'stage_card');
+    if (stageCard) return stageCard;
+    const screenItem = visibleStageItems.find((item) => item.kind === 'track' && item.trackRef.source === Track.Source.ScreenShare);
+    if (screenItem) return screenItem;
     if (activeSpeakerIdentity) {
-      const found = visibleTracks.find(t => t.participant.identity === activeSpeakerIdentity);
+      const found = visibleStageItems.find((item) => item.kind === 'track' && item.trackRef.participant.identity === activeSpeakerIdentity);
       if (found) return found;
     }
-    return visibleTracks[0] || null;
-  }, [visibleTracks, sidebarStagePinnedIdentity, activeSpeakerIdentity, getTrackKey]);
+    return visibleStageItems[0] || null;
+  }, [visibleStageItems, sidebarStagePinnedIdentity, activeSpeakerIdentity]);
 
-  const focusTrack = useMemo(() => {
+  const focusItem = useMemo(() => {
     if (computedLayout === 'imo') {
-      return processedTracks.find(t => getTrackKey(t) === spotlightIdentity || t.participant.identity === spotlightIdentity)
-        || processedTracks.find(t => t.source === Track.Source.ScreenShare)
-        || processedTracks[0];
+      return stageItems.find((item) => item.key === spotlightIdentity || (item.kind === 'track' && item.trackRef.participant.identity === spotlightIdentity))
+        || stageItems.find((item) => item.kind === 'stage_card')
+        || stageItems.find((item) => item.kind === 'track' && item.trackRef.source === Track.Source.ScreenShare)
+        || stageItems[0];
     }
     if (pinnedIdentities.size > 0) {
-      return processedTracks.find(t => isTrackPinned(t)) || processedTracks[0];
+      return stageItems.find((item) => pinnedIdentities.has(item.key) || (item.kind === 'track' && isTrackPinned(item.trackRef))) || stageItems[0];
     }
-    const screenTrack = processedTracks.find(t => t.source === Track.Source.ScreenShare);
-    if (screenTrack) return screenTrack;
+    const stageCard = stageItems.find((item) => item.kind === 'stage_card');
+    if (stageCard) return stageCard;
+    const screenItem = stageItems.find((item) => item.kind === 'track' && item.trackRef.source === Track.Source.ScreenShare);
+    if (screenItem) return screenItem;
     if (spotlightIdentity) {
-      const spotted = processedTracks.find(t => getTrackKey(t) === spotlightIdentity || t.participant.identity === spotlightIdentity);
+      const spotted = stageItems.find((item) => item.key === spotlightIdentity || (item.kind === 'track' && item.trackRef.participant.identity === spotlightIdentity));
       if (spotted) return spotted;
     }
     if (activeSpeakerIdentity) {
-      return processedTracks.find(t => t.participant.identity === activeSpeakerIdentity) || processedTracks[0];
+      return stageItems.find((item) => item.kind === 'track' && item.trackRef.participant.identity === activeSpeakerIdentity) || stageItems[0];
     }
-    return processedTracks[0];
-  }, [processedTracks, pinnedIdentities, isTrackPinned, computedLayout, spotlightIdentity, activeSpeakerIdentity, getTrackKey]);
+    return stageItems[0];
+  }, [stageItems, pinnedIdentities, isTrackPinned, computedLayout, spotlightIdentity, activeSpeakerIdentity]);
 
   const togglePin = (trackKey: string) => {
     setPinnedIdentities((prev) => {
@@ -2794,55 +4183,194 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     });
   };
 
-  const toggleScreenShare = async () => {
-    const currentlySharing = localParticipant.isScreenShareEnabled;
-    if (!currentlySharing && !allowScreenShare && !hasAdminAuthority) {
+  const stopScreenShare = useCallback(async () => {
+    try {
+      await localParticipant.setScreenShareEnabled(false);
+    } catch {}
+    for (const pub of Array.from(localParticipant.trackPublications.values())) {
+      if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
+        try {
+          if (pub.track) {
+            await localParticipant.unpublishTrack(pub.track, true);
+            pub.track.stop();
+          }
+        } catch {}
+      }
+    }
+    setIsScreenSharing(false);
+    appendActivityLog('You stopped sharing screen');
+    setToastMessage("Stopped screen sharing");
+    setTimeout(() => setToastMessage(null), 2000);
+  }, [appendActivityLog, localParticipant]);
+
+  const startScreenShare = useCallback(async (preferredSurface?: 'monitor' | 'window' | 'browser') => {
+    if (!allowScreenShare && !hasAdminAuthority) {
       setToastMessage("Screen sharing is disabled by the host");
       setTimeout(() => setToastMessage(null), 3000);
       return;
     }
 
-    if (!currentlySharing && (typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia)) {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
       setToastMessage("Screen sharing is not supported in this browser");
       setTimeout(() => setToastMessage(null), 3500);
       return;
     }
 
     try {
-      if (currentlySharing) {
-        await localParticipant.setScreenShareEnabled(false);
-        setIsScreenSharing(false);
-        setToastMessage("Stopped screen sharing");
-        setTimeout(() => setToastMessage(null), 2000);
-      } else {
+      // Stop any active share before switching to a new monitor / app window / tab
+      if (localParticipant.isScreenShareEnabled) {
         try {
-          await localParticipant.setScreenShareEnabled(true, {
-            audio: true,
-            resolution: ScreenSharePresets.h1080fps30.resolution,
-          });
-        } catch (firstErr: any) {
-          const name = firstErr?.name || '';
-          if (name === 'OverconstrainedError' || name === 'TypeError') {
-            await localParticipant.setScreenShareEnabled(true);
-          } else {
-            throw firstErr;
+          await localParticipant.setScreenShareEnabled(false);
+        } catch {}
+        for (const pub of Array.from(localParticipant.trackPublications.values())) {
+          if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
+            try {
+              if (pub.track) {
+                await localParticipant.unpublishTrack(pub.track, true);
+                pub.track.stop();
+              }
+            } catch {}
           }
         }
-        setIsScreenSharing(true);
-        setToastMessage("Screen sharing started");
-        setTimeout(() => setToastMessage(null), 2000);
       }
+
+      const videoConstraint: any = preferredSurface
+        ? {
+            displaySurface: preferredSurface,
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 },
+          }
+        : {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 },
+          };
+
+      let displayStream: MediaStream | null = null;
+      const attempts: any[] = [
+        {
+          video: videoConstraint,
+          audio: true,
+          monitorTypeSurfaces: 'include',
+          surfaceSwitching: 'include',
+          selfBrowserSurface: 'exclude',
+          systemAudio: 'include',
+          preferCurrentTab: false,
+        },
+        {
+          video: videoConstraint,
+          audio: false,
+          monitorTypeSurfaces: 'include',
+          surfaceSwitching: 'include',
+          selfBrowserSurface: 'exclude',
+          preferCurrentTab: false,
+        },
+        {
+          video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+          audio: false,
+        },
+      ];
+
+      let lastErr: any = null;
+      for (const opts of attempts) {
+        try {
+          displayStream = await navigator.mediaDevices.getDisplayMedia(opts);
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          const name = err?.name || '';
+          const msg = String(err?.message || '').toLowerCase();
+          // Abort immediately if the user explicitly cancelled or browser blocked permissions policy
+          if (
+            name === 'NotAllowedError' ||
+            name === 'AbortError' ||
+            msg.includes('display-capture') ||
+            msg.includes('permissions policy') ||
+            msg.includes('permission denied by system')
+          ) {
+            throw err;
+          }
+        }
+      }
+
+      if (!displayStream) {
+        throw lastErr || new Error('Could not capture screen');
+      }
+
+      const rawVideoTrack = displayStream.getVideoTracks()[0];
+      if (!rawVideoTrack) {
+        displayStream.getTracks().forEach((t) => t.stop());
+        throw new Error('No screen video track was returned');
+      }
+
+      try {
+        rawVideoTrack.contentHint = 'detail';
+      } catch {}
+
+      const localScreenVideo = new LocalVideoTrack(rawVideoTrack, undefined, false);
+      localScreenVideo.source = Track.Source.ScreenShare;
+
+      const rawAudioTrack = displayStream.getAudioTracks()[0];
+      let localScreenAudio: LocalAudioTrack | null = null;
+      if (rawAudioTrack) {
+        localScreenAudio = new LocalAudioTrack(rawAudioTrack, undefined, false);
+        localScreenAudio.source = Track.Source.ScreenShareAudio;
+      }
+
+      await localParticipant.publishTrack(localScreenVideo, {
+        source: Track.Source.ScreenShare,
+        simulcast: true,
+      });
+
+      if (localScreenAudio) {
+        try {
+          await localParticipant.publishTrack(localScreenAudio, {
+            source: Track.Source.ScreenShareAudio,
+          });
+        } catch {}
+      }
+
+      rawVideoTrack.addEventListener('ended', () => {
+        void (async () => {
+          try {
+            await localParticipant.unpublishTrack(localScreenVideo, true);
+            localScreenVideo.stop();
+          } catch {}
+          if (localScreenAudio) {
+            try {
+              await localParticipant.unpublishTrack(localScreenAudio, true);
+              localScreenAudio.stop();
+            } catch {}
+          }
+          setIsScreenSharing(false);
+          appendActivityLog('You stopped sharing screen');
+        })();
+      });
+
+      setIsScreenSharing(true);
+      appendActivityLog('You started sharing screen');
+      setToastMessage("Screen sharing started");
+      setTimeout(() => setToastMessage(null), 2000);
     } catch (err: any) {
       const errName = err?.name || '';
       const errMsg = String(err?.message || err || '');
       if (errMsg.toLowerCase().includes('display-capture') || errMsg.toLowerCase().includes('permissions policy')) {
-        setToastMessage("Screen share is blocked inside this preview frame — open the meeting in a standalone browser tab to share your screen.");
+        setToastMessage("Screen share is blocked inside this preview frame — open the meeting in a standalone browser tab to share screens or apps.");
       } else if (errName === 'NotAllowedError' || errName === 'AbortError') {
         setToastMessage("Screen sharing was cancelled or permission was denied");
       } else {
         setToastMessage(errMsg || "Could not start screen sharing");
       }
       setTimeout(() => setToastMessage(null), 4500);
+    }
+  }, [allowScreenShare, appendActivityLog, hasAdminAuthority, localParticipant]);
+
+  const toggleScreenShare = async () => {
+    if (localParticipant.isScreenShareEnabled) {
+      await stopScreenShare();
+    } else {
+      await startScreenShare();
     }
   };
 
@@ -2877,7 +4405,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             )}
             <button 
               type="button"
-              onClick={() => navigate(user ? '/dashboard' : '/')}
+              onClick={() => void requestExitWithRecordingGuard(user ? '/dashboard' : '/')}
               className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors whitespace-nowrap truncate cursor-pointer"
             >
               Leave Meeting
@@ -2940,7 +4468,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             </button>
             <button 
               type="button"
-              onClick={() => navigate(user ? '/dashboard' : '/')}
+              onClick={() => void requestExitWithRecordingGuard(user ? '/dashboard' : '/')}
               className="py-2 text-xs text-red-600 hover:text-red-700 font-medium whitespace-nowrap truncate cursor-pointer"
             >
               Leave meeting
@@ -3134,31 +4662,14 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           )}
         </AnimatePresence>
 
-        {/* Top-Right AI Note-Taking Indicator */}
-        <AnimatePresence>
-          {isAiNoteTakingActive && (
-            <motion.button
-              type="button"
-              initial={{ opacity: 0, scale: 0.9, y: -10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: -10 }}
-              onClick={() => navigateSidebar('notes', null)}
-              className="fixed top-3.5 right-3.5 sm:top-4 sm:right-4 z-40 flex items-center gap-1.5 px-2.5 py-1.5 bg-[#202124]/90 hover:bg-[#303134] text-slate-300 hover:text-white rounded-full border border-white/10 shadow-lg text-xs cursor-pointer transition-all backdrop-blur-md"
-              title="AI Note Taking is active (Click to view notes)"
-            >
-              <FileText size={14} className="text-slate-300" />
-              <span className="text-[11px] font-medium hidden sm:inline">AI Notes Active</span>
-            </motion.button>
-          )}
-        </AnimatePresence>
-
         {/* Click Outside Backdrop for Dropdowns */}
-        {(isMicMenuOpen || isCamMenuOpen || isReactionsMenuOpen || isMoreMenuOpen) && (
+        {(isMicMenuOpen || isCamMenuOpen || isScreenMenuOpen || isReactionsMenuOpen || isMoreMenuOpen) && (
           <div 
             className="fixed inset-0 z-[65]" 
             onClick={() => {
               setIsMicMenuOpen(false);
               setIsCamMenuOpen(false);
+              setIsScreenMenuOpen(false);
               setIsReactionsMenuOpen(false);
               setIsMoreMenuOpen(false);
             }} 
@@ -3171,474 +4682,393 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             isWorkspaceMaximized ? "hidden" : ""
           )}
         >
-          {/* Stage Layout when Workspace or any Sidebar is Open on Desktop */}
-          {isSidebarOpenOnDesktop ? (
-            <div className="relative w-full h-full flex flex-col items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
-              {visibleTracks.length <= 1 ? (
-                visibleTracks[0] ? (
-                  <div className="w-full h-full flex items-center justify-center p-3 sm:p-5 min-h-0">
-                    <div className="h-full aspect-video max-h-[calc(100vh-140px)] rounded-2xl overflow-hidden shadow-2xl bg-bg-dark border border-white/5 flex items-center justify-center">
-                      <CustomParticipantTile
-                        trackRef={visibleTracks[0]}
-                        raisedHands={raisedHands}
-                        onTogglePin={() => togglePin(getTrackKey(visibleTracks[0]))}
-                        isPinned={isTrackPinned(visibleTracks[0])}
-                        mirror={visibleTracks[0].source !== Track.Source.ScreenShare && visibleTracks[0].participant.isLocal && videoMirroring}
-                        aiVideoFilter={visibleTracks[0].source !== Track.Source.ScreenShare && visibleTracks[0].participant.isLocal ? localAIVideoFilter : undefined}
-                        showName={showParticipantNames}
-                        isFocal
-                        onContextMenu={(e: any) => handleTileContextMenu(e, visibleTracks[0])}
-                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(visibleTracks[0].participant)}
-                        onSendFile={(identity: string) => openSendFileFor(identity)}
-                      />
-                    </div>
-                  </div>
-                ) : null
-              ) : (
-                /* Centered Primary Card taking almost full height flanked by a vertical scrollable column */
-                <div className="w-full h-full flex items-center justify-center gap-3 sm:gap-4 p-3 sm:p-4 min-h-0 min-w-0 max-h-[calc(100vh-120px)]">
-                  {/* Primary Focused Card: takes full available height matching sidebar */}
-                  {sidebarStageFocusTrack && (
-                    <div className="flex-1 h-full max-h-[calc(100vh-140px)] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-2xl border border-white/5 flex items-center justify-center min-w-0">
-                      <CustomParticipantTile
-                        trackRef={sidebarStageFocusTrack}
-                        raisedHands={raisedHands}
-                        onTogglePin={() => togglePin(getTrackKey(sidebarStageFocusTrack))}
-                        isPinned={isTrackPinned(sidebarStageFocusTrack)}
-                        mirror={sidebarStageFocusTrack.source !== Track.Source.ScreenShare && sidebarStageFocusTrack.participant.isLocal && videoMirroring}
-                        aiVideoFilter={sidebarStageFocusTrack.source !== Track.Source.ScreenShare && sidebarStageFocusTrack.participant.isLocal ? localAIVideoFilter : undefined}
-                        showName={showParticipantNames}
-                        isFocal
-                        onContextMenu={(e: any) => handleTileContextMenu(e, sidebarStageFocusTrack)}
-                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(sidebarStageFocusTrack.participant)}
-                        onSendFile={(identity: string) => openSendFileFor(identity)}
-                      />
+          {(() => {
+            const renderStageItemTile = (
+              item: StageTileItem,
+              opts?: { isFocal?: boolean; isCompact?: boolean; isMobilePortrait?: boolean; interactive?: boolean }
+            ) => {
+              const isFocal = opts?.isFocal ?? false;
+              const isCompact = opts?.isCompact ?? false;
+              const interactive = opts?.interactive ?? !isCompact;
+
+              if (item.kind === 'stage_card') {
+                return (
+                  <StagePresentationCard
+                    overlay={item.overlay}
+                    roomId={room}
+                    isCompact={isCompact}
+                    isPinned={pinnedIdentities.has(item.key)}
+                    canControl={interactive}
+                    showName={showParticipantNames}
+                    onTogglePin={interactive ? () => togglePin(item.key) : undefined}
+                    onDismiss={
+                      interactive
+                        ? () => void updateStageOverlay({ ...item.overlay, active: false, updatedAt: Date.now() })
+                        : undefined
+                    }
+                    onChangePage={
+                      interactive
+                        ? (nextPage) => {
+                            if (!item.overlay.document) return;
+                            void updateStageOverlay({
+                              ...item.overlay,
+                              document: {
+                                ...item.overlay.document,
+                                currentPage: nextPage,
+                              },
+                              updatedAt: Date.now(),
+                            });
+                          }
+                        : undefined
+                    }
+                  />
+                );
+              }
+
+              const t = item.trackRef;
+              return (
+                <CustomParticipantTile
+                  trackRef={t}
+                  raisedHands={raisedHands}
+                  onTogglePin={interactive ? () => togglePin(item.key) : undefined}
+                  isPinned={isTrackPinned(t)}
+                  mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
+                  aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
+                  showName={isCompact ? true : showParticipantNames}
+                  isFocal={isFocal}
+                  isCompact={isCompact}
+                  isMobilePortrait={opts?.isMobilePortrait}
+                  onContextMenu={interactive ? (e: any) => handleTileContextMenu(e, t) : undefined}
+                  onCopyIsolatedFeed={interactive ? () => copyIsolatedFeedLink(t.participant) : undefined}
+                  onSendFile={interactive ? (identity: string) => openSendFileFor(identity) : undefined}
+                />
+              );
+            };
+
+            const getItemDisplayLabel = (item: StageTileItem) => {
+              if (item.kind === 'stage_card') {
+                return item.overlay.document?.title || item.overlay.title || 'Stage Card';
+              }
+              const name = item.trackRef.participant.identity.split('#')[0];
+              return item.trackRef.source === Track.Source.ScreenShare ? `${name} (Screen)` : name;
+            };
+
+            if (isSidebarOpenOnDesktop) {
+              return (
+                <div className="relative w-full h-full flex flex-col items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
+                  {visibleStageItems.length <= 1 ? (
+                    visibleStageItems[0] ? (
+                      <div className="w-full h-full flex items-center justify-center p-3 sm:p-5 min-h-0 min-w-0">
+                        <div className="relative w-full max-w-[min(860px,calc((100vh-140px)*16/9))] aspect-video rounded-2xl overflow-hidden shadow-2xl bg-bg-dark border border-white/5">
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(visibleStageItems[0], { isFocal: true })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center gap-3 sm:gap-4 p-3 sm:p-4 min-h-0 min-w-0 max-h-[calc(100vh-120px)]">
+                      {sidebarStageFocusItem && (
+                        <div className="flex-1 min-w-0 h-full flex items-center justify-center">
+                          <div className="relative w-full max-w-[min(860px,calc((100vh-150px)*16/9))] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-2xl border border-white/5">
+                            <div className="absolute inset-0 w-full h-full">
+                              {renderStageItemTile(sidebarStageFocusItem, { isFocal: true })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="w-[144px] sm:w-[164px] h-full max-h-[calc(100vh-140px)] flex flex-col md:justify-center gap-3 overflow-y-auto custom-scroll shrink-0 py-1 pr-1">
+                        {visibleStageItems
+                          .filter((item) => item.key !== sidebarStageFocusItem?.key)
+                          .map((item) => (
+                            <div
+                              key={item.key}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setSidebarStagePinnedIdentity(item.key)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') setSidebarStagePinnedIdentity(item.key); }}
+                              className="relative w-full aspect-[16/10] rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none"
+                              title={`Click to focus on ${getItemDisplayLabel(item)}`}
+                            >
+                              <div className="absolute inset-0 w-full h-full">
+                                {renderStageItemTile(item, { isCompact: true, interactive: false })}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                     </div>
                   )}
-
-                  {/* Vertical Scrollable Column for other tracks (participant camera remains intact even when sharing screen) */}
-                  <div className="w-[140px] sm:w-[170px] h-full max-h-[calc(100vh-140px)] flex flex-col gap-2.5 overflow-y-auto custom-scroll shrink-0 py-1 pr-1">
-                    {visibleTracks.filter(t => getTrackKey(t) !== getTrackKey(sidebarStageFocusTrack)).map(t => (
-                      <div
-                        key={getTrackKey(t)}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSidebarStagePinnedIdentity(getTrackKey(t))}
-                        onKeyDown={(e) => { if (e.key === 'Enter') setSidebarStagePinnedIdentity(getTrackKey(t)); }}
-                        className="w-full aspect-video rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none"
-                        title={`Click to focus on ${t.participant.identity.split('#')[0]}${t.source === Track.Source.ScreenShare ? ' (Screen)' : ''}`}
-                      >
-                        <CustomParticipantTile
-                          trackRef={t}
-                          raisedHands={raisedHands}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={true}
-                          isCompact
-                        />
-                      </div>
-                    ))}
-                  </div>
                 </div>
-              )}
-            </div>
+              );
+            }
 
-          ) : (
-            /* Fullscreen Stage (Sidebar Closed) */
-            <>
-              {/* Floating Layout Switcher */}
-              {visibleTracks.length > 1 && !isMobile && (
-                <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-40 flex items-center gap-1 bg-[#1a1b1e]/90 backdrop-blur-md p-1 rounded-xl border border-white/10 select-none shadow-md">
-                  <button
-                    type="button"
-                    onClick={() => { setLayoutMode('tiled'); setSpotlightIdentity(null); }}
-                    className={cn(
-                      "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap",
-                      computedLayout === 'tiled' ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
-                    )}
-                    title="Grid View (Everyone Equal)"
-                  >
-                    Grid
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { 
-                      setLayoutMode('imo'); 
-                      if (!spotlightIdentity && activeSpeakerTrack) {
-                        setSpotlightIdentity(getTrackKey(activeSpeakerTrack));
-                      }
-                    }}
-                    className={cn(
-                      "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap",
-                      computedLayout === 'imo' ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
-                    )}
-                    title="Speaker + Filmstrip Row"
-                  >
-                    Speaker (Row)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { 
-                      setLayoutMode('sidebar'); 
-                      if (!spotlightIdentity && activeSpeakerTrack) {
-                        setSpotlightIdentity(getTrackKey(activeSpeakerTrack));
-                      }
-                    }}
-                    className={cn(
-                      "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap",
-                      computedLayout === 'sidebar' ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
-                    )}
-                    title="Speaker + Side Column"
-                  >
-                    Speaker (Column)
-                  </button>
-                </div>
-              )}
-
-              {/* Speaker + Horizontal Minimized Strip View */}
-              {computedLayout === 'imo' && focusTrack ? (
-                <div className="flex flex-col h-full w-full gap-3 items-center justify-center p-2 sm:p-4 min-h-0">
-                  {/* Top Filmstrip (keeps participant card separate from their screen share) */}
-                  <div className="h-[84px] md:h-[96px] w-full max-w-4xl flex items-center justify-center gap-2.5 overflow-x-auto py-1 px-2 custom-scroll scroll-smooth shrink-0">
-                    {processedTracks.filter(t => getTrackKey(t) !== getTrackKey(focusTrack)).map(t => (
-                      <div 
-                        key={getTrackKey(t)} 
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSpotlightIdentity(getTrackKey(t))}
-                        onKeyDown={(e) => { if (e.key === 'Enter') setSpotlightIdentity(getTrackKey(t)); }}
-                        className="w-[140px] sm:w-[154px] h-[78px] sm:h-[86px] rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md flex items-center justify-center select-none"
-                        title={`Focus on ${t.participant.identity.split('#')[0]}${t.source === Track.Source.ScreenShare ? ' (Screen)' : ''}`}
-                      >
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={true}
-                          isCompact
-                        />
-                      </div>
-                    ))}
+            return (
+              <>
+                {/* Floating Layout Switcher */}
+                {visibleStageItems.length > 1 && !isMobile && (
+                  <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-40 flex items-center gap-1 bg-[#1a1b1e]/90 backdrop-blur-md p-1 rounded-xl border border-white/10 select-none shadow-md">
+                    <button
+                      type="button"
+                      onClick={() => { setLayoutMode('tiled'); setSpotlightIdentity(null); }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap",
+                        computedLayout === 'tiled' ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                      )}
+                      title="Grid View (Everyone Equal)"
+                    >
+                      Grid
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLayoutMode('imo');
+                        if (!spotlightIdentity && activeSpeakerTrack) {
+                          setSpotlightIdentity(getTrackKey(activeSpeakerTrack));
+                        }
+                      }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap",
+                        computedLayout === 'imo' ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                      )}
+                      title="Speaker + Filmstrip Row"
+                    >
+                      Speaker (Row)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLayoutMode('sidebar');
+                        if (!spotlightIdentity && activeSpeakerTrack) {
+                          setSpotlightIdentity(getTrackKey(activeSpeakerTrack));
+                        }
+                      }}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap",
+                        computedLayout === 'sidebar' ? "bg-white/15 text-white" : "text-slate-400 hover:text-white"
+                      )}
+                      title="Speaker + Side Column"
+                    >
+                      Speaker (Column)
+                    </button>
                   </div>
+                )}
 
-                  {/* Central Main Speaker */}
-                  <div className="flex-1 min-h-0 w-full flex items-center justify-center">
-                    <div className="w-full max-w-[700px] sm:max-w-[760px] max-h-[calc(100vh-240px)] aspect-video rounded-2xl overflow-hidden shadow-2xl bg-bg-dark flex items-center justify-center">
-                      <CustomParticipantTile 
-                        trackRef={focusTrack} 
-                        raisedHands={raisedHands}
-                        onTogglePin={() => togglePin(getTrackKey(focusTrack))}
-                        isPinned={isTrackPinned(focusTrack)}
-                        mirror={focusTrack.source !== Track.Source.ScreenShare && focusTrack.participant.isLocal && videoMirroring}
-                        aiVideoFilter={focusTrack.source !== Track.Source.ScreenShare && focusTrack.participant.isLocal ? localAIVideoFilter : undefined}
-                        showName={showParticipantNames}
-                        isFocal
-                        onContextMenu={(e: any) => handleTileContextMenu(e, focusTrack)}
-                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(focusTrack.participant)}
-                        onSendFile={(identity: string) => openSendFileFor(identity)}
-                      />
+                {computedLayout === 'imo' && focusItem ? (
+                  <div className="flex flex-col h-full w-full gap-3 items-center justify-center p-2 sm:p-4 min-h-0">
+                    <div className="h-[84px] md:h-[96px] w-full max-w-4xl flex items-center justify-center gap-2.5 overflow-x-auto py-1 px-2 custom-scroll scroll-smooth shrink-0">
+                      {stageItems
+                        .filter((item) => item.key !== focusItem.key)
+                        .map((item) => (
+                          <div
+                            key={item.key}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setSpotlightIdentity(item.key)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') setSpotlightIdentity(item.key); }}
+                            className="relative w-[140px] sm:w-[154px] h-[78px] sm:h-[86px] rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none"
+                            title={`Focus on ${getItemDisplayLabel(item)}`}
+                          >
+                            <div className="absolute inset-0 w-full h-full">
+                              {renderStageItemTile(item, { isCompact: true, interactive: false })}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+
+                    <div className="flex-1 min-h-0 w-full flex items-center justify-center">
+                      <div className="relative w-full max-w-[min(820px,calc((100vh-230px)*16/9))] aspect-video rounded-2xl overflow-hidden shadow-2xl bg-bg-dark">
+                        <div className="absolute inset-0 w-full h-full">
+                          {renderStageItemTile(focusItem, { isFocal: true })}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : computedLayout === 'sidebar' && focusTrack ? (
-                /* Speaker + Vertical Column View (screen share separate from participant's own camera card) */
-                <div className="flex flex-col md:flex-row gap-3 sm:gap-4 h-full w-full max-w-5xl p-2 sm:p-4 items-center justify-center min-h-0">
-                  <div className="flex-[3] w-full max-h-[calc(100vh-170px)] aspect-video bg-bg-dark rounded-2xl overflow-hidden relative shadow-2xl border border-white/5">
-                    <CustomParticipantTile 
-                      trackRef={focusTrack} 
-                      raisedHands={raisedHands} 
-                      isPinned={isTrackPinned(focusTrack)}
-                      onTogglePin={() => togglePin(getTrackKey(focusTrack))}
-                      mirror={focusTrack.source !== Track.Source.ScreenShare && focusTrack.participant.isLocal && videoMirroring}
-                      aiVideoFilter={focusTrack.source !== Track.Source.ScreenShare && focusTrack.participant.isLocal ? localAIVideoFilter : undefined}
-                      showName={showParticipantNames}
-                      isFocal
-                      onContextMenu={(e: any) => handleTileContextMenu(e, focusTrack)}
-                      onCopyIsolatedFeed={() => copyIsolatedFeedLink(focusTrack.participant)}
-                      onSendFile={(identity: string) => openSendFileFor(identity)}
-                    />
-                  </div>
-                  {/* Minimized Vertical Rail */}
-                  <div className="w-full md:w-[200px] lg:w-[220px] h-[100px] md:h-full max-h-[calc(100vh-170px)] overflow-x-auto md:overflow-y-auto flex md:flex-col gap-2.5 custom-scroll p-1 shrink-0">
-                    {processedTracks.filter(t => getTrackKey(t) !== getTrackKey(focusTrack)).map(t => (
-                      <div 
-                        key={getTrackKey(t)} 
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSpotlightIdentity(getTrackKey(t))}
-                        onKeyDown={(e) => { if (e.key === 'Enter') setSpotlightIdentity(getTrackKey(t)); }}
-                        className="w-[140px] sm:w-[154px] md:w-full h-full md:h-[90px] rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none flex items-center justify-center"
-                        title={`Focus on ${t.participant.identity.split('#')[0]}${t.source === Track.Source.ScreenShare ? ' (Screen)' : ''}`}
-                      >
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={true}
-                          isCompact
-                        />
+                ) : computedLayout === 'sidebar' && focusItem ? (
+                  <div className="flex flex-col md:flex-row gap-3.5 sm:gap-5 h-full w-full max-w-6xl px-3 sm:px-5 pt-12 md:pt-14 pb-3 items-center justify-center min-h-0">
+                    <div className="flex-[3] w-full min-w-0 flex items-center justify-center">
+                      <div className="relative w-full max-w-[min(860px,calc((100vh-205px)*16/9))] aspect-video bg-bg-dark rounded-2xl overflow-hidden shadow-2xl border border-white/5">
+                        <div className="absolute inset-0 w-full h-full">
+                          {renderStageItemTile(focusItem, { isFocal: true })}
+                        </div>
                       </div>
-                    ))}
+                    </div>
+                    <div className="w-full md:w-[164px] lg:w-[180px] h-[96px] md:h-full max-h-[calc(100vh-185px)] overflow-x-auto md:overflow-y-auto flex md:flex-col md:justify-center gap-3 custom-scroll p-1 shrink-0">
+                      {stageItems
+                        .filter((item) => item.key !== focusItem.key)
+                        .map((item) => (
+                          <div
+                            key={item.key}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setSpotlightIdentity(item.key)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') setSpotlightIdentity(item.key); }}
+                            className="relative w-[144px] sm:w-[156px] md:w-full h-full md:h-auto aspect-[16/10] rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none"
+                            title={`Focus on ${getItemDisplayLabel(item)}`}
+                          >
+                            <div className="absolute inset-0 w-full h-full">
+                              {renderStageItemTile(item, { isCompact: true, interactive: false })}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
                   </div>
-                </div>
-              ) : isMobile && visibleTracks.length === 2 && mobilePrimaryTrack && mobileSecondaryTrack ? (
-                /* Mobile 2-Person Picture-in-Picture View */
-                <div className="relative w-full h-full">
-                  <div className="absolute inset-0 rounded-[28px] overflow-hidden bg-bg-dark">
-                    <CustomParticipantTile 
-                      trackRef={mobilePrimaryTrack} 
-                      raisedHands={raisedHands}
-                      onTogglePin={() => togglePin(getTrackKey(mobilePrimaryTrack))}
-                      isPinned={isTrackPinned(mobilePrimaryTrack)}
-                      mirror={mobilePrimaryTrack.source !== Track.Source.ScreenShare && mobilePrimaryTrack.participant.isLocal && videoMirroring}
-                      aiVideoFilter={mobilePrimaryTrack.source !== Track.Source.ScreenShare && mobilePrimaryTrack.participant.isLocal ? localAIVideoFilter : undefined}
-                      showName={showParticipantNames}
-                      isFocal
-                      onContextMenu={(e: any) => handleTileContextMenu(e, mobilePrimaryTrack)}
-                      onCopyIsolatedFeed={() => copyIsolatedFeedLink(mobilePrimaryTrack.participant)}
-                      onSendFile={(identity: string) => openSendFileFor(identity)}
-                    />
-                  </div>
+                ) : isMobile && visibleStageItems.length === 2 && mobilePrimaryItem && mobileSecondaryItem ? (
+                  <div ref={mobilePipStageRef} className="relative w-full h-full">
+                    <div className="absolute inset-0 rounded-[28px] overflow-hidden bg-bg-dark">
+                      {renderStageItemTile(mobilePrimaryItem, { isFocal: true })}
+                    </div>
 
-                  <motion.div 
-                    drag
-                    dragConstraints={containerRef}
-                    dragMomentum={false}
-                    className={cn(
-                    "absolute bottom-4 z-20 w-[130px] h-[175px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-bg-dark active:scale-105 transition-transform cursor-move",
-                    mobileOverlaySide === 'right' ? 'right-3' : 'left-3'
-                  )}>
-                    <div className="relative w-full h-full">
-                      <CustomParticipantTile 
-                        trackRef={mobileSecondaryTrack} 
-                        raisedHands={raisedHands}
-                        onTogglePin={() => togglePin(getTrackKey(mobileSecondaryTrack))}
-                        isPinned={isTrackPinned(mobileSecondaryTrack)}
-                        mirror={mobileSecondaryTrack.source !== Track.Source.ScreenShare && mobileSecondaryTrack.participant.isLocal && videoMirroring}
-                        aiVideoFilter={mobileSecondaryTrack.source !== Track.Source.ScreenShare && mobileSecondaryTrack.participant.isLocal ? localAIVideoFilter : undefined}
-                        showName={showParticipantNames}
-                        onContextMenu={(e: any) => handleTileContextMenu(e, mobileSecondaryTrack)}
-                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(mobileSecondaryTrack.participant)}
-                        onSendFile={(identity: string) => openSendFileFor(identity)}
-                      />
-                      <div className="absolute top-2.5 right-2.5 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <DraggableEdgeSnapCard
+                      boundsMode="container"
+                      containerRef={mobilePipStageRef}
+                      padding={12}
+                      initialCorner={mobileOverlaySide === 'left' ? 'bottom-left' : 'bottom-right'}
+                      onSnapSideChange={setMobileOverlaySide}
+                      className="z-20 w-[132px] h-[176px] rounded-3xl overflow-hidden border border-white/15 shadow-2xl bg-bg-dark"
+                    >
+                      <div className="relative w-full h-full">
+                        {renderStageItemTile(mobileSecondaryItem, { isCompact: true })}
                         <button
-                          onClick={() => {
-                            setMobilePrimaryIdentity(getTrackKey(mobileSecondaryTrack));
+                          type="button"
+                          data-no-drag="true"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMobilePrimaryIdentity(mobileSecondaryItem.key);
                           }}
-                          className="px-2 py-1 rounded-full bg-black/70 text-white text-[11px] font-semibold hover:bg-black/90 transition-all shadow-lg"
+                          className="absolute top-2 right-2 p-1.5 rounded-full bg-black/65 hover:bg-black/90 text-white border border-white/15 transition-colors shadow-md cursor-pointer"
+                          title="Swap main view"
                         >
-                          Swap
+                          <ArrowLeftRight size={12} />
                         </button>
                       </div>
-                    </div>
-                  </motion.div>
-                </div>
-              ) : visibleTracks.length === 1 ? (
-                /* Uniform 1 Participant */
-                <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
-                  <div className={cn(
-                    "w-full aspect-video transition-all duration-300 ease-out flex items-center justify-center",
-                    isMobile && !isMobileLandscape
-                      ? "max-w-[460px] max-h-[calc(100dvh-120px)] aspect-[9/16] rounded-3xl overflow-hidden shadow-2xl"
-                      : "max-w-[700px] sm:max-w-[760px] max-h-[calc(100vh-200px)] rounded-2xl overflow-hidden shadow-2xl"
-                  )}>
-                    <CustomParticipantTile 
-                      trackRef={visibleTracks[0]} 
-                      raisedHands={raisedHands}
-                      onTogglePin={() => togglePin(getTrackKey(visibleTracks[0]))}
-                      isPinned={isTrackPinned(visibleTracks[0])}
-                      mirror={visibleTracks[0].source !== Track.Source.ScreenShare && visibleTracks[0].participant.isLocal && videoMirroring}
-                      aiVideoFilter={visibleTracks[0].source !== Track.Source.ScreenShare && visibleTracks[0].participant.isLocal ? localAIVideoFilter : undefined}
-                      showName={showParticipantNames}
-                      isFocal
-                      isMobilePortrait={isMobile && !isMobileLandscape}
-                      onContextMenu={(e: any) => handleTileContextMenu(e, visibleTracks[0])}
-                      onCopyIsolatedFeed={() => copyIsolatedFeedLink(visibleTracks[0].participant)}
-                      onSendFile={(identity: string) => openSendFileFor(identity)}
-                    />
+                    </DraggableEdgeSnapCard>
                   </div>
-                </div>
-              ) : visibleTracks.length === 2 ? (
-                /* Uniform 2 Cards: Balanced side-by-side on desktop, locked to 16:9 aspect-video */
-                <div className="w-full h-full flex items-center justify-center p-3 sm:p-6 min-h-0 min-w-0">
-                  <div className="flex flex-col md:flex-row items-center justify-center gap-4 sm:gap-6 w-full h-full max-h-[calc(100vh-170px)]">
-                    {visibleTracks.map(t => (
-                      <div key={getTrackKey(t)} className="h-full aspect-video max-h-[calc(100vh-190px)] rounded-2xl overflow-hidden bg-bg-dark shadow-xl min-w-0 border border-white/5 flex items-center justify-center">
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          onTogglePin={() => togglePin(getTrackKey(t))}
-                          isPinned={isTrackPinned(t)}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={showParticipantNames}
-                          isFocal
-                          onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                          onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                          onSendFile={(identity: string) => openSendFileFor(identity)}
-                        />
+                ) : visibleStageItems.length === 1 ? (
+                  <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
+                    <div
+                      className={cn(
+                        "relative w-full transition-all duration-300 ease-out",
+                        isMobile && !isMobileLandscape
+                          ? "max-w-[460px] max-h-[calc(100dvh-120px)] aspect-[9/16] rounded-3xl overflow-hidden shadow-2xl"
+                          : "max-w-[min(860px,calc((100vh-200px)*16/9))] aspect-video rounded-2xl overflow-hidden shadow-2xl"
+                      )}
+                    >
+                      <div className="absolute inset-0 w-full h-full">
+                        {renderStageItemTile(visibleStageItems[0], {
+                          isFocal: true,
+                          isMobilePortrait: isMobile && !isMobileLandscape,
+                        })}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ) : visibleTracks.length === 3 ? (
-                /* Uniform 3 Cards: 2 on top row, 1 centered on bottom row, identical 16:9 sizing, never cropped or too wide */
-                <div className="w-full h-full flex flex-col items-center justify-center p-3 sm:p-5 min-h-0 min-w-0 max-h-[calc(100vh-160px)] gap-3.5 sm:gap-4">
-                  {/* Top Row: 2 cards */}
-                  <div className="flex items-center justify-center gap-3.5 sm:gap-4 w-full flex-1 min-h-0">
-                    {visibleTracks.slice(0, 2).map(t => (
-                      <div key={getTrackKey(t)} className="h-full aspect-video max-h-[calc((100vh-195px)/2)] rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 flex items-center justify-center">
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          onTogglePin={() => togglePin(getTrackKey(t))}
-                          isPinned={isTrackPinned(t)}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={showParticipantNames}
-                          onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                          onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                          onSendFile={(identity: string) => openSendFileFor(identity)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  {/* Bottom Row: 1 centered card matching top row size */}
-                  <div className="flex items-center justify-center w-full flex-1 min-h-0">
-                    <div className="h-full aspect-video max-h-[calc((100vh-195px)/2)] rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 flex items-center justify-center">
-                      <CustomParticipantTile 
-                        trackRef={visibleTracks[2]} 
-                        raisedHands={raisedHands}
-                        onTogglePin={() => togglePin(getTrackKey(visibleTracks[2]))}
-                        isPinned={isTrackPinned(visibleTracks[2])}
-                        mirror={visibleTracks[2].source !== Track.Source.ScreenShare && visibleTracks[2].participant.isLocal && videoMirroring}
-                        aiVideoFilter={visibleTracks[2].source !== Track.Source.ScreenShare && visibleTracks[2].participant.isLocal ? localAIVideoFilter : undefined}
-                        showName={showParticipantNames}
-                        onContextMenu={(e: any) => handleTileContextMenu(e, visibleTracks[2])}
-                        onCopyIsolatedFeed={() => copyIsolatedFeedLink(visibleTracks[2].participant)}
-                        onSendFile={(identity: string) => openSendFileFor(identity)}
-                      />
                     </div>
                   </div>
-                </div>
-              ) : visibleTracks.length === 4 ? (
-                /* Uniform 4 Cards: 2x2 Equal Grid, Non-overlapping, Scaled */
-                <div className="w-full h-full flex flex-col items-center justify-center p-3 sm:p-5 min-h-0 min-w-0 max-h-[calc(100vh-160px)] gap-3.5 sm:gap-4">
-                  <div className="flex items-center justify-center gap-3.5 sm:gap-4 w-full flex-1 min-h-0">
-                    {visibleTracks.slice(0, 2).map(t => (
-                      <div key={getTrackKey(t)} className="h-full aspect-video max-h-[calc((100vh-195px)/2)] rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 flex items-center justify-center">
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          onTogglePin={() => togglePin(getTrackKey(t))}
-                          isPinned={isTrackPinned(t)}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={showParticipantNames}
-                          onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                          onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                          onSendFile={(identity: string) => openSendFileFor(identity)}
-                        />
-                      </div>
-                    ))}
+                ) : visibleStageItems.length === 2 ? (
+                  <div className="w-full h-full flex items-center justify-center p-3 sm:p-6 min-h-0 min-w-0">
+                    <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-center justify-items-center">
+                      {visibleStageItems.map((item) => (
+                        <div
+                          key={item.key}
+                          className="relative w-full max-w-[calc((100vh-190px)*16/9)] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl min-w-0 border border-white/5"
+                        >
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(item, { isFocal: true })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex items-center justify-center gap-3.5 sm:gap-4 w-full flex-1 min-h-0">
-                    {visibleTracks.slice(2, 4).map(t => (
-                      <div key={getTrackKey(t)} className="h-full aspect-video max-h-[calc((100vh-195px)/2)] rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 flex items-center justify-center">
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          onTogglePin={() => togglePin(getTrackKey(t))}
-                          isPinned={isTrackPinned(t)}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={showParticipantNames}
-                          onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                          onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                          onSendFile={(identity: string) => openSendFileFor(identity)}
-                        />
+                ) : visibleStageItems.length === 3 ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center p-3 sm:p-5 min-h-0 min-w-0 gap-3.5 sm:gap-4">
+                    <div className="w-full max-w-5xl grid grid-cols-2 gap-3.5 sm:gap-4 items-center justify-items-center">
+                      {visibleStageItems.slice(0, 2).map((item) => (
+                        <div
+                          key={item.key}
+                          className="relative w-full max-w-[calc(((100vh-200px)/2)*16/9)] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0"
+                        >
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(item)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="w-full max-w-5xl flex items-center justify-center">
+                      <div className="relative w-full max-w-[min(50%,calc(((100vh-200px)/2)*16/9))] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0">
+                        <div className="absolute inset-0 w-full h-full">
+                          {renderStageItemTile(visibleStageItems[2])}
+                        </div>
                       </div>
-                    ))}
+                    </div>
                   </div>
-                </div>
-              ) : visibleTracks.length <= 6 ? (
-                /* Uniform 5-6 Cards: Scaled 3-column / 2-row Grid, Non-overlapping */
-                <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
-                  <div className="w-full max-w-5xl grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[calc(100vh-160px)] items-center justify-center transition-all duration-300 ease-out">
-                    {visibleTracks.map(t => (
-                      <div key={getTrackKey(t)} className="w-full aspect-video max-h-[calc((100vh-190px)/2)] rounded-xl overflow-hidden bg-bg-dark shadow-md min-w-0">
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          onTogglePin={() => togglePin(getTrackKey(t))}
-                          isPinned={isTrackPinned(t)}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={showParticipantNames}
-                          onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                          onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                          onSendFile={(identity: string) => openSendFileFor(identity)}
-                        />
-                      </div>
-                    ))}
+                ) : visibleStageItems.length === 4 ? (
+                  <div className="w-full h-full flex items-center justify-center p-3 sm:p-5 min-h-0 min-w-0">
+                    <div className="w-full max-w-5xl grid grid-cols-2 gap-3.5 sm:gap-4 items-center justify-items-center">
+                      {visibleStageItems.map((item) => (
+                        <div
+                          key={item.key}
+                          className="relative w-full max-w-[calc(((100vh-200px)/2)*16/9)] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0"
+                        >
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(item)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ) : visibleTracks.length <= 9 ? (
-                /* Uniform 7-9 Cards: Scaled 3x3 Equal Grid */
-                <div className="w-full h-full flex items-center justify-center p-2 sm:p-3 min-h-0 min-w-0">
-                  <div className="w-full max-w-5xl grid grid-cols-3 gap-2.5 max-h-[calc(100vh-160px)] items-center justify-center transition-all duration-300 ease-out">
-                    {visibleTracks.map(t => (
-                      <div key={getTrackKey(t)} className="w-full aspect-video max-h-[calc((100vh-190px)/3)] rounded-xl overflow-hidden bg-bg-dark shadow-md min-w-0">
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          onTogglePin={() => togglePin(getTrackKey(t))}
-                          isPinned={isTrackPinned(t)}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={showParticipantNames}
-                          onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                          onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                          onSendFile={(identity: string) => openSendFileFor(identity)}
-                        />
-                      </div>
-                    ))}
+                ) : visibleStageItems.length <= 6 ? (
+                  <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
+                    <div className="w-full max-w-5xl grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[calc(100vh-160px)] items-center justify-center transition-all duration-300 ease-out">
+                      {visibleStageItems.map((item) => (
+                        <div
+                          key={item.key}
+                          className="relative w-full aspect-video max-h-[calc((100vh-190px)/2)] rounded-xl overflow-hidden bg-bg-dark shadow-md min-w-0"
+                        >
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(item)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                /* Uniform 10+ Cards: Compact Multi-column Grid */
-                <div className="w-full h-full flex items-center justify-center p-2 sm:p-3 min-h-0 min-w-0 overflow-y-auto custom-scroll">
-                  <div className="w-full max-w-6xl grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[calc(100vh-160px)] items-center justify-center transition-all duration-300 ease-out">
-                    {visibleTracks.map(t => (
-                      <div key={getTrackKey(t)} className="w-full aspect-video max-h-[calc((100vh-190px)/4)] rounded-lg overflow-hidden bg-bg-dark shadow-sm min-w-0">
-                        <CustomParticipantTile 
-                          trackRef={t} 
-                          raisedHands={raisedHands}
-                          onTogglePin={() => togglePin(getTrackKey(t))}
-                          isPinned={isTrackPinned(t)}
-                          mirror={t.source !== Track.Source.ScreenShare && t.participant.isLocal && videoMirroring}
-                          aiVideoFilter={t.source !== Track.Source.ScreenShare && t.participant.isLocal ? localAIVideoFilter : undefined}
-                          showName={showParticipantNames}
-                          onContextMenu={(e: any) => handleTileContextMenu(e, t)}
-                          onCopyIsolatedFeed={() => copyIsolatedFeedLink(t.participant)}
-                          onSendFile={(identity: string) => openSendFileFor(identity)}
-                        />
-                      </div>
-                    ))}
-                    {extraTrackCount > 0 && (
-                      <div className="w-full aspect-video max-h-[calc((100vh-190px)/4)] rounded-lg overflow-hidden bg-black/70 border border-white/10 flex flex-col items-center justify-center text-center p-2 text-white min-w-0">
-                        <span className="text-xl sm:text-2xl font-bold">+{extraTrackCount}</span>
-                        <span className="text-[10px] uppercase tracking-widest text-slate-400">more</span>
-                      </div>
-                    )}
+                ) : visibleStageItems.length <= 9 ? (
+                  <div className="w-full h-full flex items-center justify-center p-2 sm:p-3 min-h-0 min-w-0">
+                    <div className="w-full max-w-5xl grid grid-cols-3 gap-2.5 max-h-[calc(100vh-160px)] items-center justify-center transition-all duration-300 ease-out">
+                      {visibleStageItems.map((item) => (
+                        <div
+                          key={item.key}
+                          className="relative w-full aspect-video max-h-[calc((100vh-190px)/3)] rounded-xl overflow-hidden bg-bg-dark shadow-md min-w-0"
+                        >
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(item)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-            </>
-          )}
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center p-2 sm:p-3 min-h-0 min-w-0 overflow-y-auto custom-scroll">
+                    <div className="w-full max-w-6xl grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[calc(100vh-160px)] items-center justify-center transition-all duration-300 ease-out">
+                      {visibleStageItems.map((item) => (
+                        <div
+                          key={item.key}
+                          className="relative w-full aspect-video max-h-[calc((100vh-190px)/4)] rounded-lg overflow-hidden bg-bg-dark shadow-sm min-w-0"
+                        >
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(item)}
+                          </div>
+                        </div>
+                      ))}
+                      {extraStageItemCount > 0 && (
+                        <div className="w-full aspect-video max-h-[calc((100vh-190px)/4)] rounded-lg overflow-hidden bg-black/70 border border-white/10 flex flex-col items-center justify-center text-center p-2 text-white min-w-0">
+                          <span className="text-xl sm:text-2xl font-bold">+{extraStageItemCount}</span>
+                          <span className="text-[10px] uppercase tracking-widest text-slate-400">more</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Live Captions Display */}
@@ -3698,7 +5128,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 !(isWorkspaceMaximized && activeTab === 'whiteboard') && (
                   activeTab === 'whiteboard' 
                     ? (isMobile && !isMobileLandscape ? "w-full" : "w-full md:w-[56vw]") 
-                    : (isMobile && !isMobileLandscape ? "w-full" : "w-full md:w-[380px]")
+                    : activeTab === 'stage'
+                      ? (isMobile && !isMobileLandscape ? "w-full" : "w-full md:w-[480px]")
+                      : (isMobile && !isMobileLandscape ? "w-full" : "w-full md:w-[410px]")
                 )
               )}
             >
@@ -3706,8 +5138,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               <div className="h-full w-full rounded-2xl border border-neutral-200/80 shadow-2xl overflow-hidden flex flex-col bg-white">
               {/* Sidebar Header */}
               {activeTab !== 'whiteboard' && (
-                <div className="flex items-center justify-between px-5 py-3.5 border-b border-neutral-200/60 bg-[#FBFBFA] sticky top-0 z-10">
-                  <div className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200/60 bg-[#FBFBFA] sticky top-0 z-10">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     {previousSidebarTab && (
                       <button
                         type="button"
@@ -3718,25 +5150,26 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                         className="p-1.5 -ml-1.5 hover:bg-stone-200/70 rounded-xl text-slate-600 hover:text-slate-900 transition-colors cursor-pointer shrink-0"
                         title="Back"
                       >
-                        <ChevronLeft size={18} />
+                        <ChevronLeft size={19} />
                       </button>
                     )}
-                    <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2 truncate">
+                    <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2.5 truncate">
                       {!previousSidebarTab && (
                         <>
-                          {activeTab === 'info' && <Info size={17} className="text-slate-700 shrink-0" />}
-                          {(activeTab === 'participants' || activeTab === 'users') && <Users size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'chat' && <MessageSquare size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'waiting' && <ShieldCheck size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'notes' && <FileText size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'host_controls' && <ShieldCheck size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'tools' && <LayoutGrid size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'qa' && <HelpCircle size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'polls' && <BarChart2 size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'canvas' && <LayoutDashboard size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'breakout' && <Radio size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'clips' && <Camera size={17} className="text-slate-700 shrink-0" />}
-                          {activeTab === 'files' && <Paperclip size={17} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'info' && <Info size={18} className="text-slate-700 shrink-0" />}
+                          {(activeTab === 'participants' || activeTab === 'users') && <Users size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'chat' && <MessageSquare size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'waiting' && <ShieldCheck size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'notes' && <FileText size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'host_controls' && <ShieldCheck size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'tools' && <LayoutGrid size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'qa' && <HelpCircle size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'polls' && <BarChart2 size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'canvas' && <LayoutDashboard size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'breakout' && <Radio size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'clips' && <Camera size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'stage' && <Layers size={18} className="text-slate-700 shrink-0" />}
+                          {activeTab === 'files' && <Paperclip size={18} className="text-slate-700 shrink-0" />}
                         </>
                       )}
                       <span className="truncate">
@@ -3744,29 +5177,31 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                           ? "Host Controls"
                           : activeTab === 'tools'
                             ? "Tools & Workspace"
-                            : activeTab === 'info'
-                              ? "Meeting Details"
-                              : activeTab === 'chat'
-                                ? "In-Call Chat"
-                                : activeTab === 'participants' || activeTab === 'users'
-                                  ? "Participants"
-                                  : activeTab === 'waiting'
-                                    ? "Waiting Room"
-                                    : activeTab === 'files'
-                                      ? "Shared Files"
-                                      : activeTab === 'notes'
-                                        ? "Notes & Transcripts"
-                                        : activeTab === 'qa'
-                                          ? "Live Q&A"
-                                          : activeTab === 'polls'
-                                            ? "Polls & Quizzes"
-                                            : activeTab === 'canvas'
-                                              ? "Canvas Board"
-                                              : activeTab === 'breakout'
-                                                ? "Breakout Rooms"
-                                                : activeTab === 'clips'
-                                                  ? "Clips Recording"
-                                                  : activeTab}
+                            : activeTab === 'stage'
+                              ? "Stage Media & Docs"
+                              : activeTab === 'info'
+                                ? "Meeting Details"
+                                : activeTab === 'chat'
+                                  ? "In-Call Chat"
+                                  : activeTab === 'participants' || activeTab === 'users'
+                                    ? "Participants"
+                                    : activeTab === 'waiting'
+                                      ? "Waiting Room"
+                                      : activeTab === 'files'
+                                        ? "Shared Files"
+                                        : activeTab === 'notes'
+                                          ? "Notes & Transcripts"
+                                          : activeTab === 'qa'
+                                            ? "Live Q&A"
+                                            : activeTab === 'polls'
+                                              ? "Polls & Quizzes"
+                                              : activeTab === 'canvas'
+                                                ? "Canvas Board"
+                                                : activeTab === 'breakout'
+                                                  ? "Breakout Rooms"
+                                                  : activeTab === 'clips'
+                                                    ? "Clips Recording"
+                                                    : activeTab}
                       </span>
                     </h2>
                   </div>
@@ -3779,13 +5214,17 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     className="p-1.5 hover:bg-stone-200/60 rounded-xl text-slate-400 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
                     title="Close"
                   >
-                    <X size={18} />
+                    <X size={19} />
                   </button>
                 </div>
               )}
               <div className={cn(
                 "flex-1 min-h-0 bg-white flex flex-col",
-                activeTab === 'whiteboard' ? "p-0 overflow-hidden" : "overflow-y-auto p-6 sm:p-8 custom-scroll bg-[#FBFBFA]"
+                activeTab === 'whiteboard'
+                  ? "p-0 overflow-hidden"
+                  : activeTab === 'stage'
+                    ? "overflow-y-auto p-5 sm:p-6 custom-scroll bg-[#FBFBFA]"
+                    : "overflow-y-auto p-5 sm:p-6 custom-scroll bg-[#FBFBFA]"
               )}>
                 {activeTab === 'host_controls' && (
                   <HostControlsPanel
@@ -3870,22 +5309,22 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     onDeclineUser={(p) => declineUser(p)}
                     onAdmitAllUsers={admitAllUsers}
                     onMuteAll={() => {
-                      sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'mute-all' })), { reliable: true });
+                      safeSendData(sendHostControl, { action: 'mute-all' }, true);
                       setToastMessage("Muted all participants");
                       setTimeout(() => setToastMessage(null), 2500);
                     }}
                     onMuteParticipant={(targetId) => {
-                      sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'mute-participant', targetIdentity: targetId })), { reliable: true });
+                      safeSendData(sendHostControl, { action: 'mute-participant', targetIdentity: targetId }, true);
                       setToastMessage("Muted participant");
                       setTimeout(() => setToastMessage(null), 2500);
                     }}
                     onAskToUnmute={(targetId) => {
-                      sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'ask-unmute', targetIdentity: targetId })), { reliable: true });
+                      safeSendData(sendHostControl, { action: 'ask-unmute', targetIdentity: targetId }, true);
                       setToastMessage(`Asked ${getDisplayName(targetId)} to unmute`);
                       setTimeout(() => setToastMessage(null), 2500);
                     }}
                     onStopParticipantVideo={(targetId) => {
-                      sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'stop-video', targetIdentity: targetId })), { reliable: true });
+                      safeSendData(sendHostControl, { action: 'stop-video', targetIdentity: targetId }, true);
                       setToastMessage("Stopped participant video");
                       setTimeout(() => setToastMessage(null), 2500);
                     }}
@@ -3898,7 +5337,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       setTimeout(() => setToastMessage(null), 2500);
                     }}
                     onRemoveParticipant={(targetId) => {
-                      sendHostControl(new TextEncoder().encode(JSON.stringify({ action: 'remove-participant', targetIdentity: targetId })), { reliable: true });
+                      safeSendData(sendHostControl, { action: 'remove-participant', targetIdentity: targetId }, true);
                       setToastMessage("Removed participant");
                       setTimeout(() => setToastMessage(null), 2500);
                     }}
@@ -3987,12 +5426,14 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                           mode,
                           meetingTitle: meetingDetails?.title || `Meeting ${room}`,
                           getParticipants: () => recorderParticipantsRef.current,
+                          getStageOverlay: () => stageOverlayRef.current,
                         });
                         meetingRecorderRef.current = recorder;
                         setRecordingSeconds(0);
                         setRecordingStatus('recording');
                         onRecordingChange?.(true);
                         updateDoc(doc(db, 'rooms', room), { recordingStatus: 'recording' }).catch(() => {});
+                        appendActivityLog(mode === 'audio' ? 'Audio recording started' : 'Recording started');
                         setToastMessage(mode === 'audio' ? "Audio recording started" : "Recording started");
                         setTimeout(() => setToastMessage(null), 2500);
                       } catch (err: any) {
@@ -4020,41 +5461,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     }}
                     onStopRecording={async () => {
                       if (!isHost && !(isCoHost && allowCoHostRecord)) return;
-                      const recorder = meetingRecorderRef.current;
-                      meetingRecorderRef.current = null;
-                      setRecordingStatus('idle');
-                      onRecordingChange?.(false);
-                      updateDoc(doc(db, 'rooms', room), { recordingStatus: 'idle' }).catch(() => {});
-                      if (recorder) {
-                        const result = await recorder.stop(room);
-                        if (latestRecordingUrlRef.current) {
-                          URL.revokeObjectURL(latestRecordingUrlRef.current);
-                        }
-                        latestRecordingUrlRef.current = result.url;
-                        setLatestRecording({
-                          url: result.url,
-                          filename: result.filename,
-                          durationSeconds: result.durationSeconds,
-                          mode: result.mode,
-                        });
-                        const a = document.createElement('a');
-                        a.href = result.url;
-                        a.download = result.filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-
-                        addDoc(collection(db, 'recordings'), {
-                          title: `${meetingDetails?.title || room} ${result.mode === 'audio' ? 'Audio' : 'Recording'}`,
-                          roomId: room,
-                          filename: result.filename,
-                          durationSeconds: result.durationSeconds,
-                          mode: result.mode,
-                          participants: user?.uid ? [user.uid] : [],
-                          createdBy: user?.uid || localParticipant.identity || 'guest',
-                          createdAt: serverTimestamp()
-                        }).catch(() => {});
-                      }
+                      await stopAndSaveRecordingNow();
                       setToastMessage("Recording saved & downloaded");
                       setTimeout(() => setToastMessage(null), 3000);
                     }}
@@ -4063,109 +5470,113 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       setHostConfirmModal({ type: 'end-meeting' });
                     }}
                     onOpenBreakoutRoomsTab={() => navigateSidebar('breakout', 'host_controls')}
+                    autoDownloadRecording={autoDownloadRecording}
+                    onToggleAutoDownloadRecording={toggleAutoDownloadRecording}
+                    onOpenStageMediaTab={() => navigateSidebar('stage', 'host_controls')}
                   />
                 )}
 
                 {activeTab === 'tools' && (
-                  <div className="space-y-5">
-                    {/* AI Notes Strip */}
-                    <div className="p-3.5 bg-white rounded-xl border border-neutral-200/80 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Bot size={17} className="text-slate-700 shrink-0" />
-                          <span className="text-xs font-semibold text-slate-900 truncate">AI Notes</span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextState = !isAiNoteTakingActive;
-                            setIsAiNoteTakingActive(nextState);
-                            setToastMessage(nextState ? "AI Note Taking active" : "AI Note Taking paused");
-                            setTimeout(() => setToastMessage(null), 2500);
-                          }}
-                          className={cn(
-                            "w-9 h-5 rounded-full relative transition-colors duration-200 cursor-pointer shrink-0",
-                            isAiNoteTakingActive ? "bg-emerald-700" : "bg-neutral-300"
-                          )}
-                          title="Toggle AI Note-Taking"
-                        >
-                          <div className={cn(
-                            "w-3.5 h-3.5 bg-white rounded-full transition-all duration-200 shadow-xs absolute top-[3px]",
-                            isAiNoteTakingActive ? "left-[19px]" : "left-[3px]"
-                          )} />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-2 border-t border-neutral-100">
-                        <button
-                          type="button"
-                          disabled={isAiSummarizing}
-                          onClick={() => generateAiMeetingSummary('summary')}
-                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FBFBFA] hover:bg-stone-100 border border-neutral-200 text-slate-700 rounded-lg text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                        >
-                          {isAiSummarizing ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
-                          <span>Summary</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={isAiSummarizing}
-                          onClick={() => generateAiMeetingSummary('action_items')}
-                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FBFBFA] hover:bg-stone-100 border border-neutral-200 text-slate-700 rounded-lg text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                        >
-                          {isAiSummarizing ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={12} />}
-                          <span>Actions</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => navigateSidebar('notes', 'tools')}
-                          className="ml-auto text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer whitespace-nowrap"
-                        >
-                          Notes →
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Clean Single-Surface Tool List */}
-                    <div className="divide-y divide-neutral-200/60 border border-neutral-200/70 rounded-xl bg-white overflow-hidden">
+                  <div className="space-y-4">
+                    <div className="divide-y divide-neutral-200/60 border border-neutral-200/70 rounded-2xl bg-white overflow-hidden">
                       {[
-                        { id: 'whiteboard' as const, label: 'Joint Workspace', icon: <Monitor size={17} /> },
-                        { id: 'files' as const, label: 'Share Files', icon: <Paperclip size={17} />, count: sharedFiles.length > 0 ? sharedFiles.length : undefined },
-                        { id: 'notes' as const, label: 'Notes & Transcripts', icon: <FileText size={17} /> },
-                        { id: 'qa' as const, label: 'Live Q&A', icon: <HelpCircle size={17} /> },
-                        { id: 'polls' as const, label: 'Polls & Quizzes', icon: <BarChart2 size={17} /> },
-                        { id: 'canvas' as const, label: 'Canvas Board', icon: <LayoutDashboard size={17} /> },
-                        { id: 'breakout' as const, label: 'Breakout Rooms', icon: <Radio size={17} /> },
-                        { id: 'clips' as const, label: 'Clips', icon: <Camera size={17} /> },
+                        {
+                          id: 'notes' as const,
+                          label: 'Notes, Transcripts & AI Summary',
+                          subtitle: 'Live background transcript, personal notes & recap',
+                          icon: <FileText size={18} />,
+                        },
+                        {
+                          id: 'stage' as const,
+                          label: 'Docs, Media & Templates',
+                          subtitle: 'Present slides, PDFs, images & lower thirds',
+                          icon: <Layers size={18} />,
+                        },
+                        {
+                          id: 'whiteboard' as const,
+                          label: 'Joint Workspace',
+                          subtitle: 'Draw and collaborate live on a shared board',
+                          icon: <Monitor size={18} />,
+                        },
+                        {
+                          id: 'files' as const,
+                          label: 'Share Files',
+                          subtitle: 'Send documents or media to everyone in the room',
+                          icon: <Paperclip size={18} />,
+                          count: sharedFiles.length > 0 ? sharedFiles.length : undefined,
+                        },
+                        {
+                          id: 'qa' as const,
+                          label: 'Live Q&A',
+                          subtitle: 'Collect and answer audience questions',
+                          icon: <HelpCircle size={18} />,
+                        },
+                        {
+                          id: 'polls' as const,
+                          label: 'Polls & Quizzes',
+                          subtitle: 'Run quick live votes with participants',
+                          icon: <BarChart2 size={18} />,
+                        },
+                        {
+                          id: 'canvas' as const,
+                          label: 'Canvas Board',
+                          subtitle: 'Visual brainstorming board for the session',
+                          icon: <LayoutDashboard size={18} />,
+                        },
+                        {
+                          id: 'breakout' as const,
+                          label: 'Breakout Rooms',
+                          subtitle: 'Split attendees into smaller discussion groups',
+                          icon: <Radio size={18} />,
+                        },
+                        {
+                          id: 'clips' as const,
+                          label: 'Clips',
+                          subtitle: 'Record short shareable video highlights',
+                          icon: <Camera size={18} />,
+                        },
                       ].map((tool) => (
                         <button
                           key={tool.id}
                           type="button"
                           onClick={() => navigateSidebar(tool.id, 'tools')}
-                          className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-stone-50/90 transition-colors cursor-pointer group"
+                          className="w-full px-4 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-stone-50/90 transition-colors cursor-pointer group"
                         >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className="text-slate-500 group-hover:text-emerald-700 transition-colors shrink-0">
+                          <div className="flex items-start gap-3.5 min-w-0">
+                            <span className="mt-0.5 text-slate-500 group-hover:text-emerald-700 transition-colors shrink-0">
                               {tool.icon}
                             </span>
-                            <span className="text-xs font-medium text-slate-800 truncate">
-                              {tool.label}
-                            </span>
+                            <div className="min-w-0">
+                              <span className="text-sm font-medium text-slate-900 block leading-snug">
+                                {tool.label}
+                              </span>
+                              <span className="text-xs text-slate-500 block leading-snug mt-0.5">
+                                {tool.subtitle}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             {tool.count !== undefined && (
-                              <span className="text-[11px] font-mono text-slate-500 tabular-nums">
+                              <span className="text-xs font-mono text-slate-500 tabular-nums">
                                 {tool.count}
                               </span>
                             )}
-                            <ChevronRight size={15} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+                            <ChevronRight size={16} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
                           </div>
                         </button>
                       ))}
                     </div>
                   </div>
+                )}
+
+                {activeTab === 'stage' && (
+                  <StageStudioPanel
+                    overlay={stageOverlay}
+                    roomId={room}
+                    presenterName={getDisplayName(localParticipant.identity)}
+                    presenterIdentity={localParticipant.identity}
+                    onChangeOverlay={updateStageOverlay}
+                  />
                 )}
 
                 {activeTab === 'qa' && (
@@ -4283,12 +5694,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   <div className="space-y-6">
                     <div className="bg-white p-6 rounded-2xl border border-neutral-200/70 shadow-xs space-y-4">
                       <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Joining info</p>
-                      <div className="bg-stone-50 p-4 rounded-xl border border-neutral-200/80 break-all text-xs font-mono text-slate-700 leading-relaxed">
+                      <div className="bg-stone-50 p-4 rounded-xl border border-neutral-200/80 break-all text-sm font-mono text-slate-700 leading-relaxed">
                         {window.location.href}
                       </div>
                       <button 
                         onClick={handleCopy} 
-                        className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl transition-all text-xs font-medium shadow-xs cursor-pointer active:scale-[0.98]"
+                        className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl transition-all text-sm font-medium shadow-xs cursor-pointer active:scale-[0.98]"
                       >
                         {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
                         <span>{copied ? 'Copied to Clipboard' : 'Copy Joining Link'}</span>
@@ -4337,9 +5748,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       <button
                         type="button"
                         onClick={() => setIsHostKeyModalOpen(true)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-stone-50 border border-neutral-200/80 rounded-xl text-xs font-medium text-slate-700 transition-colors whitespace-nowrap truncate cursor-pointer"
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-stone-50 border border-neutral-200/80 rounded-xl text-sm font-medium text-slate-700 transition-colors whitespace-nowrap truncate cursor-pointer"
                       >
-                        <Key size={14} className="text-emerald-700 shrink-0" />
+                        <Key size={15} className="text-emerald-700 shrink-0" />
                         <span>Claim Host Role</span>
                       </button>
                     )}
@@ -4348,20 +5759,22 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 {activeTab === 'chat' && (
                   <div className="flex flex-col h-full">
                     {/* Toggle: Messages / Shared Files */}
-                    <div className="flex items-center gap-1.5 mb-4 bg-stone-100 p-1 rounded-xl shrink-0">
+                    <div className="flex items-center gap-1.5 mb-3 bg-stone-100 p-1 rounded-xl shrink-0">
                       <button
+                        type="button"
                         onClick={() => setChatSubTab('messages')}
                         className={cn(
-                          "flex-1 py-2 text-xs font-medium rounded-lg transition-all cursor-pointer",
+                          "flex-1 py-2 text-sm font-medium rounded-lg transition-all cursor-pointer whitespace-nowrap",
                           chatSubTab === 'messages' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-900"
                         )}
                       >
                         Messages
                       </button>
                       <button
+                        type="button"
                         onClick={() => setChatSubTab('files')}
                         className={cn(
-                          "flex-1 py-2 text-xs font-medium rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                          "flex-1 py-2 text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap",
                           chatSubTab === 'files' ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-900"
                         )}
                       >
@@ -4381,33 +5794,157 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       />
                     ) : (
                       <>
-                        <div className="flex-1 space-y-3.5 mb-4 overflow-y-auto custom-scroll pr-1">
-                          {chatMessages.length === 0 && sharedFiles.length === 0 ? (
-                            <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-400">
-                              <MessageSquare size={32} />
-                              <p className="text-xs">No messages yet. Send a message to participants.</p>
-                            </div>
-                          ) : (
-                            chatMessages.map((msg, i) => (
-                              <div key={i} className="flex flex-col">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-xs font-medium text-slate-900">
-                                    {msg.from?.identity === localParticipant.identity ? 'You' : getDisplayName(msg.from?.identity)}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400">
-                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-slate-800 bg-stone-100 px-4 py-2.5 rounded-2xl rounded-tl-sm inline-block max-w-[95%] border border-neutral-200/60 leading-relaxed">
-                                  {msg.message}
-                                </p>
+                        {/* Custom Multi-Tab Chat Bar */}
+                        <div className="flex items-center gap-1.5 pb-3 mb-3 border-b border-neutral-200/70 overflow-x-auto no-scrollbar shrink-0">
+                          {chatTabs.map((tab) => {
+                            const active = activeChatTabId === tab.id;
+                            return (
+                              <div
+                                key={tab.id}
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-xl border transition-colors shrink-0",
+                                  active
+                                    ? "bg-emerald-50/80 text-emerald-800 border-emerald-200/80"
+                                    : "bg-white text-slate-600 border-neutral-200/80 hover:border-slate-300"
+                                )}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveChatTabId(tab.id)}
+                                  className="px-3 py-1.5 text-[13px] font-medium cursor-pointer whitespace-nowrap"
+                                >
+                                  {tab.name}
+                                </button>
+                                {tab.id !== 'general' && (
+                                  <button
+                                    type="button"
+                                    title="Close tab"
+                                    onClick={() => {
+                                      setChatTabs((prev) => prev.filter((t) => t.id !== tab.id));
+                                      if (activeChatTabId === tab.id) setActiveChatTabId('general');
+                                      safeSendData(sendMultiChatData, { type: 'close-tab', tabId: tab.id }, true);
+                                      deleteDoc(doc(db, 'rooms', room, 'chatTabs', tab.id)).catch(() => {});
+                                    }}
+                                    className="pr-2 py-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                )}
                               </div>
-                            ))
-                          )}
+                            );
+                          })}
+
+                          <button
+                            type="button"
+                            onClick={() => setIsAddingChatTab((prev) => !prev)}
+                            title="New chat tab"
+                            className="p-1.5 rounded-xl border border-neutral-200 bg-white hover:bg-stone-50 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer shrink-0"
+                          >
+                            <Plus size={15} />
+                          </button>
+                        </div>
+
+                        {isAddingChatTab && (
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              const clean = newChatTabName.trim();
+                              if (!clean) return;
+                              const newTab: ChatTabItem = {
+                                id: `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+                                name: clean.slice(0, 24),
+                                createdBy: getDisplayName(localParticipant.identity),
+                                createdAt: Date.now(),
+                              };
+                              setChatTabs((prev) => [...prev, newTab]);
+                              setActiveChatTabId(newTab.id);
+                              setNewChatTabName('');
+                              setIsAddingChatTab(false);
+                              safeSendData(sendMultiChatData, { type: 'create-tab', tab: newTab }, true);
+                              setDoc(doc(db, 'rooms', room, 'chatTabs', newTab.id), newTab).catch(() => {});
+                            }}
+                            className="flex items-center gap-1.5 mb-3 shrink-0"
+                          >
+                            <input
+                              type="text"
+                              autoFocus
+                              value={newChatTabName}
+                              onChange={(e) => setNewChatTabName(e.target.value)}
+                              placeholder="Tab name (e.g. Q&A, Links)..."
+                              className="flex-1 px-3 py-2 text-[13px] bg-white border border-neutral-200 rounded-xl outline-none focus:ring-1 focus:ring-emerald-700/50 text-slate-900"
+                            />
+                            <button
+                              type="submit"
+                              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-[13px] font-medium rounded-xl cursor-pointer whitespace-nowrap"
+                            >
+                              Add
+                            </button>
+                          </form>
+                        )}
+
+                        <div className="flex-1 space-y-3 mb-4 overflow-y-auto custom-scroll pr-1">
+                          {(() => {
+                            const items: ExtendedChatMessage[] =
+                              activeChatTabId === 'general'
+                                ? [
+                                    ...chatMessages.map((m, idx) => ({
+                                      id: `lk_${m.timestamp}_${idx}`,
+                                      tabId: 'general',
+                                      senderIdentity: m.from?.identity,
+                                      senderName: m.from?.identity === localParticipant.identity ? 'You' : getDisplayName(m.from?.identity),
+                                      text: m.message,
+                                      timestamp: m.timestamp,
+                                      isSystem: false,
+                                    })),
+                                    ...activityLogs,
+                                  ].sort((a, b) => a.timestamp - b.timestamp)
+                                : customTabMessages.filter((m) => m.tabId === activeChatTabId);
+
+                            if (items.length === 0) {
+                              return (
+                                <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-400">
+                                  <MessageSquare size={28} />
+                                  <p className="text-[13px]">
+                                    {activeChatTabId === 'general'
+                                      ? 'No messages yet. Activity logs and messages appear here.'
+                                      : `No messages in ${chatTabs.find((t) => t.id === activeChatTabId)?.name || 'this tab'} yet.`}
+                                  </p>
+                                </div>
+                              );
+                            }
+
+                            return items.map((item) => {
+                              if (item.isSystem) {
+                                return (
+                                  <p
+                                    key={item.id}
+                                    className="text-xs text-slate-400 text-center py-0.5 select-none"
+                                  >
+                                    {item.text} · {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                );
+                              }
+                              return (
+                                <div key={item.id} className="flex flex-col">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[13px] font-medium text-slate-900">
+                                      {item.senderIdentity === localParticipant.identity ? 'You' : item.senderName}
+                                    </span>
+                                    <span className="text-[11px] text-slate-400">
+                                      {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                  <p className="text-[13px] text-slate-800 bg-stone-100 px-4 py-2.5 rounded-2xl rounded-tl-sm inline-block max-w-[95%] border border-neutral-200/60 leading-relaxed">
+                                    {item.text}
+                                  </p>
+                                </div>
+                              );
+                            });
+                          })()}
                           <div ref={chatEndRef} />
                         </div>
                         {!allowChat && !hasAdminAuthority ? (
-                          <div className="px-4 py-3 bg-stone-100 border border-neutral-200/80 rounded-xl text-xs text-slate-500 text-center shrink-0">
+                          <div className="px-4 py-3 bg-stone-100 border border-neutral-200/80 rounded-xl text-[13px] text-slate-500 text-center shrink-0">
                             Chat has been disabled by the host.
                           </div>
                         ) : (
@@ -4415,10 +5952,24 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                             onSubmit={(e) => { 
                               e.preventDefault(); 
                               if (!allowChat && !hasAdminAuthority) return;
-                              if(chatInput.trim()){ 
-                                sendChat(chatInput); 
-                                setChatInput(""); 
+                              const trimmed = chatInput.trim();
+                              if (!trimmed) return;
+                              if (activeChatTabId === 'general') {
+                                sendChat(trimmed);
+                              } else {
+                                const msgObj: ExtendedChatMessage = {
+                                  id: `cm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                                  tabId: activeChatTabId,
+                                  senderIdentity: localParticipant.identity,
+                                  senderName: getDisplayName(localParticipant.identity),
+                                  text: trimmed,
+                                  timestamp: Date.now(),
+                                };
+                                setCustomTabMessages((prev) => [...prev, msgObj]);
+                                safeSendData(sendMultiChatData, { type: 'tab-message', msg: msgObj }, true);
+                                setDoc(doc(db, 'rooms', room, 'chatMessages', msgObj.id), msgObj).catch(() => {});
                               }
+                              setChatInput(""); 
                             }}
                             className="flex gap-2 items-center bg-stone-50 rounded-xl px-3 py-1.5 border border-neutral-200/80 focus-within:border-slate-400 transition-all shrink-0"
                           >
@@ -4432,7 +5983,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                             </button>
                             <input 
                               type="text" 
-                              placeholder="Send a message..." 
+                              placeholder={`Message ${chatTabs.find((t) => t.id === activeChatTabId)?.name || 'chat'}...`}
                               className="bg-transparent outline-none flex-1 text-xs text-slate-900 h-9 placeholder:text-slate-400"
                               value={chatInput}
                               onChange={(e) => setChatInput(e.target.value)}
@@ -4519,12 +6070,27 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   <NotesPanel 
                     user={user} 
                     navigate={navigate} 
+                    roomId={room}
+                    mySpeakerName={getMySpeakerName()}
+                    resolveSpeakerName={getDisplayName}
                     autoSaveTranscript={autoSaveTranscript}
                     setAutoSaveTranscript={setAutoSaveTranscript}
-                    activeTranscriptNoteId={transcriptNoteId}
                     liveTranscriptions={transcriptions}
                     liveInterim={localTranscript}
-                    onFlushTranscript={flushTranscriptBuffer}
+                    onFlushTranscript={flushTranscriptBeforeExit}
+                    isAiSummarizing={isAiSummarizing}
+                    aiSummaryStatus={aiSummaryStatus}
+                    aiSummaryError={aiSummaryError}
+                    lastAiSyncedAt={lastAiSyncedAt}
+                    generatedAiNote={generatedAiNote}
+                    onUpdateGeneratedAiNote={(val: string) => {
+                      setGeneratedAiNote(val);
+                      try {
+                        if (room) localStorage.setItem(`forum_guest_ai_notes_${room}`, val);
+                      } catch {}
+                    }}
+                    onSaveAiNoteToCloud={() => void persistAiNoteToFirestore(generatedAiNote)}
+                    onGenerateAiNote={(ft) => void generateAiMeetingSummary(ft)}
                   />
                 )}
                 {activeTab === 'whiteboard' && (
@@ -4553,49 +6119,48 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         )}
       </AnimatePresence>
 
-      {/* Floating Draggable PiP Active Speaker Box during Workspace Maximize Mode */}
-      <AnimatePresence>
-        {isWorkspaceMaximized && activeSpeakerTrack && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8, y: 30 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 30 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 280 }}
-            drag
-            dragConstraints={containerRef}
-            dragMomentum={false}
-            className="fixed bottom-6 right-6 z-[120] w-64 sm:w-72 aspect-video rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-[#141517] cursor-grab active:cursor-grabbing select-none"
+      {/* Floating Edge-Clipping Draggable PiP Meeting Card during Workspace Maximize Mode */}
+      {isWorkspaceMaximized && (activeSpeakerTrack || visibleTracks[0]) && (() => {
+        const workspacePipTrack = activeSpeakerTrack || visibleTracks[0];
+        return (
+          <DraggableEdgeSnapCard
+            boundsMode="viewport"
+            padding={16}
+            initialCorner="bottom-right"
+            className="z-[120] w-60 sm:w-72 aspect-video rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-[#141517]"
           >
             <div className="w-full h-full relative">
               <CustomParticipantTile 
-                trackRef={activeSpeakerTrack} 
+                trackRef={workspacePipTrack} 
                 raisedHands={raisedHands}
-                isPinned={pinnedIdentities.has(activeSpeakerTrack.participant.identity)}
-                mirror={activeSpeakerTrack.participant.isLocal && videoMirroring}
-                aiVideoFilter={activeSpeakerTrack.participant.isLocal ? localAIVideoFilter : undefined}
+                isPinned={pinnedIdentities.has(workspacePipTrack.participant.identity)}
+                mirror={workspacePipTrack.source !== Track.Source.ScreenShare && workspacePipTrack.participant.isLocal && videoMirroring}
+                aiVideoFilter={workspacePipTrack.source !== Track.Source.ScreenShare && workspacePipTrack.participant.isLocal ? localAIVideoFilter : undefined}
                 showName={false}
-                isFocal
+                isMiniCard
               />
 
               {/* Floating Top Header: Active speaker label & Restore button */}
               <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-auto">
-                <span className="text-[11px] font-medium text-white/90 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10 truncate max-w-[140px]">
-                  {activeSpeakerTrack.participant.identity.split('#')[0]} {activeSpeakerTrack.participant.isLocal && "(You)"}
+                <span className="text-[11px] font-medium text-white/90 bg-black/65 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10 truncate max-w-[140px]">
+                  {workspacePipTrack.participant.identity.split('#')[0]} {workspacePipTrack.participant.isLocal && "(You)"}
                 </span>
                 <button
                   type="button"
+                  data-no-drag="true"
                   onClick={() => setIsWorkspaceMaximized(false)}
-                  className="p-1.5 rounded-xl bg-black/60 hover:bg-black/90 text-white/80 hover:text-white backdrop-blur-md border border-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-xl bg-black/65 hover:bg-black/90 text-white/80 hover:text-white backdrop-blur-md border border-white/10 transition-colors cursor-pointer"
                   title="Restore Side-by-Side View"
                 >
                   <Minimize2 size={13} />
                 </button>
               </div>
 
-              {/* Floating Bottom: ONLY Audio & Video Icon Buttons */}
+              {/* Floating Bottom: Audio & Video Icon Buttons */}
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-2xl border border-white/15 shadow-xl">
                 <button
                   type="button"
+                  data-no-drag="true"
                   onClick={async () => {
                     try {
                       const target = !localParticipant.isMicrophoneEnabled;
@@ -4616,11 +6181,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
                 <button
                   type="button"
+                  data-no-drag="true"
                   onClick={async () => {
                     try {
                       const target = !localParticipant.isCameraEnabled;
                       setIsCamEnabled(target);
-                      await localParticipant.setCameraEnabled(target);
+                      await localParticipant.setCameraEnabled(target, target ? {
+                        ...(selectedVideoId && selectedVideoId !== 'default' ? { deviceId: selectedVideoId } : {}),
+                        facingMode,
+                        resolution: getCameraVideoPreset(selectedResolution, streamProfile === 'high'),
+                      } : undefined);
                     } catch (err) {}
                   }}
                   className={cn(
@@ -4635,9 +6205,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 </button>
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </DraggableEdgeSnapCard>
+        );
+      })()}
 
         {/* Settings Central Modal with Full Mobile Optimization, Category Navigation & Custom Dropdowns */}
         <SettingsModal
@@ -4659,6 +6229,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           setNoiseCancellation={setNoiseCancellation}
           echoCancellation={echoCancellation}
           setEchoCancellation={setEchoCancellation}
+          audioSoundMode={audioSoundMode}
+          setAudioSoundMode={setAudioSoundMode}
+          performanceAudioOptions={performanceAudioOptions}
+          setPerformanceAudioOptions={setPerformanceAudioOptions}
           aiDenoise={aiDenoise}
           setAiDenoise={setAiDenoise}
           hvacFilter={hvacFilter}
@@ -4690,6 +6264,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           feedExports={feedExports}
           streamProfile={streamProfile}
           setStreamProfile={setStreamProfile}
+          selectedResolution={selectedResolution}
+          setSelectedResolution={setSelectedResolution}
           liveResolution={liveResolution}
           liveFps={liveFps}
           liveBitrate={liveBitrate}
@@ -4737,23 +6313,16 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     type="button"
                     onClick={async () => {
                       if (hostConfirmModal.type === 'remove-participant' && hostConfirmModal.targetIdentity) {
-                        sendHostControl(new TextEncoder().encode(JSON.stringify({ 
-                          action: 'remove-participant', 
-                          targetIdentity: hostConfirmModal.targetIdentity 
-                        })), { reliable: true });
+                        safeSendData(sendHostControl, {
+                          action: 'remove-participant',
+                          targetIdentity: hostConfirmModal.targetIdentity
+                        }, true);
                         setToastMessage(`Removed ${hostConfirmModal.name || 'participant'}`);
                         setTimeout(() => setToastMessage(null), 2500);
                       } else if (hostConfirmModal.type === 'end-meeting') {
-                        sendHostControl(new TextEncoder().encode(JSON.stringify({ 
-                          action: 'end-meeting' 
-                        })), { reliable: true });
-                        try {
-                          await updateDoc(doc(db, 'rooms', room), { status: 'ended' });
-                        } catch (e) {}
-                        try {
-                          await updateDoc(doc(db, 'meetings', room), { status: 'ended' });
-                        } catch (e) {}
-                        navigate(user ? '/dashboard' : '/');
+                        setHostConfirmModal(null);
+                        await requestExitWithRecordingGuard(user ? '/dashboard' : '/', true);
+                        return;
                       }
                       setHostConfirmModal(null);
                     }}
@@ -4849,31 +6418,88 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     <>
                       <div className="fixed inset-0 z-[110]" onClick={() => setIsMicMenuOpen(false)} />
                       <motion.div
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
+                        initial={{ opacity: 0, scale: 0.96, y: 4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.96, y: 4 }}
+                        transition={{ duration: 0.14 }}
                         className={cn(
-                          "w-64 bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120]",
+                          "w-80 max-w-[calc(100vw-2rem)] bg-[#1d1f23]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-3 z-[120] space-y-3",
                           isMobileLandscape 
                             ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2 max-h-[85vh]" 
                             : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
                         )}
                       >
-                        <p className="text-[10px] font-bold text-slate-400 px-3 py-1 uppercase tracking-wider">Microphone</p>
-                        <div className="max-h-48 overflow-y-auto custom-scroll">
-                          {audioDevices.map(d => (
-                            <button 
-                              key={d.deviceId}
-                              onClick={() => { setSelectedAudioId(d.deviceId); setIsMicMenuOpen(false); }}
-                              className={cn(
-                                "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 cursor-pointer",
-                                selectedAudioId === d.deviceId ? "bg-slate-700 text-white font-medium" : "text-slate-300 hover:bg-white/10"
-                              )}
-                            >
-                              <Mic size={14} />
-                              <span className="truncate">{d.label || `Microphone ${d.deviceId.slice(0, 4)}`}</span>
-                            </button>
-                          ))}
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-slate-400 px-2">Microphone</p>
+                          <div className="max-h-40 overflow-y-auto custom-scroll space-y-0.5">
+                            {audioDevices.map(d => {
+                              const isSelected = selectedAudioId === d.deviceId;
+                              return (
+                                <button 
+                                  key={d.deviceId}
+                                  type="button"
+                                  onClick={() => { setSelectedAudioId(d.deviceId); setIsMicMenuOpen(false); }}
+                                  className={cn(
+                                    "w-full text-left px-2.5 py-2 rounded-xl text-xs transition-colors flex items-center justify-between gap-2.5 cursor-pointer",
+                                    isSelected ? "bg-white/10 text-white font-medium" : "text-slate-300 hover:bg-white/5"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <Mic size={13} className={isSelected ? "text-emerald-400 shrink-0" : "text-slate-400 shrink-0"} />
+                                    <span className="truncate">{d.label || `Microphone ${d.deviceId.slice(0, 4)}`}</span>
+                                  </div>
+                                  {isSelected && <Check size={14} className="text-emerald-400 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="pt-2.5 border-t border-white/10 space-y-2">
+                          <p className="text-xs font-medium text-slate-400 px-1">Sound mode</p>
+                          <div className="grid grid-cols-3 gap-1 p-1 bg-black/30 rounded-xl border border-white/5">
+                            {([
+                              { id: 'standard', label: 'Standard' },
+                              { id: 'smooth', label: 'Smooth' },
+                              { id: 'performance', label: 'Live Music' },
+                            ] as const).map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => {
+                                  setAudioSoundMode(m.id);
+                                  if (m.id !== 'performance') setIsMicMenuOpen(false);
+                                }}
+                                className={cn(
+                                  "py-1.5 px-2 rounded-lg text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap truncate",
+                                  audioSoundMode === m.id
+                                    ? "bg-white/15 text-emerald-300 border border-emerald-500/30"
+                                    : "text-slate-400 hover:text-slate-200"
+                                )}
+                              >
+                                {m.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          {audioSoundMode === 'performance' && (
+                            <div className="flex items-center justify-between gap-2 px-1 pt-1">
+                              <span className="text-[11px] text-slate-400 truncate">
+                                Style: <span className="text-slate-200 font-medium">{PERFORMANCE_PRESET_CONFIGS[performanceAudioOptions.profile].label}</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsMicMenuOpen(false);
+                                  setSettingsCategory('audio');
+                                  setActiveTab('settings');
+                                }}
+                                className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 cursor-pointer whitespace-nowrap shrink-0"
+                              >
+                                Audio Settings →
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </motion.div>
                     </>
@@ -4888,7 +6514,11 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     try {
                       const targetState = !localParticipant.isCameraEnabled;
                       setIsCamEnabled(targetState);
-                      await localParticipant.setCameraEnabled(targetState);
+                      await localParticipant.setCameraEnabled(targetState, targetState ? {
+                        ...(selectedVideoId && selectedVideoId !== 'default' ? { deviceId: selectedVideoId } : {}),
+                        facingMode,
+                        resolution: getCameraVideoPreset(selectedResolution, streamProfile === 'high'),
+                      } : undefined);
                     } catch (err: any) {
                       console.warn("Camera toggle failed:", err?.message || err);
                     }
@@ -4966,15 +6596,69 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
               {/* Screen Share (Desktop & narrow non-mobile viewports supporting display capture) */}
               {(!isMobile || (!isMobileBrowser() && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia)) && (
-                <ControlButton 
-                  active={localParticipant.isScreenShareEnabled} 
-                  onClick={toggleScreenShare}
-                  icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={isMobile ? 18 : 22} /> : <MonitorUp size={isMobile ? 18 : 22} />}
-                  highlight={localParticipant.isScreenShareEnabled}
-                  size={isMobile || isSidebarOpenOnDesktop ? "small" : "normal"}
-                  isLandscape={isMobileLandscape}
-                  title={localParticipant.isScreenShareEnabled ? "Stop sharing" : "Share screen"}
-                />
+                <div className="relative">
+                  <ControlButton 
+                    active={localParticipant.isScreenShareEnabled} 
+                    onClick={toggleScreenShare}
+                    onDropdownClick={() => setIsScreenMenuOpen(v => !v)}
+                    hasDropdown={!isMobile}
+                    icon={localParticipant.isScreenShareEnabled ? <MonitorOff size={isMobile ? 18 : 22} /> : <MonitorUp size={isMobile ? 18 : 22} />}
+                    highlight={localParticipant.isScreenShareEnabled}
+                    size={isMobile || isSidebarOpenOnDesktop ? "small" : "normal"}
+                    isLandscape={isMobileLandscape}
+                    title={localParticipant.isScreenShareEnabled ? "Stop sharing" : "Share screen, projector, or app"}
+                  />
+                  <AnimatePresence>
+                    {isScreenMenuOpen && !isMobile && (
+                      <>
+                        <div className="fixed inset-0 z-[110]" onClick={() => setIsScreenMenuOpen(false)} />
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          className={cn(
+                            "w-64 bg-[#282a2e]/98 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/10 p-2 z-[120] space-y-1",
+                            isMobileLandscape 
+                              ? "fixed right-[78px] sm:right-[88px] top-1/2 -translate-y-1/2" 
+                              : "absolute bottom-full mb-3 left-1/2 -translate-x-1/2"
+                          )}
+                        >
+                          <p className="text-[10px] font-bold text-slate-400 px-2.5 py-1 uppercase tracking-wider">Share Source</p>
+                          <button
+                            type="button"
+                            onClick={() => { setIsScreenMenuOpen(false); void startScreenShare('monitor'); }}
+                            className="w-full text-left px-3 py-2 rounded-xl text-xs text-slate-200 hover:bg-white/10 transition-colors cursor-pointer"
+                          >
+                            Entire Screen / Projector (Desktop 1, 2…)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setIsScreenMenuOpen(false); void startScreenShare('window'); }}
+                            className="w-full text-left px-3 py-2 rounded-xl text-xs text-slate-200 hover:bg-white/10 transition-colors cursor-pointer"
+                          >
+                            Another App Window
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setIsScreenMenuOpen(false); void startScreenShare('browser'); }}
+                            className="w-full text-left px-3 py-2 rounded-xl text-xs text-slate-200 hover:bg-white/10 transition-colors cursor-pointer"
+                          >
+                            Browser Tab
+                          </button>
+                          {localParticipant.isScreenShareEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => { setIsScreenMenuOpen(false); void stopScreenShare(); }}
+                              className="w-full text-left px-3 py-2 rounded-xl text-xs text-rose-300 hover:bg-rose-500/15 transition-colors cursor-pointer"
+                            >
+                              Stop Sharing
+                            </button>
+                          )}
+                        </motion.div>
+                      </>
+                    )}
+                  </AnimatePresence>
+                </div>
               )}
 
               {/* Reactions & Smile (Mobile and Desktop) - Hidden when sidebar is open to preserve the 4-control clean layout */}
@@ -5251,6 +6935,38 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
                                 <button 
                                   type="button"
+                                  onClick={() => { setIsMoreMenuOpen(false); void pipRef.current?.togglePiP(); }}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <PictureInPicture2 size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Floating Mini View</span>
+                                  </div>
+                                  <span className="text-xs font-normal text-slate-400">
+                                    {isPiPActive ? 'Active' : 'Pop out'}
+                                  </span>
+                                </button>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => toggleAutoPipOnTabLeave(!autoPipOnTabLeave)}
+                                  className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-white/10 text-slate-200 flex items-center justify-center shrink-0">
+                                      <Monitor size={18} />
+                                    </div>
+                                    <span className="text-sm font-medium text-white block">Auto-float on tab leave</span>
+                                  </div>
+                                  <span className="text-xs font-normal text-slate-400">
+                                    {autoPipOnTabLeave ? 'On' : 'Off'}
+                                  </span>
+                                </button>
+
+                                <button 
+                                  type="button"
                                   onClick={() => { setLayoutMode(layoutMode === 'tiled' ? 'sidebar' : 'tiled'); setIsMoreMenuOpen(false); }}
                                   className="w-full flex items-center justify-between p-3 hover:bg-white/10 rounded-xl text-left transition-colors cursor-pointer"
                                 >
@@ -5473,6 +7189,28 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                                 <UserX size={16} className="text-slate-400" />
                                 <span>{hideNonVideo ? "Show non-video" : "Hide non-video"}</span>
                               </button>
+                              <button 
+                                type="button"
+                                onClick={() => { setIsMoreMenuOpen(false); void pipRef.current?.togglePiP(); }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-slate-300 hover:text-white transition-colors cursor-pointer"
+                              >
+                                <span className="flex items-center gap-3">
+                                  <PictureInPicture2 size={16} className="text-slate-400" />
+                                  <span>Floating Mini View (PiP)</span>
+                                </span>
+                                <span className="text-[10px] text-slate-400">{isPiPActive ? 'Active' : 'Pop out'}</span>
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => toggleAutoPipOnTabLeave(!autoPipOnTabLeave)}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/10 rounded-xl text-xs text-slate-300 hover:text-white transition-colors cursor-pointer"
+                              >
+                                <span className="flex items-center gap-3">
+                                  <Monitor size={16} className="text-slate-400" />
+                                  <span>Auto-float on tab switch</span>
+                                </span>
+                                <span className="text-[10px] text-slate-400">{autoPipOnTabLeave ? 'On' : 'Off'}</span>
+                              </button>
 
                               <div className="h-px bg-white/10 my-1" />
                               <button 
@@ -5495,7 +7233,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
               {/* End Call Button - Squircle Matching Other Buttons */}
               <button 
                 type="button"
-                onClick={() => navigate('/')}
+                onClick={() => void requestExitWithRecordingGuard(user ? '/dashboard' : '/')}
                 className={cn(
                   "bg-[#ea4335] hover:bg-[#d93025] text-white flex items-center justify-center transition-all shadow-xs active:scale-95 cursor-pointer shrink-0",
                   isMobile || isMobileLandscape || isSidebarOpenOnDesktop
@@ -5544,6 +7282,14 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     icon={<MessageSquare size={20} />} 
                     badge={chatMessages.length > 0 ? chatMessages.length : undefined} 
                     title="In-call Chat" 
+                  />
+
+                  {/* Picture-in-Picture Floating Mini View */}
+                  <TabButton 
+                    active={isPiPActive} 
+                    onClick={() => void pipRef.current?.togglePiP()} 
+                    icon={<PictureInPicture2 size={19} />} 
+                    title={isPiPActive ? "Close Floating Mini View" : "Floating Mini View (Picture-in-Picture)"} 
                   />
 
                   {/* Settings */}
@@ -5730,24 +7476,34 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
       {/* Minimal Non-Intrusive Toast Notification */}
       <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: 16, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-            className="fixed bottom-24 right-6 z-[140] flex items-center gap-2.5 px-4 py-3 bg-slate-900/95 text-slate-100 border border-slate-700/80 rounded-xl shadow-2xl backdrop-blur-md text-xs font-medium"
-          >
-            <Check className="text-emerald-400 shrink-0" size={16} />
-            <span>{toastMessage}</span>
-            <button 
-              onClick={() => setToastMessage(null)}
-              className="ml-2 p-1 text-slate-400 hover:text-slate-200 rounded-md transition-colors"
+        {toastMessage && (() => {
+          const isErrorToast = /\b(could not|failed|error|blocked|denied|not supported|prevented)\b/i.test(toastMessage);
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="fixed bottom-24 right-6 z-[140] flex items-center gap-2.5 px-4 py-3 bg-slate-900/95 text-slate-100 border border-slate-700/80 rounded-xl shadow-2xl backdrop-blur-md text-xs font-medium max-w-md flex-wrap"
             >
-              <X size={13} />
-            </button>
-          </motion.div>
-        )}
+              {isErrorToast ? (
+                <Lock className="text-rose-400 shrink-0" size={15} />
+              ) : (
+                <Check className="text-emerald-400 shrink-0" size={16} />
+              )}
+              <span className="flex-1 min-w-0">{toastMessage}</span>
+              {isErrorToast && (
+                <SendErrorFeedbackButton variant="dark" errorMessage={toastMessage} source="Meeting Room" />
+              )}
+              <button 
+                onClick={() => setToastMessage(null)}
+                className="ml-1 p-1 text-slate-400 hover:text-slate-200 rounded-md transition-colors cursor-pointer shrink-0"
+              >
+                <X size={13} />
+              </button>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* Floating Reactions Overlay */}
@@ -5812,7 +7568,117 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           setToastMessage("Session active on this device");
           setTimeout(() => setToastMessage(null), 2500);
         }}
-        onReturnToDashboard={() => navigate(user ? '/dashboard' : '/')}
+        onReturnToDashboard={() => void requestExitWithRecordingGuard(user ? '/dashboard' : '/')}
+      />
+
+      {/* Active Recording Exit Guard Modal */}
+      <AnimatePresence>
+        {recordingExitModal?.open && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[250] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              className="bg-white w-full max-w-md rounded-2xl border border-neutral-200/80 shadow-2xl p-6 space-y-5"
+            >
+              <div className="space-y-1">
+                <h3 className="text-base font-semibold text-slate-900">Recording in Progress</h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  You have an active recording running. Download it before leaving so your recording is not lost.
+                </p>
+              </div>
+
+              <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoDownloadRecording}
+                  onChange={(e) => toggleAutoDownloadRecording(e.target.checked)}
+                  className="mt-0.5 rounded border-neutral-300 text-emerald-700 focus:ring-emerald-700/50 cursor-pointer"
+                />
+                <span className="text-xs text-slate-700 leading-relaxed">
+                  Always auto-download recordings when leaving, ending a meeting, or closing this tab
+                </span>
+              </label>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isSavingRecordingBeforeExit}
+                  onClick={() => setRecordingExitModal(null)}
+                  className="px-3.5 py-2 bg-white hover:bg-stone-50 border border-neutral-200 text-slate-700 rounded-xl text-xs font-medium cursor-pointer whitespace-nowrap"
+                >
+                  Stay in Call
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingRecordingBeforeExit}
+                  onClick={async () => {
+                    const { destination, isEndForAll } = recordingExitModal;
+                    setRecordingExitModal(null);
+                    meetingRecorderRef.current?.cleanup();
+                    meetingRecorderRef.current = null;
+                    setRecordingStatus('idle');
+                    onRecordingChange?.(false);
+                    await executeExitAction(destination, isEndForAll);
+                  }}
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/70 rounded-xl text-xs font-medium cursor-pointer whitespace-nowrap"
+                >
+                  Discard & Leave
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingRecordingBeforeExit}
+                  onClick={async () => {
+                    const { destination, isEndForAll } = recordingExitModal;
+                    setIsSavingRecordingBeforeExit(true);
+                    try {
+                      await stopAndSaveRecordingNow();
+                    } finally {
+                      setIsSavingRecordingBeforeExit(false);
+                    }
+                    setRecordingExitModal(null);
+                    await executeExitAction(destination, isEndForAll);
+                  }}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                >
+                  {isSavingRecordingBeforeExit ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  <span>{isSavingRecordingBeforeExit ? 'Finalizing...' : 'Download & Leave'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <MeetingPictureInPicture
+        ref={pipRef}
+        activeTrack={activeSpeakerTrack || visibleTracks[0] || null}
+        participantCount={remoteParticipants.length + 1}
+        roomTitle={meetingDetails?.title || room}
+        isMicEnabled={localParticipant.isMicrophoneEnabled}
+        isCamEnabled={localParticipant.isCameraEnabled}
+        onToggleMic={async () => {
+          try {
+            const target = !localParticipant.isMicrophoneEnabled;
+            setIsMicEnabled(target);
+            await localParticipant.setMicrophoneEnabled(target);
+          } catch {}
+        }}
+        onToggleCam={async () => {
+          try {
+            const target = !localParticipant.isCameraEnabled;
+            setIsCamEnabled(target);
+            await localParticipant.setCameraEnabled(target, target ? {
+              ...(selectedVideoId && selectedVideoId !== 'default' ? { deviceId: selectedVideoId } : {}),
+              facingMode,
+              resolution: getCameraVideoPreset(selectedResolution, streamProfile === 'high'),
+            } : undefined);
+          } catch {}
+        }}
+        onLeave={() => void requestExitWithRecordingGuard(user ? '/dashboard' : '/')}
+        autoPipEnabled={autoPipOnTabLeave}
+        videoMirroring={videoMirroring}
+        onPiPStateChange={setIsPiPActive}
       />
 
       <RoomAudioRenderer />
@@ -5820,7 +7686,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   );
 }
 
-function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, mirror, aiVideoFilter, showName = true, isFocal, isCompact, isMobilePortrait, onSpotlight, onContextMenu, onCopyIsolatedFeed, onSendFile }: any) {
+function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, mirror, aiVideoFilter, showName = true, isFocal, isCompact, isMiniCard, isMobilePortrait, onSpotlight, onContextMenu, onCopyIsolatedFeed, onSendFile }: any) {
   const { user } = useAuth();
   const isScreenShare = trackRef?.source === Track.Source.ScreenShare;
   const isSpeaking = useIsSpeaking(trackRef?.participant);
@@ -5857,14 +7723,20 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
       )}
     >
       {isVideoOff ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#18191b] to-[#222428]">
+        <div className={cn(
+          "absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#18191b] to-[#222428]",
+          isMiniCard && "pb-8",
+          isCompact && "pb-3.5"
+        )}>
           {userAvatar ? (
             <div className={cn(
               isCompact
-                ? "w-8 h-8 sm:w-9 sm:h-9 max-w-[40%] max-h-[40%] aspect-square"
-                : isFocal 
-                  ? "w-20 h-20 sm:w-28 sm:h-28 md:w-32 md:h-32 max-w-[45%] max-h-[55%] aspect-square" 
-                  : "w-14 h-14 sm:w-20 sm:h-20 max-w-[45%] max-h-[55%] aspect-square",
+                ? "w-9 h-9 shrink-0 aspect-square"
+                : isMiniCard
+                  ? "w-14 h-14 shrink-0 aspect-square"
+                  : isFocal 
+                    ? "w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 shrink-0 aspect-square" 
+                    : "w-14 h-14 sm:w-20 sm:h-20 shrink-0 aspect-square",
               "rounded-full overflow-hidden border-2 border-accent-blue/20 shadow-xl transition-all",
               isSpeaking ? "ring-4 ring-accent-blue/40 scale-105" : ""
             )}>
@@ -5873,10 +7745,12 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
           ) : (
             <div className={cn(
               isCompact
-                ? "w-8 h-8 sm:w-9 sm:h-9 max-w-[40%] max-h-[40%] aspect-square text-xs sm:text-sm"
-                : isFocal 
-                  ? "w-20 h-20 sm:w-28 sm:h-28 md:w-32 md:h-32 max-w-[45%] max-h-[55%] aspect-square text-2xl sm:text-4xl" 
-                  : "w-14 h-14 sm:w-20 sm:h-20 max-w-[45%] max-h-[55%] aspect-square text-xl sm:text-2xl",
+                ? "w-9 h-9 shrink-0 aspect-square text-xs sm:text-sm"
+                : isMiniCard
+                  ? "w-14 h-14 shrink-0 aspect-square text-xl"
+                  : isFocal 
+                    ? "w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 shrink-0 aspect-square text-2xl sm:text-4xl" 
+                    : "w-14 h-14 sm:w-20 sm:h-20 shrink-0 aspect-square text-xl sm:text-2xl",
               "rounded-full bg-accent-blue flex items-center justify-center font-bold text-white shadow-xl transition-all",
               isSpeaking ? "ring-4 ring-accent-blue/40 scale-105" : ""
             )}>
@@ -6038,7 +7912,7 @@ function ParticipantItem(props: any) {
   const resolvedLabel = displayName || participant?.identity?.split('#')[0] || "User";
 
   return (
-    <div className="flex items-center justify-between py-2.5 px-3.5 bg-white hover:bg-stone-50/80 transition-colors">
+    <div className="flex items-center justify-between py-3 px-4 bg-white hover:bg-stone-50/80 transition-colors">
       <div className="flex items-center gap-3 min-w-0">
         {avatarUrl ? (
           <img src={avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-neutral-200" referrerPolicy="no-referrer" />
@@ -6048,17 +7922,17 @@ function ParticipantItem(props: any) {
           </div>
         )}
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-medium text-slate-900 truncate">
+          <span className="text-sm font-medium text-slate-900 truncate">
             {resolvedLabel} {isLocal && "(You)"}
           </span>
           {(isHostRole || metadata.isHost === true) && (
             <span title="Host" className="text-amber-600 shrink-0 flex items-center">
-              <Crown size={14} />
+              <Crown size={15} />
             </span>
           )}
           {!(isHostRole || metadata.isHost === true) && isCoHostRole && (
             <span title="Co-host" className="text-emerald-700 shrink-0 flex items-center">
-              <ShieldCheck size={14} />
+              <ShieldCheck size={15} />
             </span>
           )}
         </div>
@@ -6147,8 +8021,46 @@ function TabButton({ active, onClick, icon, badge, title }: any) {
   );
 }
 
-const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript, activeTranscriptNoteId, liveTranscriptions = [], liveInterim = '', onFlushTranscript }: { user: any, navigate: any, autoSaveTranscript: boolean, setAutoSaveTranscript: (v: boolean) => void, activeTranscriptNoteId?: string | null, liveTranscriptions?: Array<{ id: string; identity: string; text: string; timestamp: number }>, liveInterim?: string, onFlushTranscript?: () => Promise<void> | void }) => {
+const NotesPanel = React.memo(({
+  user,
+  roomId,
+  mySpeakerName = 'Speaker',
+  resolveSpeakerName,
+  autoSaveTranscript,
+  setAutoSaveTranscript,
+  liveTranscriptions = [],
+  liveInterim = '',
+  onFlushTranscript,
+  isAiSummarizing = false,
+  aiSummaryStatus,
+  aiSummaryError,
+  lastAiSyncedAt = null,
+  generatedAiNote = '',
+  onUpdateGeneratedAiNote,
+  onSaveAiNoteToCloud,
+  onGenerateAiNote,
+}: {
+  user: any;
+  navigate: any;
+  roomId?: string;
+  mySpeakerName?: string;
+  resolveSpeakerName?: (identity?: string) => string;
+  autoSaveTranscript: boolean;
+  setAutoSaveTranscript: (v: boolean) => void;
+  liveTranscriptions?: Array<{ id: string; identity: string; speaker?: string; timeLabel?: string; text: string; timestamp: number }>;
+  liveInterim?: string;
+  onFlushTranscript?: () => Promise<void> | void;
+  isAiSummarizing?: boolean;
+  aiSummaryStatus?: string | null;
+  aiSummaryError?: string | null;
+  lastAiSyncedAt?: number | null;
+  generatedAiNote?: string;
+  onUpdateGeneratedAiNote?: (val: string) => void;
+  onSaveAiNoteToCloud?: () => Promise<void> | void;
+  onGenerateAiNote?: (formatType: 'summary' | 'action_items' | 'full_notes') => void;
+}) => {
   const { komuLogin, komuUser } = useAuth();
+  const [panelTab, setPanelTab] = useState<'notes' | 'transcript' | 'summary'>('notes');
   const [notes, setNotes] = useState<any[]>([]);
   const [isCreatingNote, setIsCreatingNote] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState("");
@@ -6156,17 +8068,18 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
   const [searchNotesTerm, setSearchNotesTerm] = useState("");
   const [selectedNote, setSelectedNote] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [copiedAiNote, setCopiedAiNote] = useState(false);
+  const [savedCloudFlash, setSavedCloudFlash] = useState(false);
+  const [savedTranscriptFlash, setSavedTranscriptFlash] = useState(false);
+  const isDirtySelectedNoteRef = useRef(false);
 
   const uid = (user || komuUser)?.uid;
 
-  useEffect(() => {
-    if (activeTranscriptNoteId && notes.length > 0 && !selectedNote) {
-      const activeNote = notes.find(n => n.id === activeTranscriptNoteId);
-      if (activeNote) {
-        setSelectedNote(activeNote);
-      }
-    }
-  }, [activeTranscriptNoteId, notes.length, selectedNote]);
+  const formatEntrySpeaker = (rawIdentity?: string) => {
+    if (!rawIdentity || rawIdentity === 'You') return mySpeakerName;
+    if (resolveSpeakerName) return resolveSpeakerName(rawIdentity);
+    return rawIdentity.split('#')[0] || mySpeakerName;
+  };
 
   useEffect(() => {
     if (!uid) return;
@@ -6176,9 +8089,9 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         where('uid', '==', uid),
         where('isTrash', '==', false)
       );
-      
+
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
         data.sort((a: any, b: any) => {
           const tA = a.updatedAt?.toMillis?.() || 0;
           const tB = b.updatedAt?.toMillis?.() || 0;
@@ -6186,10 +8099,11 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         });
         setNotes(data);
 
-        if (selectedNote) {
+        // Only update the currently open note if user isn't actively editing unsaved text
+        if (selectedNote && !isDirtySelectedNoteRef.current) {
           const updatedSelected = data.find(n => n.id === selectedNote.id);
           if (updatedSelected && updatedSelected.body !== selectedNote.body) {
-             setSelectedNote(updatedSelected);
+            setSelectedNote(updatedSelected);
           }
         }
       }, (err) => {
@@ -6210,6 +8124,7 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         body: selectedNote.body,
         updatedAt: serverTimestamp()
       });
+      isDirtySelectedNoteRef.current = false;
     } catch (err) {
       console.error("Failed to update note:", err);
     } finally {
@@ -6225,6 +8140,7 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         title: newNoteTitle,
         body: newNoteBody,
         type: 'text',
+        roomId: roomId || '',
         isArchive: false,
         isTrash: false,
         createdAt: serverTimestamp(),
@@ -6251,6 +8167,7 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
     try {
       await updateDoc(doc(komuDb, 'notes', id), { isTrash, updatedAt: serverTimestamp() });
       if (selectedNote?.id === id) {
+        isDirtySelectedNoteRef.current = false;
         setSelectedNote(null);
       }
     } catch (err) {
@@ -6258,58 +8175,64 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
     }
   };
 
-  if (!user || !komuUser) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-6">
-        <div className="w-16 h-16 bg-stone-100 rounded-2xl flex items-center justify-center text-slate-700 border border-neutral-200/60">
-          <FileText size={32} />
-        </div>
-        <div className="space-y-2">
-           <h3 className="text-lg font-medium text-slate-900 leading-tight">Secure Notes Sync</h3>
-           <p className="text-xs text-slate-500 max-w-[260px] mx-auto leading-relaxed">Access and sync notes directly during your conference. Private and encrypted.</p>
-        </div>
-        <button 
-          onClick={komuLogin}
-          className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-xl shadow-xs transition-all active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <Plus size={16} />
-          <span>{user ? "Link Account" : "Sign in with Google"}</span>
-        </button>
-      </div>
-    );
-  }
-
-  if (selectedNote) {
+  // Note detail view (clean Back navigation — never loops back into a transcript)
+  if (selectedNote && panelTab === 'notes') {
     return (
       <div className="flex flex-col h-full bg-white -m-5 p-5 z-20">
         <div className="flex items-center gap-3 mb-4 sticky top-0 bg-white z-10 pb-3 border-b border-neutral-200/60">
           <button 
-             onClick={() => { handleUpdateNote(); setSelectedNote(null); }} 
-             className="p-2 hover:bg-stone-100 rounded-xl text-slate-500 hover:text-slate-900 transition-colors flex items-center justify-center cursor-pointer"
-             title="Back to list"
+            type="button"
+            onClick={() => {
+              void handleUpdateNote();
+              isDirtySelectedNoteRef.current = false;
+              setSelectedNote(null);
+            }} 
+            className="p-2 hover:bg-stone-100 rounded-xl text-slate-500 hover:text-slate-900 transition-colors flex items-center justify-center cursor-pointer"
+            title="Back to notes list"
           >
             <ArrowLeft size={18} />
           </button>
-          <div className="flex-1">
-             <input 
-                value={selectedNote.title}
-                onChange={(e) => setSelectedNote({...selectedNote, title: e.target.value})}
-                placeholder="Title"
-                className="w-full text-base font-semibold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300"
-                onBlur={handleUpdateNote}
-             />
+          <div className="flex-1 min-w-0">
+            <input 
+              value={selectedNote.title}
+              onChange={(e) => {
+                isDirtySelectedNoteRef.current = true;
+                setSelectedNote({ ...selectedNote, title: e.target.value });
+              }}
+              placeholder="Title"
+              className="w-full text-base font-semibold text-slate-900 bg-transparent border-none outline-none placeholder:text-slate-300"
+              onBlur={() => void handleUpdateNote()}
+            />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button 
-              onClick={handleUpdateNote} 
+              type="button"
+              onClick={() => {
+                const blob = new Blob([`${selectedNote.title || 'Note'}\n\n${selectedNote.body || ''}`], { type: 'text/markdown;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `forum-note-${Date.now()}.md`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="p-2 text-slate-500 hover:text-slate-900 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer"
+              title="Download .md"
+            >
+              <Download size={15} />
+            </button>
+            <button 
+              type="button"
+              onClick={() => void handleUpdateNote()} 
               disabled={isSaving}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl disabled:opacity-50 transition-colors shadow-xs cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl disabled:opacity-50 transition-colors shadow-xs cursor-pointer whitespace-nowrap"
             >
               <Save size={13} />
               <span>{isSaving ? "Saving..." : "Save"}</span>
             </button>
             <button 
-              onClick={() => toggleTrash(selectedNote.id, true)} 
+              type="button"
+              onClick={() => void toggleTrash(selectedNote.id, true)} 
               className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
               title="Delete note"
             >
@@ -6319,192 +8242,415 @@ const NotesPanel = React.memo(({ user, autoSaveTranscript, setAutoSaveTranscript
         </div>
         <textarea 
           value={selectedNote.body}
-          onChange={(e) => setSelectedNote({...selectedNote, body: e.target.value})}
+          onChange={(e) => {
+            isDirtySelectedNoteRef.current = true;
+            setSelectedNote({ ...selectedNote, body: e.target.value });
+          }}
           placeholder="Start writing..."
-          className="flex-1 w-full text-sm text-slate-800 bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-slate-300 custom-scroll"
-          onBlur={handleUpdateNote}
+          className="flex-1 w-full text-sm text-slate-800 bg-transparent border-none outline-none resize-none leading-relaxed placeholder:text-slate-300 custom-scroll font-sans"
+          onBlur={() => void handleUpdateNote()}
         />
         <div className="mt-4 pt-4 border-t border-neutral-200/60 flex items-center justify-between">
-           <span className="text-[10px] text-slate-400 font-medium">
-             Last edited {selectedNote.updatedAt?.toDate() ? format(selectedNote.updatedAt.toDate(), 'PPp') : 'Just now'}
-           </span>
+          <span className="text-[10px] text-slate-400 font-medium">
+            Last edited {selectedNote.updatedAt?.toDate() ? format(selectedNote.updatedAt.toDate(), 'PPp') : 'Just now'}
+          </span>
         </div>
       </div>
     );
   }
 
+  const personalAndSavedNotes = notes.filter((n) => n.type !== 'transcript');
+  const roomTranscriptDoc = notes.find(
+    (n) => n.type === 'transcript' && (!roomId || n.roomId === roomId || n.id.includes(roomId.replace(/[^a-zA-Z0-9_-]/g, '_')))
+  );
+
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="mb-4 space-y-4 shrink-0">
-        <div className="bg-stone-50 rounded-2xl p-4 border border-neutral-200/70 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-stone-200/70 flex items-center justify-center text-slate-700">
-                <Languages size={18} />
+    <div className="flex flex-col h-full min-h-0 space-y-4">
+      {/* Clean 3-Tab Separation: Notes | Transcript (No AI) | Summary (AI) */}
+      <div className="grid grid-cols-3 gap-1 p-1 bg-stone-100 rounded-xl shrink-0">
+        {([
+          { id: 'notes' as const, label: 'Notes' },
+          { id: 'transcript' as const, label: 'Transcript' },
+          { id: 'summary' as const, label: 'AI Summary' },
+        ]).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => {
+              setPanelTab(tab.id);
+              if (tab.id !== 'notes') {
+                isDirtySelectedNoteRef.current = false;
+                setSelectedNote(null);
+              }
+            }}
+            className={cn(
+              "py-2 px-2 rounded-lg text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap truncate",
+              panelTab === tab.id
+                ? "bg-white text-slate-900 shadow-xs"
+                : "text-slate-500 hover:text-slate-800"
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scroll pr-1 space-y-4">
+        {/* TAB 1: PERSONAL NOTES (separate from auto-updating transcripts) */}
+        {panelTab === 'notes' && (
+          <>
+            {!uid ? (
+              <div className="bg-white border border-neutral-200/80 rounded-2xl p-5 text-center space-y-3">
+                <p className="text-sm font-medium text-slate-900">Sync personal notes across meetings</p>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Sign in with Google to save your notes, transcripts, and AI summaries in one place.
+                </p>
+                <button
+                  type="button"
+                  onClick={komuLogin}
+                  className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-medium text-[13px] rounded-xl transition-colors cursor-pointer"
+                >
+                  Sign in with Google
+                </button>
               </div>
-              <div className="flex flex-col">
-                <span className="text-xs font-semibold text-slate-900 leading-none mb-1">Auto-Transcript</span>
-                <span className="text-[10px] text-slate-500 font-normal leading-none">
-                  {autoSaveTranscript ? 'Saving spoken transcript to Notes' : 'Paused'}
+            ) : (
+              <>
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 peer-focus:text-slate-800 transition-colors" size={16} />
+                    <input 
+                      type="text"
+                      placeholder="Search saved notes..."
+                      value={searchNotesTerm}
+                      onChange={(e) => setSearchNotesTerm(e.target.value)}
+                      className="peer w-full pl-10 pr-4 py-2.5 bg-white border border-neutral-200/80 rounded-xl text-sm text-slate-900 focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 outline-none transition-all font-normal placeholder:text-slate-400"
+                    />
+                  </div>
+                  {!isCreatingNote ? (
+                    <button 
+                      type="button"
+                      onClick={() => setIsCreatingNote(true)}
+                      className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white px-4 py-3 rounded-xl hover:bg-slate-800 transition-all font-medium text-[13px] shadow-xs cursor-pointer whitespace-nowrap"
+                    >
+                      <Plus size={16} />
+                      <span>Take a note</span>
+                    </button>
+                  ) : (
+                    <div className="bg-white border border-neutral-200/80 rounded-2xl p-4 shadow-sm space-y-3">
+                      <input 
+                        type="text"
+                        placeholder="Title"
+                        autoFocus
+                        value={newNoteTitle}
+                        onChange={(e) => setNewNoteTitle(e.target.value)}
+                        className="w-full text-sm font-semibold bg-transparent border-none outline-none text-slate-900 placeholder:text-slate-400"
+                      />
+                      <textarea 
+                        placeholder="Take a note..."
+                        value={newNoteBody}
+                        onChange={(e) => setNewNoteBody(e.target.value)}
+                        className="w-full text-[13px] bg-transparent border-none outline-none resize-none min-h-[90px] text-slate-700 placeholder:text-slate-400 leading-relaxed"
+                      />
+                      <div className="flex items-center justify-between pt-2">
+                        <button 
+                          type="button"
+                          onClick={() => { setIsCreatingNote(false); setNewNoteTitle(""); setNewNoteBody(""); }}
+                          className="text-[13px] font-medium text-slate-500 hover:text-slate-800 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="button"
+                          disabled={!newNoteTitle.trim() && !newNoteBody.trim()}
+                          onClick={() => void handleAddNote()}
+                          className="px-4 py-2 bg-slate-900 text-white text-[13px] font-medium rounded-xl hover:bg-slate-800 disabled:opacity-40 transition-all cursor-pointer"
+                        >
+                          Save note
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {personalAndSavedNotes
+                    .filter(n => (n.title || '').toLowerCase().includes(searchNotesTerm.toLowerCase()) || (n.body || '').toLowerCase().includes(searchNotesTerm.toLowerCase()))
+                    .map(note => (
+                      <div 
+                        key={note.id} 
+                        onClick={() => {
+                          isDirtySelectedNoteRef.current = false;
+                          setSelectedNote(note);
+                        }}
+                        className="group p-4 bg-white border border-neutral-200/70 rounded-2xl hover:border-slate-400 hover:shadow-xs transition-all relative cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <h4 className="font-semibold text-slate-900 text-sm truncate">{note.title || "Untitled"}</h4>
+                          {note.type === 'summary' && (
+                            <span className="text-[11px] font-medium text-emerald-800 bg-emerald-50/80 border border-emerald-200/60 px-2 py-0.5 rounded-md shrink-0">
+                              AI Summary
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-slate-600 text-[13px] line-clamp-3 leading-relaxed whitespace-pre-wrap">
+                          {note.body}
+                        </p>
+                        <div className="mt-3 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
+                          <span className="text-xs text-slate-400 font-medium">
+                            {note.updatedAt?.toDate() ? new Date(note.updatedAt.toDate()).toLocaleDateString() : 'Just now'}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button 
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); void toggleArchive(note.id, !note.isArchive); }} 
+                              className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-stone-100 rounded-lg transition-all cursor-pointer"
+                            >
+                              <Archive size={14} />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); void toggleTrash(note.id, true); }} 
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  {personalAndSavedNotes.length === 0 && !isCreatingNote && (
+                    <div className="py-8 flex flex-col items-center justify-center text-center p-6 space-y-2 text-slate-400">
+                      <FileText size={24} />
+                      <p className="text-[13px]">Personal notes and saved meeting summaries appear here.</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* TAB 2: ALWAYS-ON MEETING TRANSCRIPT (NO AI — Pure speech-to-text synced in background to ONE single file) */}
+        {panelTab === 'transcript' && (
+          <div className="bg-white rounded-2xl p-4 border border-neutral-200/80 space-y-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-stone-100 flex items-center justify-center text-slate-700 shrink-0">
+                  <Languages size={17} />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-sm font-semibold text-slate-900 block leading-snug">Meeting Transcript</span>
+                  <span className="text-xs text-slate-500 block leading-snug">
+                    {autoSaveTranscript
+                      ? uid
+                        ? 'Auto-saving in background · 1 single file'
+                        : 'Capturing locally · Auto-downloads on exit'
+                      : 'Transcript paused'}
+                  </span>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setAutoSaveTranscript(!autoSaveTranscript)}
+                className={cn(
+                  "w-10 h-5 rounded-full relative transition-all duration-200 cursor-pointer shrink-0",
+                  autoSaveTranscript ? "bg-emerald-700" : "bg-neutral-300"
+                )}
+                title="Toggle background transcript"
+              >
+                <div className={cn(
+                  "absolute top-1 w-3 h-3 bg-white rounded-full transition-all duration-200",
+                  autoSaveTranscript ? "left-6" : "left-1"
+                )} />
+              </button>
+            </div>
+
+            {(liveTranscriptions.length > 0 || liveInterim || roomTranscriptDoc?.body) ? (
+              <div className="pt-2.5 border-t border-neutral-200/70 space-y-3">
+                <div className="max-h-80 overflow-y-auto custom-scroll space-y-3 text-[13px] text-slate-700 bg-[#FBFBFA] rounded-xl p-3.5 border border-neutral-200/60">
+                  {liveTranscriptions.length > 0 ? (
+                    liveTranscriptions.map((entry) => {
+                      const ts = entry.timeLabel || new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const speakerText = entry.speaker || formatEntrySpeaker(entry.identity);
+                      return (
+                        <div key={entry.id} className="leading-relaxed space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-900">{speakerText}</span>
+                            <span className="text-[11px] font-mono text-slate-400 tabular-nums">{ts}</span>
+                          </div>
+                          <p className="text-slate-700 leading-relaxed">{entry.text}</p>
+                        </div>
+                      );
+                    })
+                  ) : roomTranscriptDoc?.body ? (
+                    <pre className="whitespace-pre-wrap font-sans text-[13px] text-slate-700 leading-relaxed">
+                      {roomTranscriptDoc.body}
+                    </pre>
+                  ) : null}
+                  {liveInterim && (
+                    <div className="leading-relaxed text-slate-400 italic space-y-0.5">
+                      <span className="font-semibold not-italic text-slate-600">{mySpeakerName} (speaking…)</span>
+                      <p>{liveInterim}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  {onFlushTranscript && uid && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await onFlushTranscript();
+                        setSavedTranscriptFlash(true);
+                        setTimeout(() => setSavedTranscriptFlash(false), 1800);
+                      }}
+                      className="text-[13px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                    >
+                      <Save size={13} />
+                      <span>{savedTranscriptFlash ? 'Synced' : 'Sync File Now'}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const textOut = liveTranscriptions.length > 0
+                        ? [
+                            ...liveTranscriptions.map((t) => `[${t.timeLabel || new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] ${t.speaker || formatEntrySpeaker(t.identity)}: ${t.text}`),
+                            ...(liveInterim ? [`[Live] ${mySpeakerName}: ${liveInterim}`] : [])
+                          ].join('\n\n')
+                        : (roomTranscriptDoc?.body || '');
+                      const blob = new Blob([textOut], { type: 'text/plain;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `forum-transcript-${Date.now()}.txt`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="text-[13px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer ml-auto flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <Download size={13} />
+                    <span>Download .txt</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[13px] text-slate-500 leading-relaxed pt-1">
+                Transcript capture stays on automatically in the background whenever participants speak—no AI required, saved cleanly into one file without duplicates.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: AI MEETING SUMMARY (Uses AI — End-of-Meeting or Manual Trigger) */}
+        {panelTab === 'summary' && (
+          <div className="bg-white rounded-2xl p-4 border border-neutral-200/80 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-50/90 border border-emerald-200/70 flex items-center justify-center text-emerald-700 shrink-0">
+                <Bot size={17} />
+              </div>
+              <div className="min-w-0">
+                <span className="text-sm font-semibold text-slate-900 block leading-snug">AI Meeting Summary</span>
+                <span className="text-xs text-slate-500 block leading-snug">
+                  {isAiSummarizing
+                    ? (aiSummaryStatus || 'Creating your summary…')
+                    : lastAiSyncedAt
+                      ? `Saved ${new Date(lastAiSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                      : 'Turns your transcript into a readable recap'}
                 </span>
               </div>
             </div>
-            <button 
-               type="button"
-               onClick={() => setAutoSaveTranscript(!autoSaveTranscript)}
-               className={cn(
-                 "w-10 h-5 rounded-full relative transition-all duration-300 cursor-pointer",
-                 autoSaveTranscript ? "bg-slate-900" : "bg-neutral-300"
-               )}
-            >
-              <div className={cn(
-                "absolute top-1 w-3 h-3 bg-white rounded-full transition-all duration-300",
-                autoSaveTranscript ? "left-6" : "left-1"
-              )} />
-            </button>
-          </div>
-          {(liveTranscriptions.length > 0 || liveInterim) && (
-            <div className="pt-2.5 border-t border-neutral-200/70 space-y-2">
-              <div className="max-h-24 overflow-y-auto custom-scroll space-y-1 text-[11px] text-slate-700 bg-white rounded-xl p-2.5 border border-neutral-200/60">
-                {liveTranscriptions.slice(-5).map((entry) => (
-                  <p key={entry.id} className="leading-snug">
-                    <span className="font-semibold text-slate-900">{entry.identity.split('#')[0]}: </span>
-                    <span>{entry.text}</span>
-                  </p>
-                ))}
-                {liveInterim && (
-                  <p className="leading-snug text-slate-400 italic">
-                    <span className="font-semibold not-italic text-slate-600">You: </span>
-                    <span>{liveInterim}</span>
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                {onFlushTranscript && (
-                  <button
-                    type="button"
-                    onClick={() => { void onFlushTranscript(); }}
-                    className="text-[11px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer"
-                  >
-                    Sync to Notes
-                  </button>
-                )}
+
+            {onGenerateAiNote && (
+              <div className="space-y-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    const textOut = [
-                      ...liveTranscriptions.map((t) => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.identity.split('#')[0]}: ${t.text}`),
-                      ...(liveInterim ? [`[Live] You: ${liveInterim}`] : [])
-                    ].join('\n');
-                    const blob = new Blob([textOut], { type: 'text/plain;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `forum-transcript-${Date.now()}.txt`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  className="text-[11px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer ml-auto flex items-center gap-1"
+                  disabled={isAiSummarizing}
+                  onClick={() => onGenerateAiNote('summary')}
+                  className="w-full py-2.5 px-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[13px] font-medium transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap"
                 >
-                  <Download size={12} />
-                  <span>Download .txt</span>
+                  {isAiSummarizing ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                  <span>{isAiSummarizing ? 'Writing Recap…' : 'Write Meeting Recap'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isAiSummarizing}
+                  onClick={() => onGenerateAiNote('action_items')}
+                  className="w-full py-2.5 px-3.5 bg-[#FBFBFA] hover:bg-stone-100 text-slate-700 border border-neutral-200/80 rounded-xl text-[13px] font-medium transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap"
+                >
+                  <CheckCheck size={14} />
+                  <span>Extract Tasks & Next Steps</span>
                 </button>
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 peer-focus:text-slate-800 transition-colors" size={16} />
-          <input 
-            type="text"
-            placeholder="Search notes..."
-            value={searchNotesTerm}
-            onChange={(e) => setSearchNotesTerm(e.target.value)}
-            className="peer w-full pl-10 pr-4 py-2.5 bg-stone-50 border border-neutral-200/80 rounded-xl text-sm text-slate-900 focus:ring-1 focus:ring-slate-400 focus:bg-white focus:border-slate-400 outline-none transition-all font-normal placeholder:text-slate-400"
-          />
-        </div>
-        {!isCreatingNote ? (
-          <button 
-            onClick={() => setIsCreatingNote(true)}
-            className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white px-4 py-3 rounded-xl hover:bg-slate-800 transition-all font-medium text-xs shadow-xs cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Take a note</span>
-          </button>
-        ) : (
-          <div className="bg-white border border-neutral-200/80 rounded-2xl p-4 shadow-sm space-y-3">
-            <input 
-              type="text"
-              placeholder="Title"
-              autoFocus
-              value={newNoteTitle}
-              onChange={(e) => setNewNoteTitle(e.target.value)}
-              className="w-full text-sm font-semibold bg-transparent border-none outline-none text-slate-900 placeholder:text-slate-400"
-            />
-            <textarea 
-              placeholder="Take a note..."
-              value={newNoteBody}
-              onChange={(e) => setNewNoteBody(e.target.value)}
-              className="w-full text-xs bg-transparent border-none outline-none resize-none min-h-[90px] text-slate-700 placeholder:text-slate-400 leading-relaxed"
-            />
-            <div className="flex items-center justify-between pt-2">
-               <button 
-                onClick={() => { setIsCreatingNote(false); setNewNoteTitle(""); setNewNoteBody(""); }}
-                className="text-xs font-medium text-slate-500 hover:text-slate-800 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button 
-                disabled={!newNoteTitle.trim() && !newNoteBody.trim()}
-                onClick={handleAddNote}
-                className="px-4 py-2 bg-slate-900 text-white text-xs font-medium rounded-xl hover:bg-slate-800 disabled:opacity-40 transition-all cursor-pointer"
-              >
-                Save note
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="flex-1 space-y-3 overflow-y-auto custom-scroll pr-1">
-        {notes
-          .filter(n => n.title.toLowerCase().includes(searchNotesTerm.toLowerCase()) || n.body.toLowerCase().includes(searchNotesTerm.toLowerCase()))
-          .map(note => (
-          <div 
-            key={note.id} 
-            onClick={() => setSelectedNote(note)}
-            className="group p-4 bg-white border border-neutral-200/70 rounded-2xl hover:border-slate-400 hover:shadow-xs transition-all relative cursor-pointer"
-          >
-            <h4 className="font-semibold text-slate-900 text-xs mb-1">{note.title || "Untitled"}</h4>
-            <p className="text-slate-600 text-xs line-clamp-3 leading-relaxed whitespace-pre-wrap">
-              {note.body}
-            </p>
-            <div className="mt-3 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
-              <span className="text-[10px] text-slate-400 font-medium">
-                {note.updatedAt?.toDate() ? new Date(note.updatedAt.toDate()).toLocaleDateString() : 'Just now'}
-              </span>
-              <div className="flex items-center gap-1">
-                <button 
-                  onClick={(e) => { e.stopPropagation(); toggleArchive(note.id, !note.isArchive); }} 
-                  className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-stone-100 rounded-lg transition-all cursor-pointer"
-                >
-                  <Archive size={14} />
-                </button>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); toggleTrash(note.id, true); }} 
-                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
-                >
-                  <Trash2 size={14} />
-                </button>
+            {aiSummaryError && (
+              <div className="p-3 bg-rose-50/70 border border-rose-200/70 rounded-xl space-y-2">
+                <p className="text-xs text-rose-700 leading-snug">{aiSummaryError}</p>
+                <SendErrorFeedbackButton errorMessage={aiSummaryError} source="AI Meeting Summary" />
               </div>
-            </div>
-          </div>
-        ))}
-        {notes.length === 0 && !isCreatingNote && (
-          <div className="h-40 flex flex-col items-center justify-center text-center p-6 space-y-3 text-slate-400">
-            <FileText size={28} />
-            <p className="text-xs">Your saved notes will appear here.</p>
+            )}
+
+            {generatedAiNote ? (
+              <div className="space-y-3 pt-2 border-t border-neutral-200/60">
+                <textarea
+                  rows={10}
+                  value={generatedAiNote}
+                  onChange={(e) => onUpdateGeneratedAiNote?.(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-[#FBFBFA] border border-neutral-200/80 text-[13px] text-slate-800 leading-relaxed resize-y focus:outline-none focus:ring-1 focus:ring-emerald-700/50 custom-scroll"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(generatedAiNote).catch(() => {});
+                        setCopiedAiNote(true);
+                        setTimeout(() => setCopiedAiNote(false), 1800);
+                      }}
+                      className="text-[13px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                    >
+                      {copiedAiNote ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
+                      <span>{copiedAiNote ? 'Copied' : 'Copy'}</span>
+                    </button>
+                    {onSaveAiNoteToCloud && uid && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await onSaveAiNoteToCloud();
+                          setSavedCloudFlash(true);
+                          setTimeout(() => setSavedCloudFlash(false), 1800);
+                        }}
+                        className="text-[13px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                      >
+                        <Save size={13} />
+                        <span>{savedCloudFlash ? 'Saved' : 'Save Summary'}</span>
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const blob = new Blob([generatedAiNote], { type: 'text/markdown;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `forum-ai-summary-${Date.now()}.md`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="text-[13px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <Download size={13} />
+                    <span>Download .md</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[13px] text-slate-500 leading-relaxed pt-1">
+                Whenever you want a recap (best at the end of your meeting), choose an option above to turn the transcript into a clean summary or list of follow-up tasks.
+              </p>
+            )}
           </div>
         )}
       </div>

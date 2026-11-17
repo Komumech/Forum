@@ -308,50 +308,36 @@ export function useAIVideoAutoEnhancer(
           diagnosis = 'Balanced lighting & healthy skin tone calibration active.';
         }
 
-        setAutoState(prev => ({
-          ...prev,
-          condition,
-          diagnosis,
-          dynamicBrightness: Math.round(prev.dynamicBrightness * 0.7 + targetBrightness * 0.3),
-          dynamicContrast: Math.round(prev.dynamicContrast * 0.7 + targetContrast * 0.3),
-          dynamicSaturation: Math.round(prev.dynamicSaturation * 0.7 + targetSaturation * 0.3),
-          dynamicWarmth: Math.round(prev.dynamicWarmth * 0.7 + targetWarmth * 0.3),
-          dynamicShadowLift: Math.round(prev.dynamicShadowLift * 0.7 + targetShadowLift * 0.3),
-          lastAnalyzedAt: Date.now(),
-        }));
+        setAutoState((prev) => {
+          const nextBrightness = Math.round(prev.dynamicBrightness * 0.7 + targetBrightness * 0.3);
+          const nextContrast = Math.round(prev.dynamicContrast * 0.7 + targetContrast * 0.3);
+          const nextSaturation = Math.round(prev.dynamicSaturation * 0.7 + targetSaturation * 0.3);
+          const nextWarmth = Math.round(prev.dynamicWarmth * 0.7 + targetWarmth * 0.3);
+          const nextShadowLift = Math.round(prev.dynamicShadowLift * 0.7 + targetShadowLift * 0.3);
 
-        const now = Date.now();
-        if (now - lastGeminiCallRef.current > 20000 && (condition === 'lowlight' || condition === 'backlit' || condition === 'warm_cast' || condition === 'cool_cast')) {
-          lastGeminiCallRef.current = now;
-          const snapshotBase64 = canvas.toDataURL('image/jpeg', 0.6);
-          fetch('/api/ai/analyze-feed', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              imageBase64: snapshotBase64,
-              currentBrightness: targetBrightness,
-              currentContrast: targetContrast,
-            })
-          })
-          .then(res => res.json())
-          .then(data => {
-            if (data?.enhancements) {
-              const e = data.enhancements;
-              setAutoState(prev => ({
-                ...prev,
-                diagnosis: e.diagnosis || prev.diagnosis,
-                dynamicBrightness: e.brightness || prev.dynamicBrightness,
-                dynamicContrast: e.contrast || prev.dynamicContrast,
-                dynamicSaturation: e.saturation || prev.dynamicSaturation,
-                dynamicWarmth: e.warmth ?? prev.dynamicWarmth,
-                dynamicShadowLift: e.shadowLift ?? prev.dynamicShadowLift,
-              }));
-            }
-          })
-          .catch(err => {
-            console.debug('[AI Auto-Enhance] Deep scene analysis:', err);
-          });
-        }
+          if (
+            prev.condition === condition &&
+            prev.dynamicBrightness === nextBrightness &&
+            prev.dynamicContrast === nextContrast &&
+            prev.dynamicSaturation === nextSaturation &&
+            prev.dynamicWarmth === nextWarmth &&
+            prev.dynamicShadowLift === nextShadowLift
+          ) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            condition,
+            diagnosis,
+            dynamicBrightness: nextBrightness,
+            dynamicContrast: nextContrast,
+            dynamicSaturation: nextSaturation,
+            dynamicWarmth: nextWarmth,
+            dynamicShadowLift: nextShadowLift,
+            lastAnalyzedAt: Date.now(),
+          };
+        });
       } catch (err) {
         console.debug('[AI Auto-Enhance] Loop debug:', err);
       }

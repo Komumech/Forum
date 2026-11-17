@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import {
   Shield, Users, Radio, CircleDot, LayoutGrid, ChevronRight, ChevronLeft,
   Copy, Check, Key, Mic, VideoOff, VolumeX, MoreHorizontal, PhoneOff,
-  Square, Pause, Play, Download, AlertCircle, Loader2
+  Square, Pause, Play, Download, AlertCircle, Loader2, Layers
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import CustomDropdown from './CustomDropdown';
+import { SendErrorFeedbackButton } from './ErrorFeedbackModal';
 
 export interface ParticipantItem {
   identity: string;
@@ -75,6 +76,9 @@ interface HostControlsPanelProps {
   onStopRecording: () => void;
   onEndMeetingForAll: () => void;
   onOpenBreakoutRoomsTab: () => void;
+  autoDownloadRecording?: boolean;
+  onToggleAutoDownloadRecording?: (auto: boolean) => void;
+  onOpenStageMediaTab?: () => void;
 }
 
 const STREAM_PRESETS: Record<string, string> = {
@@ -158,7 +162,10 @@ export default function HostControlsPanel({
   onResumeRecording,
   onStopRecording,
   onEndMeetingForAll,
-  onOpenBreakoutRoomsTab
+  onOpenBreakoutRoomsTab,
+  autoDownloadRecording = false,
+  onToggleAutoDownloadRecording,
+  onOpenStageMediaTab
 }: HostControlsPanelProps) {
   const [section, setSection] = useState<HostSection>('home');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -639,6 +646,19 @@ export default function HostControlsPanel({
               </div>
             )}
 
+            {onToggleAutoDownloadRecording && (
+              <div className="pt-4 border-t border-neutral-200/70 flex items-center justify-between gap-4">
+                <div className="space-y-0.5 pr-2">
+                  <span className="text-xs font-medium text-slate-900 block">Auto-download on leave or end</span>
+                  <p className="text-[11px] text-slate-500">Save recording file automatically when ending call or closing tab</p>
+                </div>
+                <ToggleSwitch
+                  checked={autoDownloadRecording}
+                  onChange={() => onToggleAutoDownloadRecording(!autoDownloadRecording)}
+                />
+              </div>
+            )}
+
             {latestRecording && recordingStatus === 'idle' && (
               <div className="pt-4 border-t border-neutral-200/70 space-y-3">
                 <div className="flex items-center justify-between text-xs">
@@ -691,9 +711,12 @@ export default function HostControlsPanel({
         {section === 'streaming' && isHost && (
           <div className="space-y-4">
             {streamError && (
-              <div className="p-3 bg-rose-50 border border-rose-200/70 rounded-xl text-rose-700 text-xs flex items-start gap-2">
-                <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                <span>{streamError}</span>
+              <div className="p-3 bg-rose-50 border border-rose-200/70 rounded-xl text-rose-700 text-xs flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{streamError}</span>
+                </div>
+                <SendErrorFeedbackButton errorMessage={streamError} source="Live Stream Controls" />
               </div>
             )}
 
@@ -910,6 +933,20 @@ export default function HostControlsPanel({
               {isStreaming && <span className="text-[11px] font-medium text-emerald-700">Live</span>}
               <ChevronRight size={15} className="text-slate-300" />
             </div>
+          </button>
+        )}
+
+        {onOpenStageMediaTab && (
+          <button
+            type="button"
+            onClick={onOpenStageMediaTab}
+            className="w-full px-4 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-stone-50 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <Layers size={17} className="text-slate-500 shrink-0" />
+              <span className="text-xs font-medium text-slate-800 truncate">Media & Stage Templates</span>
+            </div>
+            <ChevronRight size={15} className="text-slate-300 shrink-0" />
           </button>
         )}
 

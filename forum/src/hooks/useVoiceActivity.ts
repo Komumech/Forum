@@ -12,12 +12,14 @@ export interface VoiceActivityState {
  * Directly taps into the MediaStreamTrack with Web Audio API AnalyserNode
  * to provide instantaneous, buttery smooth 60 FPS voice animations on participant tiles.
  */
+const IDLE_VOICE_STATE: VoiceActivityState = {
+  isSpeaking: false,
+  volume: 0,
+  bars: [0.15, 0.2, 0.15],
+};
+
 export function useVoiceActivity(participant?: Participant | null): VoiceActivityState {
-  const [activity, setActivity] = useState<VoiceActivityState>({
-    isSpeaking: false,
-    volume: 0,
-    bars: [0.1, 0.1, 0.1],
-  });
+  const [activity, setActivity] = useState<VoiceActivityState>(IDLE_VOICE_STATE);
 
   const animFrameRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -26,7 +28,7 @@ export function useVoiceActivity(participant?: Participant | null): VoiceActivit
 
   useEffect(() => {
     if (!participant) {
-      setActivity({ isSpeaking: false, volume: 0, bars: [0.1, 0.1, 0.1] });
+      setActivity((prev) => (!prev.isSpeaking && prev.volume === 0 ? prev : IDLE_VOICE_STATE));
       return;
     }
 
@@ -35,7 +37,7 @@ export function useVoiceActivity(participant?: Participant | null): VoiceActivit
     const mediaStreamTrack = audioTrackPub?.track?.mediaStreamTrack;
 
     if (!mediaStreamTrack || mediaStreamTrack.readyState !== 'live' || !participant.isMicrophoneEnabled) {
-      setActivity({ isSpeaking: false, volume: 0, bars: [0.1, 0.1, 0.1] });
+      setActivity((prev) => (!prev.isSpeaking && prev.volume === 0 ? prev : IDLE_VOICE_STATE));
       return;
     }
 
@@ -63,13 +65,15 @@ export function useVoiceActivity(participant?: Participant | null): VoiceActivit
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       let smoothVol = 0;
+      let lastEmitTime = 0;
+      let lastSpeaking = false;
+      let lastVolume = 0;
 
       const checkAudio = () => {
         if (isDestroyed) return;
 
         analyser.getByteFrequencyData(dataArray);
 
-        // Compute RMS energy
         let sum = 0;
         let lowEnergy = 0;
         let midEnergy = 0;
@@ -91,20 +95,32 @@ export function useVoiceActivity(participant?: Participant | null): VoiceActivit
         const rms = Math.sqrt(sum / binCount);
         const rawVol = Math.min(100, Math.round((rms / 128) * 100));
 
-        // Smooth volume interpolation
         smoothVol = smoothVol * 0.7 + rawVol * 0.3;
         const normalizedVol = Math.round(smoothVol);
         const isSpeakingNow = normalizedVol > 10;
 
-        const bar1 = Math.max(0.15, Math.min(1, (lowEnergy / (binCount * 0.33 * 220))));
-        const bar2 = Math.max(0.2, Math.min(1, (midEnergy / (binCount * 0.33 * 200))));
-        const bar3 = Math.max(0.15, Math.min(1, (highEnergy / (binCount * 0.33 * 180))));
+        const now = performance.now();
+        const speakingChanged = isSpeakingNow !== lastSpeaking;
+        const volumeChanged = Math.abs(normalizedVol - lastVolume) >= 3;
 
-        setActivity({
-          isSpeaking: isSpeakingNow,
-          volume: normalizedVol,
-          bars: isSpeakingNow ? [bar1, bar2, bar3] : [0.15, 0.2, 0.15],
-        });
+        if ((speakingChanged || volumeChanged || isSpeakingNow) && now - lastEmitTime >= 150) {
+          lastEmitTime = now;
+          lastSpeaking = isSpeakingNow;
+          lastVolume = normalizedVol;
+
+          if (!isSpeakingNow && normalizedVol < 3) {
+            setActivity((prev) => (!prev.isSpeaking && prev.volume === 0 ? prev : IDLE_VOICE_STATE));
+          } else {
+            const bar1 = Math.max(0.15, Math.min(1, lowEnergy / (binCount * 0.33 * 220)));
+            const bar2 = Math.max(0.2, Math.min(1, midEnergy / (binCount * 0.33 * 200)));
+            const bar3 = Math.max(0.15, Math.min(1, highEnergy / (binCount * 0.33 * 180)));
+            setActivity({
+              isSpeaking: isSpeakingNow,
+              volume: normalizedVol,
+              bars: isSpeakingNow ? [bar1, bar2, bar3] : IDLE_VOICE_STATE.bars,
+            });
+          }
+        }
 
         animFrameRef.current = requestAnimationFrame(checkAudio);
       };

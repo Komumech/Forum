@@ -1,4 +1,4 @@
-import { renderInviteOgPng } from './_inviteHelper.js';
+import { renderInviteOgPng } from './_inviteHelper';
 
 export default async function handler(req: any, res: any) {
   const rawId = req?.query?.id || '';

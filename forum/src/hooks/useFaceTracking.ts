@@ -41,8 +41,8 @@ export function useFaceTracking(
 
   useEffect(() => {
     if (!enabled || !trackRef?.publication?.track?.mediaStreamTrack) {
-      setFacePosition({ x: 50, y: 50, width: 35, height: 40 });
-      setSpotlightIntensity(0);
+      setFacePosition((prev) => (prev.x === 50 && prev.y === 50 ? prev : { x: 50, y: 50, width: 35, height: 40 }));
+      setSpotlightIntensity((prev) => (prev === 0 ? prev : 0));
       return;
     }
 
@@ -53,13 +53,11 @@ export function useFaceTracking(
 
     let isDestroyed = false;
 
-    // Sampling video element
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
     video.autoplay = true;
 
-    // Fast sampling offscreen canvas (64x48)
     const canvas = document.createElement('canvas');
     const width = 64;
     const height = 48;
@@ -71,7 +69,9 @@ export function useFaceTracking(
     video.srcObject = stream;
     video.play().catch(() => {});
 
-    // Detection loop running at ~8 FPS (125ms)
+    let lastLumaEmit = 0;
+
+    // Detection loop running at ~4 FPS (250ms)
     const detectFace = async () => {
       if (isDestroyed || !video.videoWidth || !video.videoHeight || !ctx) return;
 
@@ -89,7 +89,6 @@ export function useFaceTracking(
 
         const pixelCount = width * height;
 
-        // 1. Scan pixels for human skin tones & calculate overall frame brightness
         for (let y = 0; y < height; y++) {
           const verticalWeight = y < height * 0.75 ? 1.2 : 0.6;
 
@@ -102,7 +101,6 @@ export function useFaceTracking(
             const lum = 0.299 * r + 0.587 * g + 0.114 * b;
             totalFrameLuma += lum;
 
-            // Skin chrominance model
             const isSkin =
               r > 60 &&
               g > 35 &&
@@ -125,7 +123,6 @@ export function useFaceTracking(
         }
 
         const avgFrameLuma = Math.round(totalFrameLuma / pixelCount);
-        setFrameLuma(avgFrameLuma);
 
         let detectedCenterX = 50;
         let detectedCenterY = 45;
@@ -140,7 +137,13 @@ export function useFaceTracking(
           avgFaceLuma = Math.round(facePixelLumaSum / Math.max(1, facePixelCount));
         }
 
-        setFaceLuma(avgFaceLuma);
+        const now = performance.now();
+        if (now - lastLumaEmit >= 500) {
+          lastLumaEmit = now;
+          setFrameLuma((prev) => (Math.abs(prev - avgFrameLuma) >= 4 ? avgFrameLuma : prev));
+          setFaceLuma((prev) => (Math.abs(prev - avgFaceLuma) >= 4 ? avgFaceLuma : prev));
+        }
+
         targetPosRef.current = {
           x: detectedCenterX,
           y: detectedCenterY,
@@ -148,14 +151,10 @@ export function useFaceTracking(
           height: 42,
         };
 
-        // If the user's face is dark (<130) or backlit (face is significantly darker than frame),
-        // activate the AI studio face illumination spotlight!
         let intensity = 0;
         if (avgFaceLuma < 125) {
-          // Low light face boost: up to 0.45 intensity
           intensity = Math.min(0.48, ((125 - avgFaceLuma) / 100) * 0.55 + 0.12);
         } else if (avgFrameLuma > avgFaceLuma + 18) {
-          // Backlit face lift
           intensity = Math.min(0.42, ((avgFrameLuma - avgFaceLuma) / 80) * 0.45);
         }
 
@@ -165,9 +164,9 @@ export function useFaceTracking(
       }
     };
 
-    intervalRef.current = window.setInterval(detectFace, 125);
+    intervalRef.current = window.setInterval(detectFace, 250);
 
-    // 60 FPS smooth interpolation
+    let lastFrameEmit = 0;
     const smoothUpdate = () => {
       if (isDestroyed) return;
 
@@ -185,17 +184,17 @@ export function useFaceTracking(
       currentSpotlightRef.current = nextSpot;
       currentPosRef.current = { ...cur, x: nextX, y: nextY };
 
-      if (Math.abs(nextX - cur.x) > 0.05 || Math.abs(nextY - cur.y) > 0.05) {
-        setFacePosition({
-          x: Math.round(nextX * 10) / 10,
-          y: Math.round(nextY * 10) / 10,
-          width: 36,
-          height: 42,
-        });
-      }
-
-      if (Math.abs(nextSpot - curSpot) > 0.005) {
-        setSpotlightIntensity(nextSpot);
+      const now = performance.now();
+      if (now - lastFrameEmit >= 180) {
+        lastFrameEmit = now;
+        const roundedX = Math.round(nextX * 10) / 10;
+        const roundedY = Math.round(nextY * 10) / 10;
+        setFacePosition((prev) =>
+          Math.abs(roundedX - prev.x) > 0.8 || Math.abs(roundedY - prev.y) > 0.8
+            ? { x: roundedX, y: roundedY, width: 36, height: 42 }
+            : prev
+        );
+        setSpotlightIntensity((prev) => (Math.abs(nextSpot - prev) > 0.03 ? nextSpot : prev));
       }
 
       animFrameRef.current = requestAnimationFrame(smoothUpdate);

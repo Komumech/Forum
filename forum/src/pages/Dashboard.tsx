@@ -9,7 +9,7 @@ import {
   Copy, Check, Monitor, ChevronLeft, Calendar as CalendarIcon,
   Filter, Grid, List as ListIcon, Trash2, Edit2, Menu,
   Paperclip, FolderUp, ArrowUpRight, Download, Send, Share2, Sparkles, Layers,
-  FileCheck, HardDrive, ShieldCheck, ArrowRight, Upload, Mail
+  FileCheck, HardDrive, ShieldCheck, ArrowRight, Upload, Mail, Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +28,7 @@ import {
   triggerForumPushNotification
 } from '../utils/pushNotifications';
 import MeetingCanvas from '../components/MeetingCanvas';
+import { SendErrorFeedbackButton } from '../components/ErrorFeedbackModal';
 import ClipsBasic from '../components/ClipsBasic';
 
 interface Meeting {
@@ -109,6 +110,69 @@ function compressCoverImageFile(file: File): Promise<string> {
   });
 }
 
+type UserPresenceStatus = 'available' | 'away' | 'busy' | 'in_meeting' | 'offline';
+
+function getPresenceMeta(
+  rawStatus?: string,
+  isOnline?: boolean,
+  lastSeen?: string,
+  inMeetingHeartbeat?: number | null
+): { label: string; dotClass: string } {
+  let normalized = rawStatus || (isOnline ? 'available' : 'offline');
+  if (normalized === 'in_meeting') {
+    const now = Date.now();
+    const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0;
+    const isStale =
+      isOnline === false ||
+      (typeof inMeetingHeartbeat === 'number' && inMeetingHeartbeat > 0
+        ? now - inMeetingHeartbeat > 120_000
+        : lastSeenMs > 0 && now - lastSeenMs > 180_000);
+    if (isStale) {
+      normalized = isOnline ? 'available' : 'offline';
+    }
+  }
+  switch (normalized) {
+    case 'in_meeting':
+      return { label: 'In meeting', dotClass: 'bg-amber-500' };
+    case 'busy':
+      return { label: 'Busy', dotClass: 'bg-rose-500' };
+    case 'away':
+      return { label: 'Away', dotClass: 'bg-amber-400' };
+    case 'offline':
+      return { label: 'Offline', dotClass: 'bg-slate-300' };
+    case 'available':
+    default:
+      return { label: 'Available', dotClass: 'bg-emerald-500' };
+  }
+}
+
+function playNotificationChime() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const playTone = (freq: number, start: number, dur: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.06, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + dur);
+    };
+    playTone(659.25, now, 0.18);
+    playTone(880, now + 0.11, 0.25);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch {
+    // Ignore autoplay errors
+  }
+}
+
 enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -154,7 +218,11 @@ export default function Dashboard() {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [fileTransferCopied, setFileTransferCopied] = useState(false);
   const [meetingSubTab, setMeetingSubTab] = useState<'upcoming' | 'previous' | 'recordings'>('upcoming');
-  const [userStatus, setUserStatus] = useState<'available' | 'away' | 'busy' | 'offline'>('available');
+  const [userStatus, setUserStatus] = useState<UserPresenceStatus>('available');
+  const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
+  const [contactStatuses, setContactStatuses] = useState<Record<string, { status: string; isOnline?: boolean; lastSeen?: string; inMeetingHeartbeat?: number | null }>>({});
+  const [liveNotificationAlert, setLiveNotificationAlert] = useState<{ title: string; body: string; url?: string } | null>(null);
+  const liveAlertTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isJoinMeetingModalOpen, setIsJoinMeetingModalOpen] = useState(false);
   const [isScheduling, setIsScheduling] = useState(false);
@@ -202,6 +270,26 @@ export default function Dashboard() {
   useEffect(() => {
     registerForumServiceWorker();
     setNotifPermission(getNotificationSupportStatus());
+
+    const handleForumNotification = (event: Event) => {
+      const detail = (event as CustomEvent<{ title?: string; body?: string; url?: string }>).detail;
+      if (!detail?.title) return;
+      setLiveNotificationAlert({
+        title: detail.title,
+        body: detail.body || '',
+        url: detail.url,
+      });
+      if (liveAlertTimerRef.current) clearTimeout(liveAlertTimerRef.current);
+      liveAlertTimerRef.current = setTimeout(() => {
+        setLiveNotificationAlert(null);
+      }, 8000);
+    };
+
+    window.addEventListener('forum:notification', handleForumNotification);
+    return () => {
+      window.removeEventListener('forum:notification', handleForumNotification);
+      if (liveAlertTimerRef.current) clearTimeout(liveAlertTimerRef.current);
+    };
   }, []);
 
   // Support deep links to Calendar tabs and pending invite auto-calendar sync
@@ -293,13 +381,69 @@ export default function Dashboard() {
     lastScrollTop.current = scrollTop;
   };
 
+  // Flush any pending transcript saved locally during an abrupt tab close
+  useEffect(() => {
+    if (!user?.uid) return;
+    try {
+      const raw = localStorage.getItem('forum_pending_transcript_sync_v1');
+      if (!raw) return;
+      const pending = JSON.parse(raw);
+      if (!pending || typeof pending !== 'object') return;
+      const entries = Object.values(pending) as Array<{
+        docId: string;
+        uid: string;
+        title: string;
+        body: string;
+        roomId: string;
+      }>;
+      const mine = entries.filter((e) => e && e.uid === user.uid && e.docId && e.body);
+      if (mine.length === 0) return;
+
+      void Promise.all(
+        mine.map((item) =>
+          setDoc(
+            doc(komuDb, 'notes', item.docId),
+            {
+              uid: item.uid,
+              title: item.title,
+              body: item.body,
+              type: 'transcript',
+              roomId: item.roomId || '',
+              isArchive: false,
+              isTrash: false,
+              updatedAt: serverTimestamp(),
+              color: '#ffffff',
+            },
+            { merge: true }
+          )
+        )
+      )
+        .then(() => {
+          const remaining = { ...pending };
+          mine.forEach((item) => {
+            delete remaining[item.docId];
+          });
+          if (Object.keys(remaining).length === 0) {
+            localStorage.removeItem('forum_pending_transcript_sync_v1');
+          } else {
+            localStorage.setItem('forum_pending_transcript_sync_v1', JSON.stringify(remaining));
+          }
+        })
+        .catch(() => {});
+    } catch {}
+  }, [user?.uid]);
+
   useEffect(() => {
     if (!user) return;
     notifsHydratedRef.current = false;
     loadedNotifIdsRef.current.clear();
-    const q = query(collection(db, 'notifications'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'notifications'), where('userId', '==', user.uid));
     return onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      const list = (snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[]).sort((a, b) => {
+        const tA = a.createdAt?.toMillis?.() || 0;
+        const tB = b.createdAt?.toMillis?.() || 0;
+        return tB - tA;
+      });
       if (!notifsHydratedRef.current) {
         list.forEach(item => loadedNotifIdsRef.current.add(item.id));
         notifsHydratedRef.current = true;
@@ -308,13 +452,30 @@ export default function Dashboard() {
           if (!loadedNotifIdsRef.current.has(item.id)) {
             loadedNotifIdsRef.current.add(item.id);
             const prefs = getPushPreferences();
-            if (!item.read && prefs.enabled && prefs.inviteAlerts) {
-              void triggerForumPushNotification({
-                title: item.title || 'Forum Notification',
-                body: item.message || 'You have a new update in Forum',
-                url: item.roomId ? `/invite/${item.roomId}` : '/dashboard',
-                tag: `notif-${item.id}`
-              });
+            if (!item.read) {
+              if (prefs.enabled) {
+                playNotificationChime();
+              }
+              if (prefs.inviteAlerts) {
+                const payload = {
+                  title: item.title || 'Forum Notification',
+                  body: item.message || 'You have a new update in Forum',
+                  url: item.roomId ? `/invite/${item.roomId}` : '/dashboard',
+                  tag: `notif-${item.id}`
+                };
+                setLiveNotificationAlert({
+                  title: payload.title,
+                  body: payload.body,
+                  url: payload.url,
+                });
+                if (liveAlertTimerRef.current) clearTimeout(liveAlertTimerRef.current);
+                liveAlertTimerRef.current = setTimeout(() => {
+                  setLiveNotificationAlert(null);
+                }, 8000);
+                if (prefs.enabled) {
+                  void triggerForumPushNotification(payload);
+                }
+              }
             }
           }
         });
@@ -398,11 +559,26 @@ export default function Dashboard() {
       setSettings(JSON.parse(savedSettings));
     }
 
-    // Fetch user profile for status
-    const profileUnsubscribe = onSnapshot(doc(db, 'userProfiles', user.uid), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        if (data.status) setUserStatus(data.status);
+    // Fetch user profile for status — if user is on Dashboard, they are never stuck in_meeting
+    const profileUnsubscribe = onSnapshot(doc(db, 'userProfiles', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.status === 'in_meeting') {
+          const restored =
+            data.previousStatus && data.previousStatus !== 'in_meeting' && data.previousStatus !== 'offline'
+              ? data.previousStatus
+              : 'available';
+          setUserStatus(restored);
+          setDoc(doc(db, 'userProfiles', user.uid), {
+            status: restored,
+            isOnline: true,
+            currentRoomId: null,
+            inMeetingHeartbeat: null,
+            lastSeen: new Date().toISOString()
+          }, { merge: true }).catch(() => {});
+        } else if (data.status) {
+          setUserStatus(data.status);
+        }
       }
     });
 
@@ -536,6 +712,61 @@ export default function Dashboard() {
     return () => unsubscribe();
   }, [user]);
 
+  // Subscribe to real-time presence statuses for Contacts from userProfiles
+  useEffect(() => {
+    if (!user || contacts.length === 0) {
+      setContactStatuses({});
+      return;
+    }
+    const emails = Array.from(
+      new Set(
+        contacts
+          .map((c) => (c.email || '').trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    if (emails.length === 0) return;
+
+    const chunks: string[][] = [];
+    for (let i = 0; i < emails.length; i += 10) {
+      chunks.push(emails.slice(i, i + 10));
+    }
+
+    const chunkMaps: Record<number, Record<string, { status: string; isOnline?: boolean; lastSeen?: string; inMeetingHeartbeat?: number | null }>> = {};
+    const unsubs = chunks.map((chunk, chunkIdx) => {
+      const q = query(collection(db, 'userProfiles'), where('email', 'in', chunk));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          const nextChunk: Record<string, { status: string; isOnline?: boolean; lastSeen?: string; inMeetingHeartbeat?: number | null }> = {};
+          snapshot.docs.forEach((d) => {
+            const data = d.data();
+            const key = (data.email || '').trim().toLowerCase();
+            if (key) {
+              nextChunk[key] = {
+                status: data.status || (data.isOnline ? 'available' : 'offline'),
+                isOnline: Boolean(data.isOnline),
+                lastSeen: data.lastSeen,
+                inMeetingHeartbeat: typeof data.inMeetingHeartbeat === 'number' ? data.inMeetingHeartbeat : null,
+              };
+            }
+          });
+          chunkMaps[chunkIdx] = nextChunk;
+          const merged: Record<string, { status: string; isOnline?: boolean; lastSeen?: string; inMeetingHeartbeat?: number | null }> = {};
+          Object.values(chunkMaps).forEach((m) => Object.assign(merged, m));
+          setContactStatuses(merged);
+        },
+        (err) => {
+          console.warn('[Dashboard] Contact status snapshot notice:', err);
+        }
+      );
+    });
+
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
+  }, [user, contacts]);
+
   // Fetch Notes & Transcripts with resilient client-side sort
   useEffect(() => {
     if (!user) return;
@@ -568,11 +799,16 @@ export default function Dashboard() {
     return () => unsubscribe();
   }, [user]);
 
-  const handleStatusChange = async (status: 'available' | 'away' | 'busy' | 'offline') => {
+  const handleStatusChange = async (status: UserPresenceStatus) => {
     setUserStatus(status);
+    setIsStatusMenuOpen(false);
     if (!user) return;
     try {
-      await setDoc(doc(db, 'userProfiles', user.uid), { status }, { merge: true });
+      await setDoc(doc(db, 'userProfiles', user.uid), {
+        status,
+        isOnline: status !== 'offline',
+        lastSeen: new Date().toISOString()
+      }, { merge: true });
     } catch (err) {
       console.error("Failed to update status:", err);
     }
@@ -582,22 +818,23 @@ export default function Dashboard() {
     e.preventDefault();
     if (!user || !newContact.email) return;
     try {
-      // Try to find if user exists to get their photo
+      const normalizedEmail = newContact.email.trim().toLowerCase();
+      let displayName = newContact.displayName.trim();
       let photoURL = '';
       const profilesRef = collection(db, 'userProfiles');
-      const q = query(profilesRef, where('email', '==', newContact.email));
+      const q = query(profilesRef, where('email', '==', normalizedEmail));
       const snap = await getDocs(q);
       
       if (!snap.empty) {
         photoURL = snap.docs[0].data().photoURL || '';
-        // Also update displayName if it's missing or generic
-        if (!newContact.displayName || newContact.displayName === newContact.email) {
-          newContact.displayName = snap.docs[0].data().displayName || newContact.displayName;
+        if (!displayName || displayName === normalizedEmail) {
+          displayName = snap.docs[0].data().displayName || displayName;
         }
       }
 
       await addDoc(collection(db, 'contacts'), {
-        ...newContact,
+        displayName: displayName || normalizedEmail.split('@')[0],
+        email: normalizedEmail,
         photoURL,
         ownerId: user.uid,
         createdAt: Timestamp.now()
@@ -1147,6 +1384,13 @@ export default function Dashboard() {
             collapsed={isSidebarCollapsed}
           />
           <SidebarItem 
+            icon={<Star size={20} />} 
+            label="Feedback" 
+            active={false} 
+            onClick={() => navigate('/feedback')}
+            collapsed={isSidebarCollapsed}
+          />
+          <SidebarItem 
             icon={<Settings size={20} />} 
             label="Settings" 
             active={activeSidebarTab === 'settings'} 
@@ -1244,6 +1488,12 @@ export default function Dashboard() {
                   onClick={() => { setActiveSidebarTab('clips'); setIsMobileMenuOpen(false); }}
                 />
                 <SidebarItem 
+                  icon={<Star size={20} />} 
+                  label="Feedback" 
+                  active={false} 
+                  onClick={() => { setIsMobileMenuOpen(false); navigate('/feedback'); }}
+                />
+                <SidebarItem 
                   icon={<Settings size={20} />} 
                   label="Settings" 
                   active={activeSidebarTab === 'settings'} 
@@ -1269,8 +1519,10 @@ export default function Dashboard() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Top Header */}
         <header className={cn(
-          "bg-white flex items-center justify-between px-4 lg:px-8 sticky top-0 z-[60] shrink-0 transition-all duration-300 ease-in-out border-b border-gray-100 overflow-hidden",
-          isHeaderVisible ? "h-16 lg:h-20 opacity-100" : "h-0 opacity-0 border-b-transparent pointer-events-none"
+          "bg-white flex items-center justify-between px-4 lg:px-8 sticky top-0 z-[60] shrink-0 transition-all duration-300 ease-in-out border-b border-gray-100",
+          isHeaderVisible
+            ? "h-16 lg:h-20 opacity-100 overflow-visible"
+            : "h-0 opacity-0 border-b-transparent pointer-events-none overflow-hidden"
         )}>
           <div className="flex items-center gap-4 flex-1 max-w-xl">
             <button 
@@ -1449,12 +1701,12 @@ export default function Dashboard() {
               <AnimatePresence>
                 {isNotificationsOpen && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsNotificationsOpen(false)} />
+                    <div className="fixed inset-0 z-[70]" onClick={() => setIsNotificationsOpen(false)} />
                     <motion.div 
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-80 bg-white rounded-3xl shadow-2xl border border-gray-100 py-4 z-50 overflow-hidden"
+                      className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white rounded-3xl shadow-2xl border border-gray-100 py-4 z-[80] overflow-hidden"
                     >
                       <div className="px-6 pb-3 border-b border-gray-100 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
@@ -1569,20 +1821,82 @@ export default function Dashboard() {
               </AnimatePresence>
             </div>
 
-            <div className="flex items-center gap-3 pl-4">
+            <div className="flex items-center gap-3 pl-2 sm:pl-4">
               {user ? (
-                user.photoURL ? (
-                  <img 
-                    src={user.photoURL} 
-                    alt="Avatar" 
-                    className="w-9 h-9 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-9 h-9 rounded-full bg-slate-900 text-white text-xs font-semibold flex items-center justify-center shadow-sm">
-                    {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                <>
+                  {/* Interactive User Presence Status Selector */}
+                  <div className="relative">
+                    {(() => {
+                      const meta = getPresenceMeta(userStatus, userStatus !== 'offline');
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setIsStatusMenuOpen(v => !v)}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-white border border-neutral-200/80 hover:border-slate-300 rounded-xl text-xs font-medium text-slate-700 transition-colors cursor-pointer whitespace-nowrap"
+                          title="Set your availability status"
+                        >
+                          <span className={cn("w-2 h-2 rounded-full shrink-0", meta.dotClass)} />
+                          <span className="hidden sm:inline">{meta.label}</span>
+                          <ChevronDown size={13} className="text-slate-400" />
+                        </button>
+                      );
+                    })()}
+
+                    <AnimatePresence>
+                      {isStatusMenuOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsStatusMenuOpen(false)} />
+                          <motion.div
+                            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                            className="absolute right-0 mt-2 w-44 bg-white rounded-2xl border border-neutral-200/80 shadow-xl py-1.5 z-50"
+                          >
+                            {(
+                              [
+                                { id: 'available', label: 'Available', dot: 'bg-emerald-500' },
+                                { id: 'busy', label: 'Busy', dot: 'bg-rose-500' },
+                                { id: 'away', label: 'Away', dot: 'bg-amber-400' },
+                                { id: 'offline', label: 'Appear Offline', dot: 'bg-slate-300' },
+                              ] as const
+                            ).map((option) => (
+                              <button
+                                key={option.id}
+                                type="button"
+                                onClick={() => handleStatusChange(option.id)}
+                                className={cn(
+                                  "w-full flex items-center justify-between px-3.5 py-2 text-xs transition-colors cursor-pointer whitespace-nowrap",
+                                  userStatus === option.id
+                                    ? "bg-stone-100 text-slate-900 font-semibold"
+                                    : "text-slate-700 hover:bg-stone-50"
+                                )}
+                              >
+                                <span className="flex items-center gap-2.5">
+                                  <span className={cn("w-2 h-2 rounded-full shrink-0", option.dot)} />
+                                  <span>{option.label}</span>
+                                </span>
+                                {userStatus === option.id && <Check size={13} className="text-emerald-700" />}
+                              </button>
+                            ))}
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
                   </div>
-                )
+
+                  {user.photoURL ? (
+                    <img 
+                      src={user.photoURL} 
+                      alt="Avatar" 
+                      className="w-9 h-9 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-slate-900 text-white text-xs font-semibold flex items-center justify-center shadow-sm">
+                      {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </>
               ) : (
                 <button 
                   onClick={login}
@@ -2181,23 +2495,40 @@ export default function Dashboard() {
                         (c.displayName || '').toLowerCase().includes(contactSearchQuery.toLowerCase()) || 
                         (c.email || '').toLowerCase().includes(contactSearchQuery.toLowerCase())
                       )
-                      .map(contact => (
+                      .map(contact => {
+                        const emailKey = (contact.email || '').trim().toLowerCase();
+                        const presence = contactStatuses[emailKey];
+                        const presenceMeta = getPresenceMeta(presence?.status, presence?.isOnline, presence?.lastSeen, presence?.inMeetingHeartbeat);
+                        return (
                       <div key={contact.id} className="bg-white p-4 rounded-2xl border border-neutral-200/70 hover:border-slate-300 transition-all flex items-center gap-3.5 shadow-xs">
-                        <div className="w-10 h-10 rounded-xl relative overflow-hidden bg-stone-100 border border-neutral-200/60 shrink-0 flex items-center justify-center font-medium text-slate-700 text-xs">
-                          {contact.photoURL ? (
-                            <img 
-                              src={contact.photoURL} 
-                              className="w-full h-full object-cover" 
-                              alt={contact.displayName} 
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <span>{(contact.displayName || contact.email || 'U').charAt(0).toUpperCase()}</span>
-                          )}
+                        <div className="w-10 h-10 rounded-xl relative bg-stone-100 border border-neutral-200/60 shrink-0 flex items-center justify-center font-medium text-slate-700 text-xs">
+                          <div className="w-full h-full rounded-xl overflow-hidden flex items-center justify-center">
+                            {contact.photoURL ? (
+                              <img 
+                                src={contact.photoURL} 
+                                className="w-full h-full object-cover" 
+                                alt={contact.displayName} 
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <span>{(contact.displayName || contact.email || 'U').charAt(0).toUpperCase()}</span>
+                            )}
+                          </div>
+                          <span
+                            title={presenceMeta.label}
+                            className={cn(
+                              "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white",
+                              presenceMeta.dotClass
+                            )}
+                          />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-slate-900 text-xs truncate">{contact.displayName || contact.email}</p>
                           <p className="text-[11px] text-slate-500 truncate mt-0.5">{contact.email}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5">
+                            <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", presenceMeta.dotClass)} />
+                            <span>{presenceMeta.label}</span>
+                          </p>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <button 
@@ -2232,7 +2563,8 @@ export default function Dashboard() {
                           </button>
                         </div>
                       </div>
-                    ))}
+                        );
+                      })}
                   </div>
                 )}
               </div>
@@ -2758,6 +3090,54 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
+      {/* Real-time Push & Notification Banner */}
+      <AnimatePresence>
+        {liveNotificationAlert && (
+          <motion.div
+            initial={{ opacity: 0, y: -16, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -16, scale: 0.97 }}
+            className="fixed top-5 right-5 z-[320] w-80 max-w-[calc(100vw-2.5rem)] bg-white border border-neutral-200/80 rounded-2xl shadow-xl p-4 space-y-2.5"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200/60 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bell size={15} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-900 truncate">{liveNotificationAlert.title}</p>
+                  {liveNotificationAlert.body && (
+                    <p className="text-[11px] text-slate-600 leading-relaxed line-clamp-2 mt-0.5">{liveNotificationAlert.body}</p>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLiveNotificationAlert(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            {liveNotificationAlert.url && liveNotificationAlert.url !== '/dashboard' && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = liveNotificationAlert.url!;
+                    setLiveNotificationAlert(null);
+                    navigate(target);
+                  }}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Open
+                </button>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Dashboard Minimalist Floating Toast */}
       <AnimatePresence>
         {dashboardToast && (
@@ -2768,6 +3148,13 @@ export default function Dashboard() {
             className="fixed bottom-6 right-6 z-[300] flex items-center gap-2.5 px-4 py-2.5 bg-slate-900 text-white text-xs font-medium rounded-xl shadow-lg border border-slate-800"
           >
             <span>{dashboardToast.message}</span>
+            {dashboardToast.type === 'error' && (
+              <SendErrorFeedbackButton
+                variant="dark"
+                errorMessage={dashboardToast.message}
+                source="Dashboard"
+              />
+            )}
             <button 
               onClick={() => setDashboardToast(null)}
               className="p-0.5 text-slate-400 hover:text-white rounded"

@@ -19,6 +19,7 @@ import {
 import { format } from 'date-fns';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
+import { SendErrorFeedbackButton } from '../components/ErrorFeedbackModal';
 
 export default function InvitePage() {
   const { id: roomId } = useParams();
@@ -408,7 +409,10 @@ export default function InvitePage() {
           )}
 
           {errorMsg && (
-            <p className="text-xs text-rose-600">{errorMsg}</p>
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200/70 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-rose-700">{errorMsg}</p>
+              <SendErrorFeedbackButton errorMessage={errorMsg} source="Meeting Invite" />
+            </div>
           )}
 
           {/* Action Buttons */}

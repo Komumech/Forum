@@ -44,6 +44,12 @@ export async function registerForumServiceWorker(): Promise<ServiceWorkerRegistr
   }
   try {
     const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    try {
+      await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((resolve) => setTimeout(resolve, 1200)),
+      ]);
+    } catch {}
     return reg;
   } catch (err) {
     console.warn('[PushNotifications] Service worker registration skipped:', err);
@@ -75,20 +81,28 @@ export interface ForumNotificationPayload {
 }
 
 export async function triggerForumPushNotification(payload: ForumNotificationPayload): Promise<boolean> {
-  if (typeof window === 'undefined' || !('Notification' in window)) {
+  if (typeof window === 'undefined') {
     return false;
   }
-  if (Notification.permission !== 'granted') {
+
+  try {
+    window.dispatchEvent(new CustomEvent('forum:notification', { detail: payload }));
+  } catch {}
+
+  if (!('Notification' in window) || Notification.permission !== 'granted') {
     return false;
   }
+
   const prefs = getPushPreferences();
   if (!prefs.enabled) {
     return false;
   }
 
   try {
-    const reg = await navigator.serviceWorker?.getRegistration?.('/') || await registerForumServiceWorker();
-    if (reg && typeof reg.showNotification === 'function') {
+    const reg =
+      (await navigator.serviceWorker?.getRegistration?.('/')) ||
+      (await registerForumServiceWorker());
+    if (reg && reg.active && typeof reg.showNotification === 'function') {
       await reg.showNotification(payload.title, {
         body: payload.body,
         icon: '/forum-logo.png',
@@ -99,7 +113,7 @@ export async function triggerForumPushNotification(payload: ForumNotificationPay
       return true;
     }
   } catch {
-    // Fallback to Notification constructor
+    // Fallback to standard browser Notification constructor
   }
 
   try {

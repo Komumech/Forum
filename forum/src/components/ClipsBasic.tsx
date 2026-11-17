@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { cn } from '../lib/utils';
 import { makeWebmSeekable } from '../utils/webmFixer';
+import { SendErrorFeedbackButton } from './ErrorFeedbackModal';
 
 interface SavedClip {
   id: string;
@@ -295,9 +296,12 @@ export default function ClipsBasic({
         </div>
 
         {error && (
-          <div className="p-3 bg-rose-50 border border-rose-200/70 rounded-xl text-rose-700 text-xs flex items-center gap-2">
-            <AlertCircle size={14} className="shrink-0" />
-            <span>{error}</span>
+          <div className="p-3 bg-rose-50 border border-rose-200/70 rounded-xl text-rose-700 text-xs flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{error}</span>
+            </div>
+            <SendErrorFeedbackButton errorMessage={error} source="Video Clips" />
           </div>
         )}
 

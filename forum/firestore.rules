@@ -71,6 +71,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Meeting Ratings & Feedback
+    match /meetingFeedback/{feedbackId} {
+      allow read, write: if true;
+    }
+
     // Test connectivity
     match /test/{docId} {
       allow read, write: if true;

@@ -1,4 +1,5 @@
 import { makeWebmSeekable } from './webmFixer';
+import type { StageOverlayState } from '../components/StreamMediaOverlay';
 
 export interface RecordedMeetingResult {
   blob: Blob;
@@ -20,6 +21,7 @@ export interface RecorderStartOptions {
   mode?: 'video' | 'audio';
   meetingTitle?: string;
   getParticipants?: () => RecorderParticipantSnapshot[];
+  getStageOverlay?: () => StageOverlayState | null;
 }
 
 function drawRoundedRect(
@@ -63,6 +65,7 @@ export class MeetingCompositeRecorder {
   private avatarCache = new Map<string, HTMLImageElement | 'failed'>();
   private displayedSpeakerId: string | null = null;
   private lastSpeakerSwitchAt = 0;
+  private hasBestEffortFlushed = false;
 
   private preloadLogo(): HTMLImageElement {
     const img = new Image();
@@ -421,6 +424,172 @@ export class MeetingCompositeRecorder {
     ctx.restore();
   }
 
+  private drawStageOverlay(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    overlay: StageOverlayState | null
+  ) {
+    if (!overlay || !overlay.active) return;
+
+    const img = overlay.mediaUrl ? this.getCachedAvatar(overlay.mediaUrl) : null;
+    const isDark = overlay.theme === 'dark';
+    const isStone = overlay.theme === 'stone';
+    const isEmerald = overlay.theme === 'emerald';
+    const bgFill = isDark
+      ? 'rgba(20, 21, 24, 0.94)'
+      : isStone
+        ? 'rgba(245, 245, 244, 0.96)'
+        : isEmerald
+          ? 'rgba(16, 36, 29, 0.95)'
+          : 'rgba(251, 251, 250, 0.96)';
+    const borderStroke = isDark
+      ? 'rgba(255, 255, 255, 0.14)'
+      : isEmerald
+        ? 'rgba(167, 243, 208, 0.35)'
+        : 'rgba(15, 23, 42, 0.12)';
+    const titleColor = isDark ? '#f8fafc' : isEmerald ? '#ecfdf5' : '#0f172a';
+    const bodyColor = isDark ? '#cbd5e1' : isEmerald ? '#a7f3d0' : '#475569';
+
+    ctx.save();
+    if (overlay.position === 'top-banner' || overlay.templateId === 'announcement') {
+      const bw = Math.min(760, width - 160);
+      const bh = 46;
+      const bx = (width - bw) / 2;
+      const by = 24;
+      drawRoundedRect(ctx, bx, by, bw, bh, 12);
+      ctx.fillStyle = bgFill;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = borderStroke;
+      ctx.stroke();
+
+      ctx.fillStyle = titleColor;
+      ctx.font = '500 15px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const line = [overlay.title, overlay.subtitle].filter(Boolean).join(' · ');
+      ctx.fillText(line.slice(0, 74), width / 2, by + bh / 2);
+      ctx.restore();
+      return;
+    }
+
+    if (
+      overlay.position === 'bottom-left' ||
+      overlay.templateId === 'lower-third' ||
+      overlay.templateId === 'guest-spotlight' ||
+      overlay.templateId === 'performance-title'
+    ) {
+      const lw = 480;
+      const lh = 72;
+      const lx = 28;
+      const ly = height - 156;
+      drawRoundedRect(ctx, lx, ly, lw, lh, 14);
+      ctx.fillStyle = bgFill;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = borderStroke;
+      ctx.stroke();
+
+      let textX = lx + 18;
+      if (img) {
+        ctx.save();
+        drawRoundedRect(ctx, lx + 14, ly + 12, 48, 48, 10);
+        ctx.clip();
+        ctx.drawImage(img, lx + 14, ly + 12, 48, 48);
+        ctx.restore();
+        textX = lx + 74;
+      }
+
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = titleColor;
+      ctx.font = '600 18px system-ui, -apple-system, sans-serif';
+      ctx.fillText((overlay.title || '').slice(0, 36), textX, ly + 26);
+
+      if (overlay.subtitle) {
+        ctx.fillStyle = bodyColor;
+        ctx.font = '400 13px system-ui, -apple-system, sans-serif';
+        ctx.fillText(overlay.subtitle.slice(0, 48), textX, ly + 49);
+      }
+      ctx.restore();
+      return;
+    }
+
+    // Center stage card / media frame
+    const cw = Math.min(740, width - 200);
+    const hasPoints = Array.isArray(overlay.points) && overlay.points.filter(Boolean).length > 0;
+    const ch = img && (overlay.title || overlay.subtitle || overlay.body)
+      ? 440
+      : hasPoints
+        ? 390
+        : 340;
+    const cx = (width - cw) / 2;
+    const cy = (height - ch) / 2;
+
+    drawRoundedRect(ctx, cx, cy, cw, ch, 20);
+    ctx.fillStyle = bgFill;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = borderStroke;
+    ctx.stroke();
+
+    let cursorY = cy + 36;
+    if (img) {
+      const imgH = overlay.title || overlay.subtitle || overlay.body ? 220 : ch - 48;
+      const imgW = cw - 48;
+      ctx.save();
+      drawRoundedRect(ctx, cx + 24, cy + 24, imgW, imgH, 12);
+      ctx.clip();
+      const scale = Math.min(imgW / img.naturalWidth, imgH / img.naturalHeight);
+      const dw = img.naturalWidth * scale;
+      const dh = img.naturalHeight * scale;
+      ctx.drawImage(img, cx + 24 + (imgW - dw) / 2, cy + 24 + (imgH - dh) / 2, dw, dh);
+      ctx.restore();
+      cursorY = cy + 24 + imgH + 28;
+    }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (overlay.title) {
+      ctx.fillStyle = titleColor;
+      ctx.font = '500 28px system-ui, -apple-system, sans-serif';
+      ctx.fillText(overlay.title.slice(0, 44), width / 2, cursorY + 4);
+      cursorY += 38;
+    }
+    if (overlay.subtitle) {
+      ctx.fillStyle = bodyColor;
+      ctx.font = '400 16px system-ui, -apple-system, sans-serif';
+      ctx.fillText(overlay.subtitle.slice(0, 62), width / 2, cursorY + 4);
+      cursorY += 28;
+    }
+    if (hasPoints) {
+      ctx.textAlign = 'left';
+      const pts = overlay.points.filter(Boolean).slice(0, 4);
+      pts.forEach((pt, idx) => {
+        if (cursorY < cy + ch - 24) {
+          ctx.fillStyle = bodyColor;
+          ctx.font = '400 15px system-ui, -apple-system, sans-serif';
+          ctx.fillText(`0${idx + 1}   ${pt.slice(0, 58)}`, cx + 48, cursorY + 6);
+          cursorY += 30;
+        }
+      });
+    } else if (overlay.body && cursorY < cy + ch - 30) {
+      ctx.fillStyle = bodyColor;
+      ctx.font = '400 14px system-ui, -apple-system, sans-serif';
+      const firstLine = overlay.body.split('\n')[0] || '';
+      ctx.fillText(firstLine.slice(0, 68), width / 2, cursorY + 4);
+      cursorY += 24;
+    }
+    if (overlay.meta && cursorY < cy + ch - 18) {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = bodyColor;
+      ctx.font = '500 12px ui-monospace, SFMono-Regular, monospace';
+      ctx.fillText(overlay.meta.slice(0, 52), width / 2, cy + ch - 28);
+    }
+    ctx.restore();
+  }
+
   start(
     getAudioTracks: () => MediaStreamTrack[],
     roomName: string,
@@ -432,6 +601,7 @@ export class MeetingCompositeRecorder {
     this.logoImg = this.preloadLogo();
     this.displayedSpeakerId = null;
     this.lastSpeakerSwitchAt = 0;
+    this.hasBestEffortFlushed = false;
 
     const canvas = document.createElement('canvas');
     canvas.width = 1280;
@@ -500,6 +670,8 @@ export class MeetingCompositeRecorder {
 
       if (videos.length === 0) {
         this.drawSpeakerStudioCard(ctx, canvas.width, canvas.height, roomLabel, speaker);
+        const overlay = options?.getStageOverlay ? options.getStageOverlay() : null;
+        this.drawStageOverlay(ctx, canvas.width, canvas.height, overlay);
         this.drawForumWatermark(ctx, canvas.width, canvas.height, false);
         return;
       }
@@ -539,6 +711,8 @@ export class MeetingCompositeRecorder {
         }
       }
 
+      const overlay = options?.getStageOverlay ? options.getStageOverlay() : null;
+      this.drawStageOverlay(ctx, canvas.width, canvas.height, overlay);
       this.drawSpeakerCornerOverlay(ctx, canvas.height, speaker);
       this.drawForumWatermark(ctx, canvas.width, canvas.height, true);
     };
@@ -583,7 +757,7 @@ export class MeetingCompositeRecorder {
       }
     };
 
-    recorder.start(1000);
+    recorder.start(500);
   }
 
   pause(): void {
@@ -606,6 +780,35 @@ export class MeetingCompositeRecorder {
         void this.audioCtx.resume().catch(() => {});
       }
       this.mediaRecorder.resume();
+    }
+  }
+
+  flushBestEffortDownload(roomName: string): boolean {
+    if (this.hasBestEffortFlushed) return false;
+    if (!this.mediaRecorder && this.chunks.length === 0) return false;
+    try {
+      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+        this.mediaRecorder.requestData();
+      }
+    } catch {}
+    if (this.chunks.length === 0) return false;
+    try {
+      this.hasBestEffortFlushed = true;
+      const blob = new Blob(this.chunks, { type: 'video/webm' });
+      const suffix = this.mode === 'audio' ? 'audio' : 'video';
+      const filename = `forum-${roomName.replace(/[^a-zA-Z0-9_-]/g, '_')}-${suffix}-${Date.now()}.webm`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return true;
+    } catch {
+      this.hasBestEffortFlushed = false;
+      return false;
     }
   }
 

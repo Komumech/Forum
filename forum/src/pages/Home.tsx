@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
 import { db } from '../firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { SendErrorFeedbackButton } from '../components/ErrorFeedbackModal';
 
 export default function Home() {
   const [roomCode, setRoomCode] = useState('');
@@ -228,6 +229,7 @@ export default function Home() {
             <a href="#features" className="hover:text-slate-900 transition-colors">Features</a>
             <a href="#workspace" className="hover:text-slate-900 transition-colors">Workspace</a>
             <a href="#faq" className="hover:text-slate-900 transition-colors">FAQ</a>
+            <button type="button" onClick={() => navigate('/count')} className="hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap">Counter</button>
           </nav>
         </div>
 
@@ -291,17 +293,20 @@ export default function Home() {
             exit={{ opacity: 0, y: -20 }}
             className="max-w-4xl mx-auto px-4 pt-4"
           >
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl flex items-center justify-between text-xs sm:text-sm">
-              <div className="flex items-center gap-2">
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl flex items-center justify-between gap-3 flex-wrap text-xs sm:text-sm">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
                 <AlertCircle size={16} className="text-red-500 shrink-0" />
                 <span>{authError}</span>
               </div>
-              <button 
-                onClick={clearAuthError}
-                className="p-1 hover:bg-red-100 rounded-lg transition-colors text-red-600"
-              >
-                <X size={14} />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <SendErrorFeedbackButton errorMessage={authError} source="Sign In" />
+                <button 
+                  onClick={clearAuthError}
+                  className="p-1 hover:bg-red-100 rounded-lg transition-colors text-red-600 cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -804,6 +809,7 @@ export default function Home() {
             <a href="#features" className="hover:text-gray-900 transition-colors">Features</a>
             <a href="#workspace" className="hover:text-gray-900 transition-colors">Workspace</a>
             <a href="#faq" className="hover:text-gray-900 transition-colors">FAQ</a>
+            <button type="button" onClick={() => navigate('/count')} className="hover:text-gray-900 transition-colors cursor-pointer whitespace-nowrap">Meetings Count</button>
             <a href="mailto:komumech@gmail.com" className="hover:text-gray-900 transition-colors">Contact</a>
           </div>
 

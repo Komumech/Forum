@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Key, Check, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
+import { SendErrorFeedbackButton } from './ErrorFeedbackModal';
 
 interface HostKeyModalProps {
   isOpen: boolean;
@@ -105,9 +106,12 @@ export default function HostKeyModal({
             </div>
 
             {error && (
-              <div className="p-3 bg-rose-50 border border-rose-200/70 rounded-xl text-rose-700 text-xs flex items-center gap-2">
-                <AlertCircle size={14} className="shrink-0" />
-                <span>{error}</span>
+              <div className="p-3 bg-rose-50 border border-rose-200/70 rounded-xl text-rose-700 text-xs flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{error}</span>
+                </div>
+                <SendErrorFeedbackButton errorMessage={error} source="Claim Host Key" />
               </div>
             )}
 

@@ -12,6 +12,13 @@ import {
 import { Track, Participant } from 'livekit-client';
 import { db } from '../firebase';
 import { doc, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { StageMediaOverlayRenderer, StageOverlayState } from '../components/StreamMediaOverlay';
+import { SendErrorFeedbackButton } from '../components/ErrorFeedbackModal';
+
+const ISOLATED_TRACK_SOURCES = [
+  { source: Track.Source.Camera, withPlaceholder: true },
+  { source: Track.Source.ScreenShare, withPlaceholder: false },
+];
 
 export default function IsolatedFeed() {
   const { room, identity } = useParams<{ room: string; identity: string }>();
@@ -24,10 +31,22 @@ export default function IsolatedFeed() {
   const [error, setError] = useState<string | null>(null);
   const [isTokenValid, setIsTokenValid] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [stageOverlay, setStageOverlay] = useState<StageOverlayState | null>(null);
 
   const decodedIdentity = useMemo(() => {
     return identity ? decodeURIComponent(identity) : '';
   }, [identity]);
+
+  // Listen for live stage media / template updates for this room
+  useEffect(() => {
+    if (!room) return;
+    return onSnapshot(doc(db, 'rooms', room), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setStageOverlay(data?.stageOverlay || null);
+      }
+    }, () => {});
+  }, [room]);
 
   // Listen to Firestore to verify token revocation status if a token was supplied
   useEffect(() => {
@@ -129,20 +148,22 @@ export default function IsolatedFeed() {
 
   if (!isTokenValid) {
     return (
-      <div className="w-screen h-screen bg-black text-slate-400 flex flex-col items-center justify-center p-6 text-center font-mono select-none">
-        <div className="w-3 h-3 bg-red-500 rounded-full mb-3" />
+      <div className="w-screen h-screen bg-black text-slate-400 flex flex-col items-center justify-center p-6 text-center font-mono select-none gap-3">
+        <div className="w-3 h-3 bg-red-500 rounded-full" />
         <p className="text-sm uppercase tracking-wider text-slate-300 font-semibold">Feed Token Revoked</p>
-        <p className="text-xs text-slate-500 mt-1">This isolated broadcast link has been deactivated by the meeting host.</p>
+        <p className="text-xs text-slate-500">This isolated broadcast link has been deactivated by the meeting host.</p>
+        <SendErrorFeedbackButton variant="dark" errorMessage="Isolated feed token revoked" source="Isolated Feed" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="w-screen h-screen bg-black text-slate-400 flex flex-col items-center justify-center p-6 text-center font-mono select-none">
-        <div className="w-3 h-3 bg-yellow-500 rounded-full mb-3" />
+      <div className="w-screen h-screen bg-black text-slate-400 flex flex-col items-center justify-center p-6 text-center font-mono select-none gap-3">
+        <div className="w-3 h-3 bg-yellow-500 rounded-full" />
         <p className="text-sm uppercase tracking-wider text-slate-300 font-semibold">Feed Error</p>
-        <p className="text-xs text-slate-500 mt-1">{error}</p>
+        <p className="text-xs text-slate-500">{error}</p>
+        <SendErrorFeedbackButton variant="dark" errorMessage={error} source="Isolated Feed" />
       </div>
     );
   }
@@ -171,6 +192,7 @@ export default function IsolatedFeed() {
           targetIdentity={decodedIdentity}
           fitMode={fitMode}
           showInfo={showInfo}
+          stageOverlay={stageOverlay}
         />
         <RoomAudioRenderer />
       </LiveKitRoom>
@@ -182,15 +204,14 @@ function IsolatedParticipantRenderer({
   targetIdentity,
   fitMode,
   showInfo,
+  stageOverlay,
 }: {
   targetIdentity: string;
   fitMode: string;
   showInfo: boolean;
+  stageOverlay: StageOverlayState | null;
 }) {
-  const tracks = useTracks([
-    { source: Track.Source.Camera, withPlaceholder: true },
-    { source: Track.Source.ScreenShare, withPlaceholder: false },
-  ]);
+  const tracks = useTracks(ISOLATED_TRACK_SOURCES);
 
   const remoteParticipants = useRemoteParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -235,7 +256,7 @@ function IsolatedParticipantRenderer({
   return (
     <div className="relative w-full h-full bg-black flex items-center justify-center">
       {targetTrack && !isVideoOff ? (
-        <div className="w-full h-full flex items-center justify-center">
+        <div className="absolute inset-0 w-full h-full">
           <VideoTrack
             trackRef={targetTrack as any}
             className={`w-full h-full ${fitMode} bg-black`}
@@ -257,6 +278,10 @@ function IsolatedParticipantRenderer({
           <span>OBS Feed: {displayName}</span>
         </div>
       )}
+
+      <StageMediaOverlayRenderer
+        overlay={stageOverlay?.broadcastToParticipants === false ? null : stageOverlay}
+      />
     </div>
   );
 }

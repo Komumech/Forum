@@ -30,8 +30,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title, {
       body: payload.body,
-      icon: '/forum-logo.svg',
-      badge: '/forum-logo.svg',
+      icon: '/forum-logo.png',
+      badge: '/forum-logo.png',
       tag: payload.tag,
       data: { url: payload.url || '/dashboard' },
     })

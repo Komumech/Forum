@@ -50,13 +50,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (u) {
         setAuthError(null);
-        // Non-blocking background sync for profile and preferences
+        // Non-blocking background sync for profile, presence status, and preferences
         (async () => {
           try {
-            await setDoc(doc(db, 'userProfiles', u.uid), {
+            const profileRef = doc(db, 'userProfiles', u.uid);
+            const existingProfile = await getDoc(profileRef);
+            const existingData = existingProfile.exists() ? existingProfile.data() : undefined;
+            const existingStatus = existingData?.status;
+            const isCurrentlyInMeetingRoute =
+              typeof window !== 'undefined' && window.location.pathname.startsWith('/meeting/');
+            const prevNonMeetingStatus =
+              existingData?.previousStatus &&
+              existingData.previousStatus !== 'in_meeting' &&
+              existingData.previousStatus !== 'offline'
+                ? existingData.previousStatus
+                : 'available';
+
+            let resolvedStatus =
+              existingStatus && existingStatus !== 'offline' ? existingStatus : 'available';
+            if (resolvedStatus === 'in_meeting' && !isCurrentlyInMeetingRoute) {
+              resolvedStatus = prevNonMeetingStatus;
+            }
+
+            await setDoc(profileRef, {
+              uid: u.uid,
               displayName: u.displayName,
-              email: u.email,
+              email: u.email?.toLowerCase() || u.email,
               photoURL: u.photoURL,
+              isOnline: true,
+              status: resolvedStatus,
+              ...(isCurrentlyInMeetingRoute ? {} : { currentRoomId: null, inMeetingHeartbeat: null }),
               lastSeen: new Date().toISOString()
             }, { merge: true });
 
@@ -81,9 +104,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    const handlePageHide = () => {
+      const current = auth.currentUser;
+      if (current) {
+        void setDoc(doc(db, 'userProfiles', current.uid), {
+          isOnline: false,
+          status: 'offline',
+          currentRoomId: null,
+          inMeetingHeartbeat: null,
+          lastSeen: new Date().toISOString()
+        }, { merge: true }).catch(() => {});
+      }
+    };
+    window.addEventListener('pagehide', handlePageHide);
+
     return () => {
       clearTimeout(safetyTimeout);
       unsubscribe();
+      window.removeEventListener('pagehide', handlePageHide);
     };
   }, []);
 
@@ -114,6 +152,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
+      if (auth.currentUser) {
+        await setDoc(doc(db, 'userProfiles', auth.currentUser.uid), {
+          isOnline: false,
+          status: 'offline',
+          lastSeen: new Date().toISOString()
+        }, { merge: true }).catch(() => {});
+      }
       await signOut(auth);
       setAuthError(null);
     } catch (error) {

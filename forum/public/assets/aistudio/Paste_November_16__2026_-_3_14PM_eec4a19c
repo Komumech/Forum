@@ -1,0 +1,675 @@
+123
+1
+14
+15:08:05.738
+System
+Build
+ Render Start 
+15:08:06.866
+Backend
+Log
+ Server restarting... 
+15:08:06.866
+Backend
+Log
+ Server stopped. 
+15:08:06.867
+Backend
+Log
+ Server started on port 3000. 
+15:08:06.867
+Backend
+Log
+ Pre-warming 1 paths...
+  
+  > react-example@0.0.0 dev
+  > tsx server.ts --port 3000 --host 0.0.0.0
+  
+  ◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+  9:59:19 PM [vite] (client) Re-optimizing dependencies because lockfile has changed
+  Server running on http://localhost:3000 
+15:08:06.867
+Backend
+Log
+ Pre-warming completed.
+  [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 10h29.248739973s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"36029s"}]}}
+  [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 10h9.540158195s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"36009s"}]}}
+  [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h59m48.507610136s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35988s"}]}}
+  [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h59m25.203828361s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35965s"}]}}
+  [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h59m5.477673384s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35945s"}]}} 
+15:08:07.015
+Backend
+Log
+ CONNECTED 
+15:08:11.780
+System
+Build
+ Render End 
+15:08:12.384
+App
+Debug
+ [vite] connecting... 
+15:08:45.273
+App
+Log
+ [MeetingPage] Attempting to join room: pmi-VE0eIf2gmtf5zWk7oj9HTp3ax2d2 as Munachi Godson 
+15:08:45.311
+App
+Log
+ [MeetingPage] Fetching token from: /api/get-participant-token?room=pmi-VE0eIf2gmtf5zWk7oj9HTp3ax2d2&username=Munachi%20Godson%233929&metadata=%7B%22pending%22%3Afalse%2C%22avatar%22%3A%22https%3A%2F%2Flh3.googleusercontent.com%2Fa%2FACg8ocKDNFVoKErEve1HMnk0RmDBJMKP28JrKTxZqFfpvv3zc1MNwuA%3Ds96-c%22%2C%22isHost%22%3Atrue%7D 
+15:08:45.404
+App
+Warning
+ [MeetingPage] Token fetch attempt 1 failed:
+  TypeError: Failed to fetch
+    at fetch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/_aistudio-iframe.js?v=1f94f900:144:14)
+    at async handleJoin (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:339:24) 
+15:08:46.176
+App
+Log
+ [MeetingPage] Token received successfully, connecting to LiveKit... 
+15:08:46.217
+Backend
+Log
+ [Token API] Request for room: pmi-VE0eIf2gmtf5zWk7oj9HTp3ax2d2, user: Munachi Godson#3929, subscriberOnly: false 
+15:08:46.217
+Backend
+Log
+ [Token API] Successfully generated token for Munachi Godson#3929 (room: pmi-VE0eIf2gmtf5zWk7oj9HTp3ax2d2) 
+15:08:49.348
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h51m11.065121215s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35471s"}]}} 
+15:08:54.805
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:08:57.440
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:02.666
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:04.779
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:06.712
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:10.499
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h50m49.685278914s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35449s"}]}} 
+15:09:13.537
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:18.074
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onClick (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:555:28)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:09:20.022
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:28.523
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:32.124
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h50m28.065055492s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35428s"}]}} 
+15:09:32.187
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:34.909
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:35.857
+App
+Error
+ [vite] failed to connect to websocket (Error: WebSocket closed without opened.).  
+15:09:35.867
+App
+Unhandled Rejection
+ Error: WebSocket closed without opened.
+    at WebSocket.<anonymous> (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/@vite/client:454:22) 
+15:09:36.795
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:44.127
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:44.266
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:47.149
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:50.845
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:52.615
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:58.377
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h50m6.545692026s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35406s"}]}} 
+15:09:58.377
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:58.394
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:09:58.394
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:02.286
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:02.303
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:08.286
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:10.207
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:16.187
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h49m46.514661099s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35386s"}]}} 
+15:10:33.671
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h49m26.517113969s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35366s"}]}} 
+15:10:40.318
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:52.282
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:53.954
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1153:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:10:54.182
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1153:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:10:54.355
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1153:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:10:54.703
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1153:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:10:54.885
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:55.147
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1153:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:10:55.553
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h49m4.635556744s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35344s"}]}} 
+15:10:57.288
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:10:59.507
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1182:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:10:59.630
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1182:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:11:00.151
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1182:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:11:00.368
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at onChange (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:1182:32)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11)
+    at runWithFiberInDEV (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:997:72) 
+15:11:01.507
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:09.626
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:12.606
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:16.628
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h48m43.575210379s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35323s"}]}} 
+15:11:18.246
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:23.384
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:32.540
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:35.840
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at selectTemplate (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:406:5)
+    at onClick (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:916:28)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11) 
+15:11:37.391
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:37.782
+App
+Unhandled Rejection
+ TypeError: Cannot read properties of undefined (reading 'next')
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3497:7
+    at Generator.next (<anonymous>)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2578:26
+    at new Promise (<anonymous>)
+    at H (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:2564:23)
+    at send (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/@livekit_components-react.js?v=2f939144:3496:79)
+    at https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/pages/MeetingPage.tsx:1073:9
+    at selectTemplate (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:406:5)
+    at onClick (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/src/components/StreamMediaOverlay.tsx:916:28)
+    at executeDispatch (https://ais-dev-64zzvoodqvb3whtsiikduj-955708438731.europe-west2.run.app/node_modules/.vite/deps/react-dom_client.js?v=3faab05b:13622:11) 
+15:11:39.221
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:43.453
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:46.025
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:59.505
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:59.509
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:11:59.679
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h48m0.499393553s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35280s"}]}} 
+15:11:59.885
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:01.350
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:02.915
+Backend
+Log
+ [Token API] Request for room: pmi-VE0eIf2gmtf5zWk7oj9HTp3ax2d2, user: Me 2#5500, subscriberOnly: false 
+15:12:02.915
+Backend
+Log
+ [Token API] Successfully generated token for Me 2#5500 (room: pmi-VE0eIf2gmtf5zWk7oj9HTp3ax2d2) 
+15:12:05.698
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:06.887
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:10.084
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":503,"message":"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.","status":"UNAVAILABLE"}} 
+15:12:14.946
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h47m48.841774767s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35268s"}]}} 
+15:12:21.211
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h47m38.972351498s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35258s"}]}} 
+15:12:32.174
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h47m28.015565766s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35248s"}]}} 
+15:12:35.625
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:40.951
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:43.265
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h47m17.296411692s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35237s"}]}} 
+15:12:45.017
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:48.384
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:50.358
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:53.769
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h47m6.419022981s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35226s"}]}} 
+15:12:56.744
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:12:58.790
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:01.495
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:05.595
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:05.597
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h46m55.756288264s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35215s"}]}} 
+15:13:06.586
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:09.469
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:15.856
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:15.857
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h46m44.830767084s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35204s"}]}} 
+15:13:19.329
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:20.069
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:22.599
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:25.068
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:27.006
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h46m33.538768278s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35193s"}]}} 
+15:13:30.389
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:33.165
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:36.330
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:37.950
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h46m23.201739424s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35183s"}]}} 
+15:13:39.418
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:44.270
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:46.005
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:47.747
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h46m12.43293581s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35172s"}]}} 
+15:13:48.780
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:51.009
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:54.058
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:13:58.714
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h46m1.619022848s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35161s"}]}} 
+15:13:59.015
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:02.884
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:05.895
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:09.778
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h45m50.855183928s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35150s"}]}} 
+15:14:09.779
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:12.060
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:14.388
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:17.800
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:20.177
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h45m40.032039413s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35140s"}]}} 
+15:14:20.715
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:25.369
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:28.136
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render. 
+15:14:31.095
+Backend
+Error
+ [AI Feed Analyzer] Gemini API fallback triggered: {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 9h45m29.094808238s.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://aistudio.google.com/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"description":"Generate content requests per day limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.","quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"model":"gemini-3.8-flash","location":"global"},"quotaValue":"20"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"35129s"}]}} 
+15:14:33.499
+App
+Error
+ Maximum update depth exceeded. This can happen when a component calls setState inside useEffect, but useEffect either doesn't have a dependency array, or one of the dependencies changes on every render.

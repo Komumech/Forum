@@ -11,7 +11,7 @@ import {
   StreamProtocol,
   EncodingOptionsPreset,
 } from "livekit-server-sdk";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -55,31 +55,41 @@ async function startServer() {
     res.json({ status: "ok", timestamp: Date.now() });
   });
 
+  let aiAnalyzeCooldownUntil = 0;
+
   // AI Video Feed Lighting & Color Analysis
   app.post("/api/ai/analyze-feed", async (req, res) => {
-    const { imageBase64, currentBrightness, currentContrast } = req.body;
+    const { imageBase64 } = req.body;
     if (!imageBase64) {
       return res.status(400).json({ error: "Missing imageBase64 snapshot" });
     }
 
+    if (Date.now() < aiAnalyzeCooldownUntil) {
+      return res.status(429).json({
+        error: "AI analysis temporarily paused after rate-limit response. Try again shortly."
+      });
+    }
+
+    const ai = getAIClient();
+    if (!ai) {
+      return res.status(503).json({ error: "Gemini API key not configured in server secrets." });
+    }
+
     try {
-      const ai = getAIClient();
-      if (ai) {
-        // Strip data:image/...;base64, prefix if present
-        const base64Data = imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
-        
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: base64Data,
-                }
-              },
-              {
-                text: `You are an expert computational photography engineer and video colorist analyzing this webcam feed snapshot in real-time.
+      const base64Data = imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: base64Data,
+              }
+            },
+            {
+              text: `You are an expert computational photography engineer and video colorist analyzing this webcam feed snapshot in real-time.
 Evaluate the lighting and complexion conditions:
 1. Is the scene underexposed / dark, overexposed, backlit (bright background, dim face), or normal?
 2. Does the scene have a warm/yellow tungsten bulb cast, cool blue fluorescent shadow, or natural daylight?
@@ -96,43 +106,30 @@ Respond ONLY with valid JSON in this exact structure without markdown fences:
   "skinSmoothing": number between 0 and 100,
   "diagnosis": "Short 1-sentence explanation of detected lighting and what was adjusted"
 }`
-              }
-            ]
-          },
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.2
-          }
-        });
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
 
-        const textOutput = response.text?.trim() || "";
-        const parsed = JSON.parse(textOutput);
-        return res.json({
-          status: "success",
-          source: "gemini",
-          enhancements: parsed
-        });
-      }
+      const textOutput = response.text?.trim() || "";
+      const parsed = JSON.parse(textOutput);
+      return res.json({
+        status: "success",
+        source: "gemini",
+        enhancements: parsed
+      });
     } catch (aiErr: any) {
-      console.warn("[AI Feed Analyzer] Gemini API fallback triggered:", aiErr?.message || aiErr);
-    }
-
-    // Adaptive mathematical fallback when key not present or offline
-    const isLikelyDark = (currentBrightness || 100) < 105;
-    res.json({
-      status: "success",
-      source: "adaptive-engine",
-      enhancements: {
-        sceneCondition: isLikelyDark ? "lowlight" : "normal",
-        brightness: isLikelyDark ? 116 : 108,
-        contrast: 108,
-        saturation: 112,
-        warmth: 3,
-        shadowLift: isLikelyDark ? 20 : 8,
-        skinSmoothing: 45,
-        diagnosis: "AI Auto-Tuning balanced exposure midtones and normalized skin vibrancy."
+      const msg = String(aiErr?.message || aiErr || 'Failed to analyze frame');
+      const statusCode = (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.toLowerCase().includes('quota')) ? 429 : 502;
+      if (statusCode === 429) {
+        aiAnalyzeCooldownUntil = Date.now() + 5 * 60 * 1000;
       }
-    });
+      console.warn("[AI Feed Analyzer] Gemini API error:", msg);
+      return res.status(statusCode).json({ error: msg });
+    }
   });
 
   // AI Meeting Note-Taking & Summaries
@@ -140,115 +137,153 @@ Respond ONLY with valid JSON in this exact structure without markdown fences:
     const { transcript, existingNotes, meetingTitle, formatType, participants, duration } = req.body;
     
     if (!transcript && !existingNotes) {
-      return res.status(400).json({ error: "No transcript or notes content provided" });
+      return res.status(400).json({ error: "No transcript or notes content provided yet." });
+    }
+
+    const ai = getAIClient();
+    if (!ai) {
+      return res.status(503).json({ error: "Gemini API key not configured in server secrets." });
     }
 
     const attendeesList = Array.isArray(participants) && participants.length > 0
       ? participants.join(", ")
       : "Meeting Attendees";
+    const dateLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const safeTitle = meetingTitle || "Meeting Session";
+    const sourceContent = [
+      transcript ? `Spoken Transcript & Chat:\n${transcript}` : '',
+      existingNotes ? `Manual Notes:\n${existingNotes}` : '',
+    ].filter(Boolean).join("\n\n");
+
+    let formatInstructions = "";
+    if (formatType === 'action_items') {
+      formatInstructions = `Extract a clean, specific checklist of Action Items & Decisions from the session:
+# Action Items: ${safeTitle}
+**Date**: ${dateLabel}
+**Attendees**: ${attendeesList}
+
+## Action Items & Owners
+- [ ] **[Speaker / Assignee]**: Exact concrete task, deadline or follow-up mentioned
+
+## Key Decisions
+- Concrete decisions made, attributed to who proposed/confirmed them`;
+    } else if (formatType === 'summary') {
+      formatInstructions = `Generate a crisp executive summary in Markdown:
+# Meeting Summary: ${safeTitle}
+**Date**: ${dateLabel}
+**Attendees**: ${attendeesList}
+
+## Executive Overview
+(2-4 clear sentences summarizing the goal and outcome of the meeting)
+
+## Key Points by Speaker
+- **Speaker Name**: Specific points, updates, or ideas they shared
+
+## Decisions & Next Steps
+- [ ] **Owner**: Clear next steps or deliverables`;
+    } else {
+      formatInstructions = `Generate comprehensive, cleanly formatted AI Meeting Notes in Markdown preserving exact speaker attribution:
+# AI Meeting Notes: ${safeTitle}
+**Date**: ${dateLabel}
+**Attendees**: ${attendeesList}
+
+## Executive Overview
+(Concise summary of the discussion and primary outcomes)
+
+## Discussion Breakdown (Speaker Highlights)
+- **Speaker Name**: Detailed summary of what they said and raised
+
+## Key Decisions
+- Explicit alignments or conclusions reached
+
+## Action Items
+- [ ] **Owner**: Specific deliverable or follow-up task
+
+## Notable Context & Open Questions
+- Any unresolved topics, links, or notes`;
+    }
+
+    const generateWithResilience = async (promptText: string): Promise<string> => {
+      const attemptModel = async (modelId: string, useLowThinking: boolean) => {
+        const resp = await ai.models.generateContent({
+          model: modelId,
+          contents: promptText,
+          config: {
+            maxOutputTokens: 2400,
+            ...(useLowThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}),
+          },
+        });
+        return resp.text?.trim() || "";
+      };
+
+      const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
+        Promise.race([
+          promise,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`${label}_TIMEOUT`)), ms)
+          ),
+        ]);
+
+      const shouldFailover = (err: any) => {
+        const raw = String(err?.message || err || "");
+        return (
+          raw.includes("_TIMEOUT") ||
+          raw.includes("503") ||
+          raw.includes("UNAVAILABLE") ||
+          raw.toLowerCase().includes("high demand") ||
+          raw.toLowerCase().includes("temporarily unavailable")
+        );
+      };
+
+      try {
+        return await withTimeout(attemptModel("gemini-4-hydrogen", true), 7000, "PRIMARY");
+      } catch (firstErr: any) {
+        if (shouldFailover(firstErr)) {
+          await new Promise((r) => setTimeout(r, 250));
+          return await withTimeout(attemptModel("gemini-3.1-flash-lite", false), 10000, "FALLBACK");
+        }
+        throw firstErr;
+      }
+    };
 
     try {
-      const ai = getAIClient();
-      if (ai) {
-        const prompt = `You are an expert executive meeting assistant. You have listened to the following meeting discussion and need to produce a clean, perfectly structured meeting summary document in clean GitHub-flavored Markdown.
+      const prompt = `You are an expert executive meeting assistant. Transform the following real meeting conversation into clean, accurate, well-structured GitHub-flavored Markdown. Only report facts, topics, quotes, and tasks present in the source content — attribute points accurately to the named speakers.
 
-Meeting Title: ${meetingTitle || "General Meeting"}
+Meeting Title: ${safeTitle}
 Attendees: ${attendeesList}
 ${duration ? `Duration: ${duration}` : ''}
 
-Meeting Conversation & Transcripts:
 """
-${transcript || existingNotes}
+${sourceContent}
 """
 
-Instructions:
-Generate a structured, professional meeting summary in Markdown format with the following exact sections:
-# 📋 Meeting Summary: ${meetingTitle || "General Meeting"}
-**Date**: ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-**Attendees**: ${attendeesList}
+Required Format:
+${formatInstructions}
 
-## 🎯 Executive Overview
-(A concise, 2-3 sentence overview of what was discussed, agreed upon, or accomplished)
+Return ONLY the formatted Markdown document without extra preamble or code fences.`;
 
-## 💬 Key Discussion Highlights
-- (Clear, structured bullet points highlighting the core discussion topics and points raised)
-
-## 📌 Decisions Made
-- (List of concrete decisions and alignments reached during the call)
-
-## ✅ Action Items & Next Steps
-- [ ] **Assignee / Team**: Specific follow-up task or deliverable
-- [ ] **Follow-up**: Next sync or checkpoint
-
-## 📝 Additional Notes & Context
-(Any notable observations, shared links, or remaining questions)
-
-Keep the formatting clean, minimal, professional, and well-organized. Return ONLY the Markdown summary without extraneous conversational filler.`;
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt,
-          config: {
-            temperature: 0.2,
-            maxOutputTokens: 2048,
-          }
-        });
-
-        const outputText = response.text?.trim() || "";
-        if (outputText) {
-          return res.json({
-            status: "success",
-            source: "gemini",
-            notes: outputText,
-            summary: outputText,
-            result: outputText
-          });
-        }
+      const outputText = await generateWithResilience(prompt);
+      if (!outputText) {
+        return res.status(502).json({ error: "Gemini returned an empty notes response." });
       }
+
+      return res.json({
+        status: "success",
+        source: "gemini",
+        notes: outputText,
+        summary: outputText,
+        result: outputText
+      });
     } catch (err: any) {
-      console.warn("[AI Meeting Notes] Gemini API error:", err?.message || err);
+      let msg = String(err?.message || err || "Failed to generate AI meeting notes");
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed?.error?.message) msg = parsed.error.message;
+      } catch {}
+      const statusCode = (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.toLowerCase().includes('quota')) ? 429 : 502;
+      console.warn("[AI Meeting Notes] Gemini API error:", msg);
+      return res.status(statusCode).json({ error: msg });
     }
-
-    // High quality structured fallback if offline or no key
-    const formattedDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const formattedTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
-    const transcriptLines = (transcript || existingNotes || "")
-      .split('\n')
-      .map((l: string) => l.trim())
-      .filter((l: string) => l.length > 0);
-
-    const fallbackNotes = `# 📋 Meeting Summary: ${meetingTitle || "General Meeting"}
-**Date**: ${formattedDate} at ${formattedTime}
-**Attendees**: ${attendeesList}
-
-## 🎯 Executive Overview
-The team convened to discuss ${meetingTitle || "project updates and active topics"}. Key items were reviewed, aligning the group on immediate goals and next deliverables.
-
-## 💬 Key Discussion Highlights
-${transcriptLines.length > 0 
-  ? transcriptLines.slice(0, 10).map((l: string) => `- ${l.replace(/^[•\-\*]\s*/, '')}`).join('\n')
-  : '- Reviewed active meeting agenda and discussion topics.\n- Shared updates across workstreams.'}
-
-## 📌 Decisions Made
-- Confirmed project timelines and active deliverables.
-- Aligned on priority items discussed in the session.
-
-## ✅ Action Items & Next Steps
-- [ ] **Team**: Review meeting minutes and follow up on assigned deliverables
-- [ ] **Host**: Share meeting recording and summary documentation
-- [ ] **Follow-up**: Next scheduled status review
-
-## 📝 Additional Notes & Context
-- Summary automatically generated and archived in Dashboard.`;
-
-    res.json({
-      status: "success",
-      source: "local-engine",
-      notes: fallbackNotes,
-      summary: fallbackNotes,
-      result: fallbackNotes
-    });
   });
 
   // AI Shared Workspace Assistance (Text Editing, Formatting, Improving, Suggestions)
@@ -259,28 +294,31 @@ ${transcriptLines.length > 0
       return res.status(400).json({ error: "Missing content or prompt" });
     }
 
-    try {
-      const ai = getAIClient();
-      if (ai) {
-        let taskPrompt = "";
-        switch (action) {
-          case "improve":
-            taskPrompt = "Improve the clarity, precision, and professional tone of this text. Keep the core meaning intact while making it clean, succinct, and natural:";
-            break;
-          case "fix":
-            taskPrompt = "Fix all grammar, spelling, punctuation, and syntax errors in this text while preserving the original structure:";
-            break;
-          case "summarize":
-            taskPrompt = "Summarize the key points in this document concisely using structured bullet points:";
-            break;
-          case "format":
-            taskPrompt = "Clean up and format this content neatly with clean headers, bullet points, or code blocks where appropriate:";
-            break;
-          default:
-            taskPrompt = instruction ? `Perform the following editing task: ${instruction}` : "Improve and polish this text:";
-        }
+    const ai = getAIClient();
+    if (!ai) {
+      return res.status(503).json({ error: "Gemini API key not configured in server secrets." });
+    }
 
-        const fullPrompt = `${taskPrompt}
+    try {
+      let taskPrompt = "";
+      switch (action) {
+        case "improve":
+          taskPrompt = "Improve the clarity, precision, and professional tone of this text. Keep the core meaning intact while making it clean, succinct, and natural:";
+          break;
+        case "fix":
+          taskPrompt = "Fix all grammar, spelling, punctuation, and syntax errors in this text while preserving the original structure:";
+          break;
+        case "summarize":
+          taskPrompt = "Summarize the key points in this document concisely using structured bullet points:";
+          break;
+        case "format":
+          taskPrompt = "Clean up and format this content neatly with clean headers, bullet points, or code blocks where appropriate:";
+          break;
+        default:
+          taskPrompt = instruction ? `Perform the following editing task: ${instruction}` : "Improve and polish this text:";
+      }
+
+      const fullPrompt = `${taskPrompt}
 File: ${fileName || "document.txt"}
 
 Content to process:
@@ -290,32 +328,26 @@ ${content || ""}
 
 Return ONLY the processed text replacement without introductory greetings or meta-commentary.`;
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: fullPrompt,
-          config: {
-            temperature: 0.2,
-            maxOutputTokens: 2048,
-          }
-        });
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: fullPrompt,
+        config: {
+          maxOutputTokens: 2048,
+        }
+      });
 
-        const resultText = response.text?.trim() || "";
-        return res.json({
-          status: "success",
-          source: "gemini",
-          result: resultText
-        });
-      }
+      const resultText = response.text?.trim() || "";
+      return res.json({
+        status: "success",
+        source: "gemini",
+        result: resultText
+      });
     } catch (err: any) {
-      console.warn("[AI Workspace Assist] Gemini API error:", err?.message || err);
+      const msg = String(err?.message || err || "Workspace assist failed");
+      const statusCode = (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.toLowerCase().includes('quota')) ? 429 : 502;
+      console.warn("[AI Workspace Assist] Gemini API error:", msg);
+      return res.status(statusCode).json({ error: msg });
     }
-
-    // Clean fallback
-    res.json({
-      status: "success",
-      source: "local-engine",
-      result: content ? `${content.trim()}\n\n[Updated with clean formatting]` : "Content updated."
-    });
   });
 
   // LiveKit Token Generation Handler

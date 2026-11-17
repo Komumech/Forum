@@ -46,6 +46,12 @@ import {
   getAIVideoFilterStyle 
 } from '../utils/mediaEnhancer';
 import { SOLID_STUDIO_COLORS, VIRTUAL_BG_PRESETS } from '../utils/backgroundProcessor';
+import {
+  AudioSoundMode,
+  PerformancePreset,
+  PerformanceAudioOptions,
+  PERFORMANCE_PRESET_CONFIGS,
+} from '../utils/audioSmoothing';
 
 export type SettingsCategoryType = 'video' | 'audio' | 'effects' | 'streaming' | 'general' | 'captions' | 'reactions';
 
@@ -67,6 +73,10 @@ interface SettingsModalProps {
   setNoiseCancellation: (val: boolean) => void;
   echoCancellation: boolean;
   setEchoCancellation: (val: boolean) => void;
+  audioSoundMode?: AudioSoundMode;
+  setAudioSoundMode?: (mode: AudioSoundMode) => void;
+  performanceAudioOptions?: PerformanceAudioOptions;
+  setPerformanceAudioOptions?: (opts: PerformanceAudioOptions) => void;
   aiDenoise?: boolean;
   setAiDenoise?: (val: boolean) => void;
   hvacFilter?: boolean;
@@ -101,6 +111,8 @@ interface SettingsModalProps {
   liveResolution: string;
   liveFps: number;
   liveBitrate: string;
+  selectedResolution?: '1080p' | '720p' | '360p';
+  setSelectedResolution?: (val: '1080p' | '720p' | '360p') => void;
   copyIsolatedFeedLink: (p: Participant) => void;
   copyExportLinkAgain: (item: any) => void;
   revokeExportToken: (id: string) => void;
@@ -133,6 +145,101 @@ function MaterialSwitch({ checked, onChange, disabled }: { checked: boolean; onC
   );
 }
 
+function MinimalistRangeSlider({
+  label,
+  helper,
+  valueDisplay,
+  min,
+  max,
+  step = 1,
+  value,
+  onChange,
+}: {
+  label: string;
+  helper: string;
+  valueDisplay: string;
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  onChange: (next: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+
+  const updateFromClientX = useCallback(
+    (clientX: number) => {
+      const el = trackRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const raw = min + ratio * (max - min);
+      const snapped = Math.round(raw / step) * step;
+      onChange(Math.max(min, Math.min(max, Number(snapped.toFixed(4)))));
+    },
+    [min, max, step, onChange]
+  );
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    updateFromClientX(e.clientX);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    updateFromClientX(e.clientX);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      onChange(Math.min(max, Number((value + step).toFixed(4))));
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      onChange(Math.max(min, Number((value - step).toFixed(4))));
+    }
+  };
+
+  return (
+    <div className="py-3.5 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-4">
+        <div className="min-w-0">
+          <span className="text-xs font-medium text-slate-900 block leading-snug">{label}</span>
+          <span className="text-[11px] text-slate-400 block leading-snug mt-0.5">{helper}</span>
+        </div>
+        <span className="text-xs font-mono tabular-nums text-slate-700 shrink-0">{valueDisplay}</span>
+      </div>
+
+      <div
+        ref={trackRef}
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onKeyDown={handleKeyDown}
+        className="relative h-6 flex items-center cursor-pointer touch-none select-none outline-none group focus-visible:ring-1 focus-visible:ring-emerald-700/40 rounded-lg"
+      >
+        <div className="w-full h-[2px] bg-neutral-200 rounded-full relative overflow-hidden">
+          <div
+            className="h-full bg-emerald-700 rounded-full transition-[width] duration-75 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <div
+          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white border border-slate-300 shadow-xs group-hover:border-emerald-700 transition-colors"
+          style={{ left: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsModal({
   isOpen,
   onClose,
@@ -151,6 +258,10 @@ export default function SettingsModal({
   setNoiseCancellation,
   echoCancellation,
   setEchoCancellation,
+  audioSoundMode = 'smooth',
+  setAudioSoundMode,
+  performanceAudioOptions,
+  setPerformanceAudioOptions,
   videoMirroring,
   setVideoMirroring,
   aiVideoOptions = DEFAULT_AI_VIDEO_ENHANCE,
@@ -178,6 +289,8 @@ export default function SettingsModal({
   copyExportLinkAgain,
   revokeExportToken,
   copiedExportId,
+  selectedResolution,
+  setSelectedResolution,
   initialCategory
 }: SettingsModalProps) {
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategoryType>(initialCategory || 'video');
@@ -197,6 +310,7 @@ export default function SettingsModal({
   const [reactionSounds, setReactionSounds] = useState(true);
   const [floatingReactions, setFloatingReactions] = useState(true);
   const [resolutionPreference, setResolutionPreference] = useState<'1080p' | '720p' | '360p'>('1080p');
+  const activeResolution = selectedResolution ?? resolutionPreference;
   const [pushPrefs, setPushPrefs] = useState(() => getPushPreferences());
   const [notifPermission, setNotifPermission] = useState(() => getNotificationSupportStatus());
   const [testPushSent, setTestPushSent] = useState(false);
@@ -511,8 +625,12 @@ export default function SettingsModal({
               <label className="text-sm font-medium text-[#1f1f1f] block">Send resolution</label>
               <CustomDropdown
                 options={resolutionOptions}
-                value={resolutionPreference}
-                onChange={(val) => setResolutionPreference(val as any)}
+                value={activeResolution}
+                onChange={(val) => {
+                  const next = val as '1080p' | '720p' | '360p';
+                  setResolutionPreference(next);
+                  setSelectedResolution?.(next);
+                }}
               />
             </div>
           </div>
@@ -577,14 +695,204 @@ export default function SettingsModal({
               </div>
             </div>
 
+            {/* Sound Profile & Live Performance Studio */}
+            {setAudioSoundMode && (
+              <div className="space-y-4 pt-4 border-t border-neutral-200/70">
+                <div className="space-y-1">
+                  <span className="text-sm font-medium text-slate-900 block">Audio processing</span>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    {audioSoundMode === 'performance'
+                      ? 'Unfiltered stereo mic capture tuned for live vocals, guitars, and instruments.'
+                      : audioSoundMode === 'smooth'
+                        ? 'Warm studio tone with steady volume leveling for clear conversation.'
+                        : 'Everyday speech clarity with standard background noise filtering.'}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1 p-1 bg-stone-100 rounded-xl">
+                  {([
+                    { id: 'standard', label: 'Standard' },
+                    { id: 'smooth', label: 'Smooth Studio' },
+                    { id: 'performance', label: 'Live Music' },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setAudioSoundMode(opt.id)}
+                      className={cn(
+                        "py-2 px-3 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap truncate",
+                        audioSoundMode === opt.id
+                          ? "bg-white text-emerald-800 shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {audioSoundMode === 'performance' && performanceAudioOptions && setPerformanceAudioOptions && (
+                  <div className="pt-4 mt-2 border-t border-neutral-200/60 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-xs font-semibold text-slate-900 block">
+                          Live sound style
+                        </span>
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                          {PERFORMANCE_PRESET_CONFIGS[performanceAudioOptions.profile].description}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cfg = PERFORMANCE_PRESET_CONFIGS[performanceAudioOptions.profile];
+                          setPerformanceAudioOptions({
+                            profile: performanceAudioOptions.profile,
+                            inputGain: cfg.inputGain,
+                            compressionMix: cfg.compressionMix,
+                            warmthDb: cfg.warmthDb,
+                            brillianceDb: cfg.brillianceDb,
+                            roomAmbience: cfg.roomAmbience,
+                          });
+                        }}
+                        className="text-[11px] font-medium text-slate-500 hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        Reset
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1 p-1 bg-stone-100 rounded-xl">
+                      {(['vocal_acoustic', 'instrument_band', 'pure_direct'] as PerformancePreset[]).map((presetKey) => {
+                        const cfg = PERFORMANCE_PRESET_CONFIGS[presetKey];
+                        const isSelected = performanceAudioOptions.profile === presetKey;
+                        return (
+                          <button
+                            key={presetKey}
+                            type="button"
+                            onClick={() =>
+                              setPerformanceAudioOptions({
+                                profile: presetKey,
+                                inputGain: cfg.inputGain,
+                                compressionMix: cfg.compressionMix,
+                                warmthDb: cfg.warmthDb,
+                                brillianceDb: cfg.brillianceDb,
+                                roomAmbience: cfg.roomAmbience,
+                              })
+                            }
+                            className={cn(
+                              'py-2 px-2.5 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap truncate',
+                              isSelected
+                                ? 'bg-white text-emerald-800 shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            )}
+                          >
+                            {cfg.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {performanceAudioOptions.profile !== 'pure_direct' && (
+                      <div className="divide-y divide-neutral-200/50 pt-1">
+                        <MinimalistRangeSlider
+                          label="Mic Volume"
+                          helper="Boosts quiet microphones or lowers loud inputs before shaping."
+                          valueDisplay={`${Math.round(performanceAudioOptions.inputGain * 100)}%`}
+                          min={60}
+                          max={160}
+                          step={5}
+                          value={Math.round(performanceAudioOptions.inputGain * 100)}
+                          onChange={(val) =>
+                            setPerformanceAudioOptions({
+                              ...performanceAudioOptions,
+                              inputGain: val / 100,
+                            })
+                          }
+                        />
+
+                        <MinimalistRangeSlider
+                          label="Volume Balance"
+                          helper="Gently brings up soft notes while preventing sudden loud spikes."
+                          valueDisplay={`${Math.round(performanceAudioOptions.compressionMix * 100)}%`}
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={Math.round(performanceAudioOptions.compressionMix * 100)}
+                          onChange={(val) =>
+                            setPerformanceAudioOptions({
+                              ...performanceAudioOptions,
+                              compressionMix: val / 100,
+                            })
+                          }
+                        />
+
+                        <MinimalistRangeSlider
+                          label="Warmth"
+                          helper="Adds natural body and richness to voices and acoustic guitars."
+                          valueDisplay={`${performanceAudioOptions.warmthDb >= 0 ? `+${performanceAudioOptions.warmthDb.toFixed(1)}` : performanceAudioOptions.warmthDb.toFixed(1)} dB`}
+                          min={-30}
+                          max={60}
+                          step={2}
+                          value={Math.round(performanceAudioOptions.warmthDb * 10)}
+                          onChange={(val) =>
+                            setPerformanceAudioOptions({
+                              ...performanceAudioOptions,
+                              warmthDb: val / 10,
+                            })
+                          }
+                        />
+
+                        <MinimalistRangeSlider
+                          label="Clarity & Detail"
+                          helper="Adds clean brightness so singing and strings stand out clearly."
+                          valueDisplay={`${performanceAudioOptions.brillianceDb >= 0 ? `+${performanceAudioOptions.brillianceDb.toFixed(1)}` : performanceAudioOptions.brillianceDb.toFixed(1)} dB`}
+                          min={-30}
+                          max={60}
+                          step={2}
+                          value={Math.round(performanceAudioOptions.brillianceDb * 10)}
+                          onChange={(val) =>
+                            setPerformanceAudioOptions({
+                              ...performanceAudioOptions,
+                              brillianceDb: val / 10,
+                            })
+                          }
+                        />
+
+                        <MinimalistRangeSlider
+                          label="Room Space"
+                          helper="Adds a subtle, natural acoustic room feel to dry recordings."
+                          valueDisplay={`${Math.round(performanceAudioOptions.roomAmbience * 100)}%`}
+                          min={0}
+                          max={28}
+                          step={2}
+                          value={Math.round(performanceAudioOptions.roomAmbience * 100)}
+                          onChange={(val) =>
+                            setPerformanceAudioOptions({
+                              ...performanceAudioOptions,
+                              roomAmbience: val / 100,
+                            })
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Noise Cancellation Toggle */}
             <div className="flex items-center justify-between py-2 border-t border-[#e0e2ec]">
               <div className="space-y-0.5 pr-4">
                 <span className="text-sm font-medium text-[#1f1f1f] block">Noise cancellation</span>
-                <p className="text-xs text-[#444746]">Filters out background sounds from your microphone</p>
+                <p className="text-xs text-[#444746]">
+                  {audioSoundMode === 'performance'
+                    ? 'Automatically bypassed in Live Performance mode so music never cuts out'
+                    : 'Filters out background sounds from your microphone'}
+                </p>
               </div>
               <MaterialSwitch
-                checked={noiseCancellation}
+                checked={audioSoundMode === 'performance' ? false : noiseCancellation}
+                disabled={audioSoundMode === 'performance'}
                 onChange={() => setNoiseCancellation(!noiseCancellation)}
               />
             </div>
