@@ -150,8 +150,8 @@ export function ErrorFeedbackModal() {
         </div>
 
         {sentSuccess ? (
-          <div className="p-4 rounded-xl bg-emerald-50/80 border border-emerald-200/70 text-emerald-900 text-xs flex items-center gap-2.5">
-            <div className="w-6 h-6 rounded-lg bg-emerald-700 text-white flex items-center justify-center shrink-0">
+          <div className="p-4 rounded-xl bg-stone-50 border border-neutral-200 text-slate-800 text-xs flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0">
               <Check size={13} />
             </div>
             <span className="font-medium">Feedback sent — thank you.</span>

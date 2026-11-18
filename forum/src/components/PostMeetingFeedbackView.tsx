@@ -8,7 +8,7 @@ import {
   Disc,
   FileText,
   Languages,
-  Bot,
+  CheckSquare,
   BarChart3,
   Copy,
   Download,
@@ -40,12 +40,12 @@ const FORUM_FEATURES = [
   {
     icon: Disc,
     title: 'HD Recording',
-    desc: 'Capture full video & audio with active speaker switching.',
+    desc: 'Capture full video and audio with active speaker switching.',
   },
   {
     icon: FileText,
     title: 'Presentations & Docs',
-    desc: 'Share multi-page PDFs, slides & stage templates cleanly.',
+    desc: 'Share multi-page PDFs, slides, and stage templates cleanly.',
   },
   {
     icon: Languages,
@@ -53,8 +53,8 @@ const FORUM_FEATURES = [
     desc: 'Always-on speaker-attributed transcripts saved cleanly in one file.',
   },
   {
-    icon: Bot,
-    title: 'AI Meeting Summary',
+    icon: CheckSquare,
+    title: 'Meeting Summary',
     desc: 'End-of-meeting overview of key points, decisions, and action items.',
   },
 ];
@@ -147,7 +147,7 @@ export default function PostMeetingFeedbackView({
         throw new Error(data?.error || `Could not generate meeting summary (HTTP ${res.status})`);
       }
       const result = data.summary || data.notes || data.result || '';
-      if (!result) throw new Error('Gemini returned an empty summary.');
+      if (!result) throw new Error('Summary service returned an empty response.');
 
       setSummaryText(result);
       try {
@@ -162,7 +162,7 @@ export default function PostMeetingFeedbackView({
           doc(komuDb, 'notes', summaryDocId),
           {
             uid: activeUid,
-            title: `AI Summary: ${meetingTitle || roomId}`,
+            title: `Meeting Summary: ${meetingTitle || roomId}`,
             body: result,
             type: 'summary',
             roomId,
@@ -176,113 +176,115 @@ export default function PostMeetingFeedbackView({
         setSavedSummaryToNotes(true);
       }
     } catch (err: any) {
-      setSummaryError(err?.message || 'Failed to generate AI summary.');
+      setSummaryError(err?.message || 'Failed to generate meeting summary.');
     } finally {
       setIsGeneratingSummary(false);
     }
   };
 
   return (
-    <div className="min-h-[100dvh] w-full bg-[#FBFBFA] text-slate-900 flex flex-col justify-between p-6 sm:p-10 md:p-12 overflow-y-auto">
+    <div className="min-h-[100dvh] w-full bg-[#FBFBFA] text-slate-900 flex flex-col justify-between px-4 py-5 sm:px-8 sm:py-8 md:p-12 overflow-y-auto">
       {/* Minimal Header */}
-      <header className="w-full max-w-4xl mx-auto flex items-center justify-between gap-4">
+      <header className="w-full max-w-3xl mx-auto flex items-center justify-between gap-4">
         <div className="inline-flex items-center gap-2.5">
-          <img src="/forum-logo.png" alt="Forum" className="w-6 h-6 rounded-md object-contain" />
-          <span className="text-sm font-medium text-slate-900 tracking-tight">Forum</span>
+          <img src="/forum-logo.png" alt="Komu" className="w-6 h-6 rounded-md object-contain" />
+          <span className="text-sm font-semibold text-slate-900 tracking-tight">Komu</span>
         </div>
 
         <button
           type="button"
           onClick={onDone}
-          className="px-4 py-2 rounded-xl border border-neutral-200 bg-white hover:border-slate-400 text-xs font-medium text-slate-700 transition-colors cursor-pointer whitespace-nowrap"
+          className="px-3.5 py-2 rounded-xl border border-neutral-200 bg-white hover:border-slate-400 text-xs font-medium text-slate-700 transition-colors cursor-pointer whitespace-nowrap"
         >
           {user ? 'Back to Dashboard' : 'Return Home'}
         </button>
       </header>
 
       {/* Main Content */}
-      <main className="w-full max-w-2xl mx-auto my-8 space-y-8">
-        <section className="bg-white border border-neutral-200/80 rounded-2xl p-6 sm:p-10 space-y-6">
+      <main className="w-full max-w-2xl mx-auto my-6 sm:my-10 space-y-5 sm:space-y-6">
+        <section className="bg-white border border-neutral-200/80 rounded-2xl p-5 sm:p-8 space-y-6">
           <div className="space-y-1.5">
-            <p className="text-xs font-mono uppercase tracking-wider text-slate-400">
+            <p className="text-[11px] font-mono uppercase tracking-wider text-slate-400 truncate">
               {meetingTitle || `Room ${roomId}`}
             </p>
-            <h1 className="text-2xl sm:text-3xl font-light tracking-tight text-slate-900">
+            <h1 className="text-xl sm:text-2xl font-medium tracking-tight text-slate-900">
               {isSubmitted ? 'Thank you for rating this session' : 'How was your meeting?'}
             </h1>
-            <p className="text-sm text-slate-600 leading-relaxed">
+            <p className="text-sm text-slate-500 leading-relaxed">
               {isSubmitted
-                ? 'Your rating and notes are saved to Forum insights.'
-                : 'Take a moment to rate the audio, video, and call experience.'}
+                ? 'Your rating and notes are saved to session insights.'
+                : 'Rate the audio, video, and call reliability.'}
             </p>
           </div>
 
           {!isSubmitted ? (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-5">
               {/* 1-5 Star Selector */}
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2 sm:gap-3" role="radiogroup" aria-label="Meeting rating">
-                  {[1, 2, 3, 4, 5].map((starVal) => {
-                    const filled = starVal <= activeStar;
-                    return (
-                      <button
-                        key={starVal}
-                        type="button"
-                        role="radio"
-                        aria-checked={rating === starVal}
-                        aria-label={`${starVal} ${starVal === 1 ? 'star' : 'stars'}`}
-                        onMouseEnter={() => setHoveredRating(starVal)}
-                        onMouseLeave={() => setHoveredRating(0)}
-                        onClick={() => setRating(starVal)}
-                        className={cn(
-                          'p-2.5 sm:p-3 rounded-xl border transition-colors duration-150 cursor-pointer',
-                          filled
-                            ? 'bg-emerald-50/80 border-emerald-200/80 text-emerald-700'
-                            : 'bg-[#FBFBFA] border-neutral-200/80 text-slate-300 hover:border-slate-300 hover:text-slate-400'
-                        )}
-                      >
-                        <Star
-                          size={22}
-                          className={cn(filled ? 'fill-emerald-600 text-emerald-700' : 'text-current')}
-                        />
-                      </button>
-                    );
-                  })}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2 sm:justify-start" role="radiogroup" aria-label="Meeting rating">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    {[1, 2, 3, 4, 5].map((starVal) => {
+                      const filled = starVal <= activeStar;
+                      return (
+                        <button
+                          key={starVal}
+                          type="button"
+                          role="radio"
+                          aria-checked={rating === starVal}
+                          aria-label={`${starVal} ${starVal === 1 ? 'star' : 'stars'}`}
+                          onMouseEnter={() => setHoveredRating(starVal)}
+                          onMouseLeave={() => setHoveredRating(0)}
+                          onClick={() => setRating(starVal)}
+                          className={cn(
+                            'w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center rounded-xl border transition-colors duration-150 cursor-pointer shrink-0',
+                            filled
+                              ? 'bg-stone-100 border-slate-900/30 text-slate-900'
+                              : 'bg-white border-neutral-200/80 text-slate-300 hover:border-slate-300 hover:text-slate-500'
+                          )}
+                        >
+                          <Star
+                            size={18}
+                            className={cn(filled ? 'fill-slate-900 text-slate-900' : 'text-current')}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
                   {rating > 0 && (
-                    <span className="ml-2 text-xs font-mono text-slate-500 tabular-nums">
-                      {rating} / 5
+                    <span className="text-xs font-mono text-slate-500 tabular-nums whitespace-nowrap shrink-0 sm:ml-2">
+                      {rating}/5
                     </span>
                   )}
                 </div>
 
-                {/* Contextual Response Message */}
+                {/* Contextual Response Message (Clean unboxed text) */}
                 {isLowRating && (
-                  <div className="p-3.5 rounded-xl bg-stone-50 border border-neutral-200/80 text-sm text-slate-800">
+                  <div className="pt-1 space-y-0.5 text-sm">
                     <p className="font-medium text-slate-900">We&apos;ll do better next time.</p>
-                    <p className="text-xs text-slate-600 mt-0.5">
-                      Tell us what felt off — audio, connection, controls, or workflow — so we can fix it.
+                    <p className="text-xs text-slate-500">
+                      Let us know what felt off — audio, connection, controls, or layout.
                     </p>
                   </div>
                 )}
 
                 {isHighRating && (
-                  <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200/60 text-sm text-emerald-900">
-                    <p className="font-medium">
+                  <div className="pt-1 space-y-0.5 text-sm">
+                    <p className="font-medium text-slate-900">
                       {rating === 5
-                        ? 'So glad it sounded and ran great — thank you!'
+                        ? 'Glad everything ran smoothly — thank you!'
                         : rating === 4
-                          ? 'Glad you had a smooth session — thanks for the rating.'
-                          : 'Thanks for sharing — we would love to hear how we can make it a 5.'}
+                          ? 'Glad you had a great session — thanks for the rating.'
+                          : 'Thanks for sharing — tell us what we can improve to make it a 5.'}
                     </p>
-                    <p className="text-xs text-emerald-800/80 mt-0.5">
-                      Optional feedback helps shape what we refine next.
+                    <p className="text-xs text-slate-500">
+                      Optional feedback helps shape upcoming releases.
                     </p>
                   </div>
                 )}
               </div>
 
               {/* Feedback Textarea */}
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <label htmlFor="post-meeting-feedback-text" className="text-xs font-medium text-slate-700 block">
                   {isLowRating ? 'What could we improve?' : 'Share quick feedback (optional)'}
                 </label>
@@ -296,22 +298,22 @@ export default function PostMeetingFeedbackView({
                       ? 'Share what interrupted your call...'
                       : 'Tell us what stood out or what feature you want next...'
                   }
-                  className="w-full py-3.5 px-4 border border-neutral-200 bg-white rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-700/50 focus:border-emerald-700/50 resize-none"
+                  className="w-full py-3 px-3.5 border border-neutral-200 bg-white rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/20 focus:border-slate-400 resize-none"
                 />
               </div>
 
               {errorMsg && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200/70 flex flex-wrap items-center justify-between gap-2">
+                <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-rose-700">{errorMsg}</p>
                   <SendErrorFeedbackButton errorMessage={errorMsg} source="Meeting Rating" />
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <div className="flex items-center justify-between gap-3 pt-1">
                 <button
                   type="button"
                   onClick={onDone}
-                  className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap"
+                  className="px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap"
                 >
                   Skip for now
                 </button>
@@ -319,89 +321,85 @@ export default function PostMeetingFeedbackView({
                 <button
                   type="submit"
                   disabled={rating < 1 || isSubmitting}
-                  className="px-5 py-3 rounded-xl bg-emerald-50/90 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 text-xs sm:text-sm font-medium transition-colors cursor-pointer disabled:opacity-45 disabled:pointer-events-none whitespace-nowrap"
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap"
                 >
-                  {isSubmitting ? 'Saving Rating…' : 'Submit Feedback'}
+                  {isSubmitting ? 'Saving…' : 'Submit Feedback'}
                 </button>
               </div>
             </form>
           ) : (
-            <div className="pt-2 space-y-5">
-              <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50/80 border border-emerald-200/70">
-                <div className="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center shrink-0">
-                  <Check size={16} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-emerald-950">
-                    Rated {rating} / 5 {isLowRating ? "— We'll do better next time." : '— Saved cleanly.'}
+            <div className="space-y-5 pt-1">
+              <div className="space-y-1.5 border-t border-neutral-100 pt-4">
+                <div className="flex items-center gap-2 text-slate-900">
+                  <Check size={16} className="text-slate-700 shrink-0" />
+                  <p className="text-sm font-medium text-slate-900">
+                    Rated <span className="whitespace-nowrap font-mono tabular-nums">{rating}/5</span>{' '}
+                    <span className="text-slate-500 font-normal">
+                      {isLowRating ? "— We'll do better next time." : '— Saved cleanly.'}
+                    </span>
                   </p>
-                  {comment.trim() && (
-                    <p className="text-xs text-emerald-800/80 truncate mt-0.5">“{comment.trim()}”</p>
-                  )}
                 </div>
+                {comment.trim() && (
+                  <p className="text-xs text-slate-500 pl-6 break-words">“{comment.trim()}”</p>
+                )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2.5 pt-1">
                 <button
                   type="button"
                   onClick={onDone}
-                  className="px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-medium transition-colors cursor-pointer whitespace-nowrap text-center"
                 >
                   {user ? 'Go to Dashboard' : 'Back to Home'}
                 </button>
                 <button
                   type="button"
                   onClick={() => navigate('/feedback')}
-                  className="px-4 py-3 rounded-xl bg-white hover:border-slate-400 border border-neutral-200 text-slate-700 text-xs sm:text-sm font-medium transition-colors cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-white hover:border-slate-400 border border-neutral-200 text-slate-700 text-xs sm:text-sm font-medium transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
                 >
                   <BarChart3 size={15} />
-                  <span>View Feedback & Stats</span>
+                  <span>View Feedback &amp; Stats</span>
                 </button>
               </div>
             </div>
           )}
         </section>
 
-        {/* End-of-Meeting AI Summary Card */}
-        <section className="bg-white border border-neutral-200/80 rounded-2xl p-6 sm:p-10 space-y-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Bot size={16} className="text-emerald-700 shrink-0" />
-                <h2 className="text-base sm:text-lg font-medium text-slate-900 tracking-tight">
-                  End-of-Meeting AI Summary
-                </h2>
-              </div>
-              <p className="text-xs sm:text-sm text-slate-500 leading-relaxed max-w-lg">
-                Explain what this meeting covered, key speaker highlights, and concrete action items based on the session transcript.
-              </p>
-            </div>
+        {/* End-of-Meeting Summary Card */}
+        <section className="bg-white border border-neutral-200/80 rounded-2xl p-5 sm:p-8 space-y-5">
+          <div className="space-y-1.5">
+            <h2 className="text-base sm:text-lg font-medium text-slate-900 tracking-tight">
+              End-of-Meeting Summary
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
+              Generate a structured recap of what was covered, speaker highlights, and concrete action items from your session transcript.
+            </p>
+          </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                disabled={isGeneratingSummary}
-                onClick={() => void handleGenerateEndSummary('summary')}
-                className="px-4 py-2.5 rounded-xl bg-emerald-50/90 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5 whitespace-nowrap"
-              >
-                {isGeneratingSummary && <Loader2 size={13} className="animate-spin" />}
-                <span>{summaryText ? 'Regenerate Summary' : 'Summarize Meeting'}</span>
-              </button>
-              <button
-                type="button"
-                disabled={isGeneratingSummary}
-                onClick={() => void handleGenerateEndSummary('action_items')}
-                className="px-3.5 py-2.5 rounded-xl bg-white hover:border-slate-400 border border-neutral-200 text-slate-700 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
-              >
-                Action Items
-              </button>
-            </div>
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2.5">
+            <button
+              type="button"
+              disabled={isGeneratingSummary}
+              onClick={() => void handleGenerateEndSummary('summary')}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+            >
+              {isGeneratingSummary && <Loader2 size={13} className="animate-spin" />}
+              <span>{summaryText ? 'Regenerate Summary' : 'Summarize Meeting'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={isGeneratingSummary}
+              onClick={() => void handleGenerateEndSummary('action_items')}
+              className="px-4 py-2.5 rounded-xl bg-white hover:border-slate-400 border border-neutral-200 text-slate-700 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center justify-center whitespace-nowrap"
+            >
+              Action Items
+            </button>
           </div>
 
           {summaryError && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200/70 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-rose-700">{summaryError}</p>
-              <SendErrorFeedbackButton errorMessage={summaryError} source="AI Meeting Summary" />
+            <div className="p-3.5 rounded-xl bg-stone-50 border border-rose-200/80 flex flex-wrap items-center justify-between gap-2.5">
+              <p className="text-xs text-rose-700 leading-snug">{summaryError}</p>
+              <SendErrorFeedbackButton errorMessage={summaryError} source="Meeting Summary" />
             </div>
           )}
 
@@ -411,15 +409,15 @@ export default function PostMeetingFeedbackView({
                 rows={8}
                 value={summaryText}
                 onChange={(e) => setSummaryText(e.target.value)}
-                className="w-full p-4 rounded-xl bg-[#FBFBFA] border border-neutral-200/80 text-xs sm:text-sm text-slate-800 leading-relaxed resize-y focus:outline-none focus:ring-1 focus:ring-emerald-700/50"
+                className="w-full p-3.5 rounded-xl bg-[#FBFBFA] border border-neutral-200/80 text-xs sm:text-sm text-slate-800 leading-relaxed resize-y focus:outline-none focus:ring-1 focus:ring-slate-900/20"
               />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs text-slate-500">
                   {savedSummaryToNotes
-                    ? 'Saved to your Notes as a single summary file'
+                    ? 'Saved to your Notes'
                     : 'Ready to copy or download'}
                 </span>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-4">
                   <button
                     type="button"
                     onClick={() => {
@@ -429,7 +427,7 @@ export default function PostMeetingFeedbackView({
                     }}
                     className="text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer inline-flex items-center gap-1 whitespace-nowrap"
                   >
-                    {copiedSummary ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
+                    {copiedSummary ? <Check size={13} className="text-slate-900" /> : <Copy size={13} />}
                     <span>{copiedSummary ? 'Copied' : 'Copy'}</span>
                   </button>
                   <button
@@ -439,11 +437,11 @@ export default function PostMeetingFeedbackView({
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
-                      a.download = `forum-summary-${Date.now()}.md`;
+                      a.download = `komu-summary-${Date.now()}.md`;
                       a.click();
                       URL.revokeObjectURL(url);
                     }}
-                    className="text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer inline-flex items-center gap-1 whitespace-nowrap"
+                    className="text-xs font-medium text-slate-700 hover:text-slate-900 cursor-pointer inline-flex items-center gap-1 whitespace-nowrap"
                   >
                     <Download size={13} />
                     <span>Download .md</span>
@@ -456,16 +454,16 @@ export default function PostMeetingFeedbackView({
 
         {/* Guest Feature Prompt Card — shown specifically when user is not signed in */}
         {!user && (
-          <section className="bg-white border border-neutral-200/80 rounded-2xl p-6 sm:p-10 space-y-6">
+          <section className="bg-white border border-neutral-200/80 rounded-2xl p-5 sm:p-8 space-y-5">
             <div className="space-y-1.5">
-              <p className="text-xs font-mono uppercase tracking-wider text-emerald-700">
-                Explore Forum
+              <p className="text-[11px] font-mono uppercase tracking-wider text-slate-400">
+                Explore Komu
               </p>
-              <h2 className="text-xl sm:text-2xl font-light tracking-tight text-slate-900">
+              <h2 className="text-lg sm:text-xl font-medium tracking-tight text-slate-900">
                 Hey, don&apos;t leave yet — try our other features
               </h2>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                Sign in with Google to save every transcript, AI summary, recording, presentation, and calendar schedule across devices.
+              <p className="text-sm text-slate-500 leading-relaxed">
+                Sign in with Google to save every transcript, summary, recording, presentation, and calendar schedule across devices.
               </p>
             </div>
 
@@ -477,7 +475,7 @@ export default function PostMeetingFeedbackView({
                     key={feat.title}
                     className="p-3.5 rounded-xl bg-[#FBFBFA] border border-neutral-200/70 flex items-start gap-3"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-white border border-neutral-200/80 flex items-center justify-center text-emerald-700 shrink-0">
+                    <div className="w-8 h-8 rounded-lg bg-white border border-neutral-200/80 flex items-center justify-center text-slate-700 shrink-0">
                       <Icon size={15} />
                     </div>
                     <div className="min-w-0">
@@ -489,11 +487,11 @@ export default function PostMeetingFeedbackView({
               })}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 pt-1">
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={() => void onLogin()}
-                className="px-5 py-3 rounded-xl bg-emerald-50/90 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 text-xs sm:text-sm font-medium transition-colors cursor-pointer inline-flex items-center gap-2 whitespace-nowrap"
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-medium transition-colors cursor-pointer inline-flex items-center justify-center gap-2 whitespace-nowrap"
               >
                 <span>Sign in with Google to Try All Features</span>
                 <ArrowRight size={15} />
@@ -501,7 +499,7 @@ export default function PostMeetingFeedbackView({
               <button
                 type="button"
                 onClick={() => navigate('/count')}
-                className="px-4 py-3 rounded-xl border border-neutral-200 bg-white hover:border-slate-400 text-slate-700 text-xs sm:text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-neutral-200 bg-white hover:border-slate-400 text-slate-700 text-xs sm:text-sm font-medium transition-colors cursor-pointer text-center whitespace-nowrap"
               >
                 Meeting Stats
               </button>
@@ -510,8 +508,8 @@ export default function PostMeetingFeedbackView({
         )}
       </main>
 
-      <footer className="w-full max-w-4xl mx-auto text-center">
-        <p className="text-xs text-slate-400">Forum Video Conferencing</p>
+      <footer className="w-full max-w-3xl mx-auto text-center">
+        <p className="text-xs text-slate-400">Komu Video Conferencing</p>
       </footer>
     </div>
   );

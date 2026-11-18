@@ -251,7 +251,7 @@ export default function MeetingQA({
               className={cn(
                 "px-3 py-1.5 text-xs font-medium rounded-xl border transition-colors cursor-pointer whitespace-nowrap truncate",
                 activeFilter === tab.id
-                  ? "bg-emerald-50/90 text-emerald-900 border-emerald-200/80"
+                  ? "bg-slate-900 text-white border-slate-900"
                   : "bg-white text-slate-600 border-neutral-200/70 hover:border-slate-400"
               )}
             >
@@ -326,7 +326,7 @@ export default function MeetingQA({
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer shrink-0 whitespace-nowrap",
                       hasUpvoted
-                        ? "bg-emerald-50 text-emerald-800 border-emerald-200/80"
+                        ? "bg-stone-100 text-slate-900 border-slate-900/30"
                         : "bg-white text-slate-600 border-neutral-200 hover:border-slate-400"
                     )}
                     title="Upvote question"
@@ -380,7 +380,7 @@ export default function MeetingQA({
                           <button
                             type="button"
                             onClick={() => handleMarkAnsweredLive(item.id)}
-                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 text-[11px] font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap truncate"
+                            className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200/70 text-slate-800 border border-neutral-200 text-[11px] font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap truncate"
                           >
                             Answer Live
                           </button>

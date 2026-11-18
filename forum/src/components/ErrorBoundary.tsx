@@ -97,8 +97,8 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             {this.state.sentFeedback ? (
-              <div className="p-3.5 rounded-xl bg-emerald-50/80 border border-emerald-200/70 text-emerald-800 text-xs flex items-center justify-center gap-2">
-                <Check size={14} />
+              <div className="p-3.5 rounded-xl bg-stone-50 border border-neutral-200/80 text-slate-800 text-xs flex items-center justify-center gap-2">
+                <Check size={14} className="text-slate-900" />
                 <span>Feedback sent — thank you.</span>
               </div>
             ) : this.state.showFeedbackForm ? (

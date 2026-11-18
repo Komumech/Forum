@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build:web",
+  "buildCommand": "vite build",
   "outputDirectory": "dist",
   "functions": {
     "api/invite-page.ts": {

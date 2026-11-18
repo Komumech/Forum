@@ -4,8 +4,8 @@ import {
   Pencil, Eraser, Type, Minus, Square, Circle, Undo, Trash2, Download,
   FileText, Plus, Copy, Check, Folder, Search, X, Edit2, Upload,
   FileCode2, FilePlus, RefreshCw, Layers, Eye, MoreVertical, CopyCheck, ArrowUpDown,
-  Bot, Loader2, CornerDownLeft, CheckCheck, ChevronLeft, Maximize2, Minimize2,
-  Image as ImageIcon, Volume2, Video, File
+  Loader2, CornerDownLeft, CheckCheck, ChevronLeft, Maximize2, Minimize2,
+  Image as ImageIcon, Volume2, Video, File, SlidersHorizontal
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -1122,8 +1122,8 @@ export default function JointWorkspace({
                       )}
                       title="AI Workspace Assistant"
                     >
-                      <Bot size={13} className="text-gray-600" />
-                      <span>AI Assist</span>
+                      <SlidersHorizontal size={13} className="text-gray-600" />
+                      <span>Writing Assist</span>
                     </button>
 
                     <button
@@ -1155,9 +1155,8 @@ export default function JointWorkspace({
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 font-medium text-gray-800">
-                          <Bot size={14} className="text-gray-600" />
-                          <span>AI Workspace Assistant</span>
-                          <span className="text-[10px] text-gray-400 font-normal">Gemini</span>
+                          <SlidersHorizontal size={14} className="text-gray-600" />
+                          <span>Writing Assistant</span>
                         </div>
                         <button
                           onClick={() => { setIsAIAssistOpen(false); setAiResult(null); }}
@@ -1320,7 +1319,7 @@ export default function JointWorkspace({
                     return (
                       <div className="flex-1 flex flex-col items-center justify-center p-6 bg-stone-50/60">
                         <div className="p-8 bg-white rounded-2xl border border-neutral-200/80 shadow-xs max-w-md w-full space-y-5 text-center">
-                          <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200/60 flex items-center justify-center mx-auto text-emerald-800">
+                          <div className="w-14 h-14 rounded-2xl bg-stone-100 border border-neutral-200/80 flex items-center justify-center mx-auto text-slate-700">
                             <Volume2 size={24} />
                           </div>
                           <div>

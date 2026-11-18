@@ -27,10 +27,10 @@ import {
   MonitorUp, MonitorOff, MoreVertical, Info, Users, MessageSquare,
   X, Send, ChevronDown, Settings, Copy, Check, Pin, PinOff,
   Layout as LayoutIcon, ShieldCheck, UserX, VolumeX, Monitor, ArrowLeftRight, ArrowLeft,
-  Sparkles, Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
+  Camera, Speaker, Headphones, Clock, Smile, Heart, Languages,
   ChevronUp, ChevronLeft, ChevronRight, FileText, Plus, Search, Trash2, Archive, Save, LayoutGrid, Globe, Calendar, LayoutDashboard,
   Radio, Maximize2, Minimize2, Activity, CheckCheck, Cast, Sliders, Paperclip, ArrowDownToLine, Download,
-  SwitchCamera, Wand2, SlidersHorizontal, Volume2, Bot, Loader2,
+  SwitchCamera, SlidersHorizontal, Volume2, Loader2,
   Image as ImageIcon, Lock, Key, Crown, HelpCircle, BarChart2, Layers, PictureInPicture2
 } from 'lucide-react';
 import { BackgroundBlur, VirtualBackground } from '@livekit/track-processors';
@@ -54,6 +54,7 @@ import { useVoiceActivity } from '../hooks/useVoiceActivity';
 import { applyBackgroundEffect, BackgroundMode, VIRTUAL_BG_PRESETS } from '../utils/backgroundProcessor';
 import { DEFAULT_MEETING_COVER } from '../assets/covers';
 import { triggerForumPushNotification } from '../utils/pushNotifications';
+import { downloadStyledTranscript } from '../utils/transcriptExport';
 import {
   AudioSoundMode,
   PerformancePreset,
@@ -327,6 +328,28 @@ export default function MeetingPage() {
         (user?.email && meetingDetails.createdBy?.toLowerCase() === user.email.toLowerCase())
       );
       const hostDetected = !!(isAdmin || isScheduledHost || isSessionHost);
+      let hostPrefRequireWaitingRoom = false;
+      try {
+        if (user?.uid) {
+          const saved = localStorage.getItem(`settings_${user.uid}`);
+          if (saved) {
+            hostPrefRequireWaitingRoom = JSON.parse(saved)?.requireWaitingRoom === true;
+          }
+        }
+      } catch {}
+
+      let roomLobbyRequired = meetingDetails?.waitingRoom === true;
+      try {
+        const roomSnap = await Promise.race([
+          getDoc(doc(db, 'rooms', room)),
+          new Promise<null>((res) => setTimeout(() => res(null), 1800))
+        ]);
+        if (roomSnap && roomSnap.exists()) {
+          roomLobbyRequired = roomSnap.data()?.lobby === true;
+        } else if (hostDetected) {
+          roomLobbyRequired = meetingDetails?.waitingRoom === true || hostPrefRequireWaitingRoom;
+        }
+      } catch {}
 
       // Persist host details into Firestore meeting & room doc if recognized as host
       if (hostDetected && room) {
@@ -350,13 +373,13 @@ export default function MeetingPage() {
           hostEmail,
           hostName,
           createdAt: Date.now(),
-          lobby: meetingDetails?.waitingRoom === true,
+          lobby: roomLobbyRequired,
           admittedList: [hostId, hostEmail, hostName].filter(Boolean)
         }, { merge: true }).catch(() => {});
       }
 
       const metadata = JSON.stringify({ 
-        pending: !hostDetected, // Hosts are never pending
+        pending: !hostDetected && roomLobbyRequired,
         avatar: user?.photoURL || "",
         isHost: hostDetected
       });
@@ -465,11 +488,11 @@ export default function MeetingPage() {
 
   if (!isReady) {
     return (
-      <div className="min-h-screen bg-[#FBFBFA] flex flex-col items-center justify-center p-4 sm:p-8 lg:p-12 selection:bg-stone-200">
-        <div className="w-full max-w-5xl bg-white rounded-3xl border border-neutral-200/70 shadow-xs overflow-hidden flex flex-col lg:flex-row min-h-[560px] lg:min-h-[600px] transition-all duration-300">
+      <div className="min-h-screen bg-[#FBFBFA] flex flex-col items-center justify-center p-3 sm:p-8 lg:p-12 selection:bg-stone-200">
+        <div className="w-full max-w-5xl bg-white rounded-3xl border border-neutral-200/70 shadow-xs overflow-hidden flex flex-col lg:flex-row lg:min-h-[600px] transition-all duration-300">
           {/* Left: Camera Preview Viewport */}
-          <div className="flex-1 min-h-[340px] lg:min-h-full bg-[#141517] relative flex items-center justify-center overflow-hidden p-6 sm:p-8">
-            <div className="relative w-full h-full aspect-[4/3] sm:aspect-video rounded-2xl overflow-hidden bg-[#18191c] flex items-center justify-center">
+          <div className="flex-1 min-h-[300px] sm:min-h-[360px] lg:min-h-full bg-[#141517] relative flex items-center justify-center overflow-hidden p-3 sm:p-6">
+            <div className="relative w-full min-h-[268px] sm:aspect-video lg:h-full rounded-2xl overflow-hidden bg-[#18191c] flex items-center justify-center">
               {preJoinCam && !cameraPermissionError ? (
                 <video 
                   ref={videoRef} 
@@ -479,13 +502,13 @@ export default function MeetingPage() {
                   className={cn("scale-x-[-1] w-full h-full object-cover", preJoinBg === 'blur' && "blur-md")} 
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center text-center p-6 space-y-4">
+                <div className="flex flex-col items-center justify-center text-center px-5 pt-6 pb-20 sm:pb-24 space-y-3">
                   {user?.photoURL ? (
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border border-white/10 shadow-lg">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border border-white/10 shadow-lg shrink-0">
                       <img src={user.photoURL} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
                   ) : (
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#222428] border border-white/10 flex items-center justify-center text-2xl sm:text-3xl font-light text-slate-200 shadow-lg">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#222428] border border-white/10 flex items-center justify-center text-2xl sm:text-3xl font-light text-slate-200 shadow-lg shrink-0">
                       {name.charAt(0).toUpperCase() || "?"}
                     </div>
                   )}
@@ -497,7 +520,7 @@ export default function MeetingPage() {
                       <button
                         type="button"
                         onClick={requestCameraAccess}
-                        className="px-3.5 py-1.5 bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-medium rounded-xl border border-white/10 transition-colors"
+                        className="px-3.5 py-1.5 bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-medium rounded-xl border border-white/10 transition-colors cursor-pointer"
                       >
                         Enable Camera
                       </button>
@@ -556,7 +579,7 @@ export default function MeetingPage() {
           </div>
 
           {/* Right: Joining Card & Input Area */}
-          <div className="w-full lg:w-[420px] p-8 sm:p-12 lg:p-14 flex flex-col justify-between bg-white">
+          <div className="w-full lg:w-[420px] p-5 sm:p-10 lg:p-14 flex flex-col justify-between bg-white">
             <div className="space-y-6">
               {meetingDetails?.coverImage && (
                 <div className="w-full aspect-video rounded-2xl overflow-hidden border border-neutral-200/80 bg-stone-100">
@@ -916,7 +939,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [isAdmitted, setIsAdmitted] = useState(() => {
     if (initialHostStatus) return true;
     if (meetingDetails?.waitingRoom === true) return false;
-    return false; // Verified via room lobby state in initializeRoom
+    return true; // Default to open admission unless room lobby is explicitly enabled
   });
   const [isMicEnabled, setIsMicEnabled] = useState(initialMic);
   const [isCamEnabled, setIsCamEnabled] = useState(initialCam);
@@ -958,6 +981,17 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   });
   const autoDownloadRecordingRef = useRef(autoDownloadRecording);
   autoDownloadRecordingRef.current = autoDownloadRecording;
+  const [autoDownloadTranscript, setAutoDownloadTranscript] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const saved = localStorage.getItem('forum_auto_download_transcript_v1');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const autoDownloadTranscriptRef = useRef(autoDownloadTranscript);
+  autoDownloadTranscriptRef.current = autoDownloadTranscript;
   const recordingStatusRef = useRef(recordingStatus);
   recordingStatusRef.current = recordingStatus;
   const isExitingAfterRecordingRef = useRef(false);
@@ -1623,16 +1657,33 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     return () => clearInterval(timer);
   }, [localParticipant?.isMicrophoneEnabled, isMicEnabled, localVoice.volume]);
 
-  // Load initial settings from Dashboard/Settings
+  // Load initial settings from Dashboard/Settings and sync auto-download transcript preference
   useEffect(() => {
-    if (user?.uid) {
+    if (!user?.uid) return;
+    try {
       const saved = localStorage.getItem(`settings_${user.uid}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.muteOnJoin) setIsMicEnabled(false);
         if (parsed.videoOffOnJoin) setIsCamEnabled(false);
+        if (typeof parsed.autoDownloadTranscript === 'boolean') {
+          setAutoDownloadTranscript(parsed.autoDownloadTranscript);
+        }
       }
-    }
+    } catch {}
+
+    const unsubProfile = onSnapshot(doc(db, 'userProfiles', user.uid), (snap) => {
+      if (!snap.exists()) return;
+      const remoteAuto = snap.data()?.settings?.autoDownloadTranscript;
+      if (typeof remoteAuto === 'boolean') {
+        setAutoDownloadTranscript(remoteAuto);
+        try {
+          localStorage.setItem('forum_auto_download_transcript_v1', remoteAuto ? 'true' : 'false');
+        } catch {}
+      }
+    }, () => {});
+
+    return () => unsubProfile();
   }, [user]);
 
   // Re-sync if state was false but user/details loaded later
@@ -1889,7 +1940,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             console.warn("[MeetingPage] room doc fetch/create error:", docErr);
           }
 
-          const currentLobby = roomData?.lobby === true || scheduledHostInfo?.waitingRoom === true;
+          const currentLobby =
+            typeof roomData?.lobby === 'boolean'
+              ? roomData.lobby
+              : scheduledHostInfo?.waitingRoom === true;
           setLobbyEnabled(currentLobby);
           if (roomData?.hostKey) setHostKey(roomData.hostKey);
           if (roomData?.hostName) setRoomHostName(roomData.hostName);
@@ -2153,12 +2207,12 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     };
   }, [localParticipant, room, user, loading, meetingDetails]);
 
-  // Host & Co-host: Listen for pending participants + push alert if tab is backgrounded
+  // Host & Co-host: Track pending participants when Waiting Room is enabled; auto-admit if disabled
   const prevPendingCountRef = useRef<number>(0);
   useEffect(() => {
     if (!hasAdminAuthority) return;
-    
-    const pending = remoteParticipants.filter(p => {
+
+    const rawPending = remoteParticipants.filter(p => {
       if (admittedSids.has(p.sid)) return false;
       try {
         const meta = JSON.parse(p.metadata || "{}");
@@ -2167,21 +2221,37 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         return false;
       }
     });
-    setPendingParticipants(pending);
 
-    if (pending.length > prevPendingCountRef.current && typeof document !== 'undefined' && document.hidden) {
-      const guestName = pending[0]?.identity?.split('#')[0] || 'Someone';
+    if (!lobbyEnabled) {
+      setPendingParticipants([]);
+      prevPendingCountRef.current = 0;
+      if (rawPending.length > 0) {
+        setAdmittedSids(prev => {
+          const next = new Set(prev);
+          rawPending.forEach(p => next.add(p.sid));
+          return next;
+        });
+        safeSendData(sendAdmit, { action: 'admit-all' }, true);
+        safeSendData(sendAdmit, "admitted", true);
+      }
+      return;
+    }
+
+    setPendingParticipants(rawPending);
+
+    if (rawPending.length > prevPendingCountRef.current && typeof document !== 'undefined' && document.hidden) {
+      const guestName = rawPending[0]?.identity?.split('#')[0] || 'Someone';
       void triggerForumPushNotification({
         title: 'Waiting Room Request',
-        body: pending.length === 1
+        body: rawPending.length === 1
           ? `${guestName} is waiting to join ${meetingDetails?.title || room}`
-          : `${guestName} and ${pending.length - 1} others are waiting to join`,
+          : `${guestName} and ${rawPending.length - 1} others are waiting to join`,
         url: window.location.pathname,
         tag: `waiting-room-${room}`
       });
     }
-    prevPendingCountRef.current = pending.length;
-  }, [remoteParticipants, hasAdminAuthority, admittedSids, meetingDetails?.title, room]);
+    prevPendingCountRef.current = rawPending.length;
+  }, [remoteParticipants, hasAdminAuthority, admittedSids, lobbyEnabled, meetingDetails?.title, room, safeSendData, sendAdmit]);
 
   const admitUser = async (participant: Participant) => {
     if (!room || !hasAdminAuthority) return;
@@ -2349,6 +2419,38 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const [hideNonVideo, setHideNonVideo] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState(16);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const sheetTouchStartYRef = useRef<number | null>(null);
+  const sheetScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (isMoreMenuOpen && isMobile && !isMobileLandscape) {
+      const prevHtmlOverscroll = document.documentElement.style.overscrollBehaviorY;
+      const prevBodyOverscroll = document.body.style.overscrollBehaviorY;
+      document.documentElement.style.overscrollBehaviorY = 'contain';
+      document.body.style.overscrollBehaviorY = 'contain';
+      return () => {
+        document.documentElement.style.overscrollBehaviorY = prevHtmlOverscroll;
+        document.body.style.overscrollBehaviorY = prevBodyOverscroll;
+      };
+    }
+  }, [isMoreMenuOpen, isMobile, isMobileLandscape]);
+
+  const updateAutoDownloadTranscript = useCallback((next: boolean) => {
+    setAutoDownloadTranscript(next);
+    try {
+      localStorage.setItem('forum_auto_download_transcript_v1', next ? 'true' : 'false');
+      if (user?.uid) {
+        const key = `settings_${user.uid}`;
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        localStorage.setItem(key, JSON.stringify({ ...parsed, autoDownloadTranscript: next }));
+        setDoc(doc(db, 'userProfiles', user.uid), {
+          settings: { autoDownloadTranscript: next }
+        }, { merge: true }).catch(() => {});
+      }
+    } catch {}
+  }, [user?.uid]);
+
   const [mobilePrimaryIdentity, setMobilePrimaryIdentity] = useState<string | null>(null);
   const [mobileOverlaySide, setMobileOverlaySide] = useState<'right' | 'left'>('right');
   const [autoSaveTranscript, setAutoSaveTranscript] = useState(true);
@@ -3324,7 +3426,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   }, [buildCompleteTranscriptText, persistGuestTranscriptLocal, user, komuUser, safeRoomKey, getTranscriptTitleAndHeader, room]);
 
   const downloadTranscriptFileIfNeeded = useCallback(() => {
-    if (hasDownloadedTranscriptRef.current || !autoSaveTranscriptRef.current) return;
+    if (hasDownloadedTranscriptRef.current || !autoSaveTranscriptRef.current || !autoDownloadTranscriptRef.current) return;
     const bodyText = buildCompleteTranscriptText(true);
     const hasSpokenLines =
       transcriptBlocksRef.current.length > 0 ||
@@ -3334,19 +3436,17 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
     hasDownloadedTranscriptRef.current = true;
     try {
-      const blob = new Blob([bodyText], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `forum-transcript-${safeRoomKey}-${Date.now()}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const { title } = getTranscriptTitleAndHeader();
+      downloadStyledTranscript({
+        roomId: room || safeRoomKey,
+        title,
+        dateText: transcriptSessionStartRef.current,
+        rawBody: bodyText,
+      });
     } catch {
       hasDownloadedTranscriptRef.current = false;
     }
-  }, [buildCompleteTranscriptText, safeRoomKey]);
+  }, [buildCompleteTranscriptText, getTranscriptTitleAndHeader, room, safeRoomKey]);
 
   transcriptAutoDownloadHelpersRef.current = {
     saveKeepalive: () => persistTranscriptKeepalive(true),
@@ -3547,7 +3647,9 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
   const appendToTranscriptNoteRef = useRef(appendToTranscriptNote);
   appendToTranscriptNoteRef.current = appendToTranscriptNote;
 
-  // Live Captions & Always-On Background Transcript SpeechRecognition (No AI required)
+  // Live Captions & Always-On Background Transcription
+  // On mobile devices, never invoke window.SpeechRecognition (which triggers Android/iOS OS chimes and interrupts call audio);
+  // instead capture voice quietly from a cloned LiveKit microphone track and transcribe voiced chunks in the background.
   useEffect(() => {
     const shouldTranscribe = (autoSaveTranscript || isCaptionsEnabled) && localParticipant?.isMicrophoneEnabled;
     if (!shouldTranscribe) {
@@ -3569,6 +3671,178 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
       }
       void flushTranscriptBuffer();
       return;
+    }
+
+    const isHandheldMobile =
+      isMobileBrowser() ||
+      (typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
+
+    if (isHandheldMobile) {
+      let isCancelled = false;
+      let clonedTrack: MediaStreamTrack | null = null;
+      let audioCtx: AudioContext | null = null;
+      let rmsInterval: any = null;
+      let chunkTimeout: any = null;
+      let recorder: MediaRecorder | null = null;
+      let activeChunks: BlobPart[] = [];
+      let peakRmsInChunk = 0;
+      let isTranscribing = false;
+
+      const pickSupportedMime = () => {
+        if (typeof MediaRecorder === 'undefined') return '';
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/ogg;codecs=opus',
+        ];
+        return candidates.find((m) => MediaRecorder.isTypeSupported?.(m)) || '';
+      };
+
+      const sendVoicedChunk = async (blob: Blob) => {
+        if (isCancelled || blob.size < 1800) return;
+        if (isTranscribing) return;
+        isTranscribing = true;
+        try {
+          const base64: string = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const res = typeof reader.result === 'string' ? reader.result : '';
+              const comma = res.indexOf(',');
+              resolve(comma >= 0 ? res.slice(comma + 1) : res);
+            };
+            reader.onerror = () => reject(new Error('Audio read error'));
+            reader.readAsDataURL(blob);
+          });
+
+          if (!base64 || isCancelled) return;
+          const resp = await fetch('/api/ai/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              audioBase64: base64,
+              mimeType: blob.type || 'audio/webm',
+            }),
+          });
+          if (!resp.ok || isCancelled) return;
+          const data = await resp.json().catch(() => ({}));
+          const text = String(data?.text || '').replace(/\s+/g, ' ').trim();
+          if (!text || isCancelled) return;
+
+          const mySpeaker = getMySpeakerNameRef.current();
+          void appendToTranscriptNoteRef.current(mySpeaker, text, localParticipant?.identity);
+          safeSendData(sendTranscription, {
+            text,
+            identity: localParticipant?.identity,
+            isFinal: true,
+          }, true);
+          if (isCaptionsEnabled) {
+            showSingleCaption(mySpeaker, text, true);
+          }
+        } catch {
+          // Silent background fallback — never interrupt meeting audio or display intrusive popups
+        } finally {
+          isTranscribing = false;
+        }
+      };
+
+      const startSilentMobileCapture = () => {
+        const micPub = localParticipant?.getTrackPublication(Track.Source.Microphone);
+        const rawTrack = micPub?.track?.mediaStreamTrack;
+        if (!rawTrack || rawTrack.readyState !== 'live' || typeof MediaRecorder === 'undefined') return;
+
+        clonedTrack = rawTrack.clone();
+        const stream = new MediaStream([clonedTrack]);
+
+        try {
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          if (AudioCtx) {
+            audioCtx = new AudioCtx();
+            const source = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 512;
+            source.connect(analyser);
+            const dataArr = new Uint8Array(analyser.fftSize);
+            rmsInterval = setInterval(() => {
+              if (isCancelled) return;
+              analyser.getByteTimeDomainData(dataArr);
+              let sumSq = 0;
+              for (let i = 0; i < dataArr.length; i++) {
+                const v = (dataArr[i] - 128) / 128;
+                sumSq += v * v;
+              }
+              const rms = Math.sqrt(sumSq / dataArr.length);
+              if (rms > peakRmsInChunk) peakRmsInChunk = rms;
+            }, 120);
+          }
+        } catch {}
+
+        const mimeType = pickSupportedMime();
+        const launchSegment = () => {
+          if (isCancelled || !clonedTrack || clonedTrack.readyState !== 'live') return;
+          activeChunks = [];
+          peakRmsInChunk = 0;
+          try {
+            recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+          } catch {
+            return;
+          }
+
+          recorder.ondataavailable = (ev) => {
+            if (ev.data && ev.data.size > 0) activeChunks.push(ev.data);
+          };
+
+          recorder.onstop = () => {
+            const hadVoice = !audioCtx || peakRmsInChunk > 0.015;
+            const chunksCopy = activeChunks;
+            const outType = recorder?.mimeType || mimeType || 'audio/webm';
+            activeChunks = [];
+            if (!isCancelled && hadVoice && chunksCopy.length > 0) {
+              const blob = new Blob(chunksCopy, { type: outType });
+              void sendVoicedChunk(blob);
+            }
+            if (!isCancelled) {
+              setTimeout(launchSegment, 80);
+            }
+          };
+
+          try {
+            recorder.start();
+            chunkTimeout = setTimeout(() => {
+              if (recorder && recorder.state === 'recording') {
+                try {
+                  recorder.stop();
+                } catch {}
+              }
+            }, 5500);
+          } catch {}
+        };
+
+        launchSegment();
+      };
+
+      const bootTimer = setTimeout(startSilentMobileCapture, 250);
+
+      return () => {
+        isCancelled = true;
+        clearTimeout(bootTimer);
+        if (chunkTimeout) clearTimeout(chunkTimeout);
+        if (rmsInterval) clearInterval(rmsInterval);
+        if (recorder && recorder.state === 'recording') {
+          try {
+            recorder.onstop = null;
+            recorder.stop();
+          } catch {}
+        }
+        if (clonedTrack) {
+          try {
+            clonedTrack.stop();
+          } catch {}
+        }
+        if (audioCtx) {
+          audioCtx.close().catch(() => {});
+        }
+      };
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -4022,15 +4296,18 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     }
   }, [isMobile, twoTileKeys, mobilePrimaryIdentity]);
 
+  const isPortraitMobile = isMobile && !isMobileLandscape;
+
   const computedLayout = useMemo(() => {
     const someoneIsSharing = processedTracks.some(t => t.source === Track.Source.ScreenShare) || stageOverlay.active;
     if (layoutMode === 'auto') {
       if (pinnedIdentities.size > 0 || someoneIsSharing) return 'sidebar';
+      if (isPortraitMobile && stageItems.length > 6) return 'sidebar';
       if (spotlightIdentity) return 'imo';
       return 'tiled';
     }
     return layoutMode;
-  }, [layoutMode, pinnedIdentities.size, processedTracks, spotlightIdentity, stageOverlay.active]);
+  }, [layoutMode, pinnedIdentities.size, processedTracks, spotlightIdentity, stageOverlay.active, isPortraitMobile, stageItems.length]);
 
   // IMO View Spotlight Logic: minimum 1 minute hold (never runs in Grid view)
   useEffect(() => {
@@ -4442,7 +4719,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-[#141517] p-6">
         <div className="max-w-md w-full bg-white p-8 sm:p-10 rounded-2xl border border-neutral-200/80 text-center space-y-5">
-          <div className="w-14 h-14 bg-emerald-50/80 rounded-2xl flex items-center justify-center mx-auto text-emerald-800 border border-emerald-200/60">
+          <div className="w-14 h-14 bg-stone-100 rounded-2xl flex items-center justify-center mx-auto text-slate-700 border border-neutral-200/70">
             <Clock size={26} />
           </div>
           <div className="space-y-1.5">
@@ -4455,7 +4732,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             <button 
               type="button"
               onClick={() => window.location.reload()}
-              className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-medium transition-colors whitespace-nowrap truncate cursor-pointer"
+              className="w-full py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium transition-colors whitespace-nowrap truncate cursor-pointer"
             >
               Retry Connection
             </button>
@@ -4519,7 +4796,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                 <button
                   type="button"
                   onClick={() => setCurrentBreakoutRoomId(null)}
-                  className="px-2.5 py-1 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/60 rounded-lg text-[11px] font-medium whitespace-nowrap truncate transition-colors cursor-pointer"
+                  className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-medium whitespace-nowrap truncate transition-colors cursor-pointer"
                 >
                   Return to Main Room
                 </button>
@@ -4527,7 +4804,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
             )}
             {broadcastBanner && (
               <div className="flex items-center gap-3 px-4 py-2 bg-white/95 backdrop-blur-md text-slate-900 rounded-xl border border-neutral-200/80 text-xs max-w-md">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-800 bg-emerald-50/80 border border-emerald-200/60 px-2 py-0.5 rounded-lg shrink-0">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 shrink-0">
                   Broadcast
                 </span>
                 <span className="text-slate-700 truncate">{broadcastBanner}</span>
@@ -4545,71 +4822,92 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
         )}
       </AnimatePresence>
 
-      {/* Host & Co-Host Admit Notification */}
+      {/* Host & Co-Host Admit Notification — shows all pending participants + quick disable toggle */}
       <AnimatePresence>
-        {hasAdminAuthority && pendingParticipants.length > 0 && (
+        {hasAdminAuthority && lobbyEnabled && pendingParticipants.length > 0 && (
           <motion.div 
-            initial={{ opacity: 0, y: -20 }}
+            initial={{ opacity: 0, y: -16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="absolute top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-lg px-4 pointer-events-auto"
+            exit={{ opacity: 0, y: -16 }}
+            className="absolute top-3 sm:top-16 left-1/2 -translate-x-1/2 z-[100] w-[calc(100%-1.5rem)] max-w-md pointer-events-auto"
           >
-            <div className="bg-white/95 backdrop-blur-xl p-4 rounded-2xl border border-neutral-200/80 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                {(() => {
-                  let pAvatar = "";
-                  try {
-                    pAvatar = JSON.parse(pendingParticipants[0]?.metadata || "{}").avatar;
-                  } catch (e) {}
-                  return pAvatar ? (
-                    <img src={pAvatar} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0 border border-neutral-200" referrerPolicy="no-referrer" />
-                  ) : (
-                    <div className="w-10 h-10 bg-stone-100 border border-neutral-200 rounded-xl flex items-center justify-center text-slate-700 font-medium shrink-0">
-                      {pendingParticipants[0].identity.charAt(0).toUpperCase()}
-                    </div>
-                  );
-                })()}
+            <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-neutral-200/80 shadow-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-neutral-100 flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-900 truncate">
-                    {pendingParticipants.length === 1 
-                      ? `${pendingParticipants[0].identity.split('#')[0]} wants to join`
-                      : `${pendingParticipants[0].identity.split('#')[0]} and ${pendingParticipants.length - 1} other(s) waiting`}
+                  <p className="text-xs sm:text-sm font-medium text-slate-900 truncate">
+                    Waiting to join ({pendingParticipants.length})
                   </p>
-                  <p className="text-xs text-slate-500">Waiting room admission</p>
+                  <p className="text-[11px] text-slate-500">Approval is currently required</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {pendingParticipants.length > 1 && (
+                    <button 
+                      type="button"
+                      onClick={admitAllUsers}
+                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      Admit All
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setLobbyEnabled(false);
+                      try {
+                        await setDoc(doc(db, 'rooms', room), { lobby: false }, { merge: true });
+                      } catch {}
+                      await admitAllUsers();
+                      setToastMessage("Waiting room turned off — everyone can join freely");
+                      setTimeout(() => setToastMessage(null), 3000);
+                    }}
+                    className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-slate-700 text-[11px] font-medium rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                    title="Turn off waiting room and let everyone join freely"
+                  >
+                    Turn off approval
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {pendingParticipants.length > 1 && (
-                  <button 
-                    type="button"
-                    onClick={admitAllUsers}
-                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-medium rounded-xl transition-colors whitespace-nowrap truncate cursor-pointer"
-                  >
-                    Admit All ({pendingParticipants.length})
-                  </button>
-                )}
-                <button 
-                  type="button"
-                  onClick={() => admitUser(pendingParticipants[0])}
-                  className="px-3 py-1.5 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/60 text-xs font-medium rounded-xl transition-colors whitespace-nowrap truncate cursor-pointer"
-                >
-                  Admit
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => declineUser({ sid: pendingParticipants[0].sid, identity: pendingParticipants[0].identity })}
-                  className="px-3 py-1.5 bg-white hover:bg-stone-50 text-slate-700 border border-neutral-200 hover:border-slate-400 text-xs font-medium rounded-xl transition-colors whitespace-nowrap truncate cursor-pointer"
-                >
-                  Decline
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => navigateSidebar('waiting', null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer"
-                  title="View Waiting Room"
-                >
-                  <Users size={16} />
-                </button>
+
+              <div className="max-h-[210px] overflow-y-auto custom-scroll divide-y divide-neutral-100">
+                {pendingParticipants.map((p) => {
+                  let pAvatar = "";
+                  try {
+                    pAvatar = JSON.parse(p.metadata || "{}").avatar;
+                  } catch {}
+                  const displayName = p.identity.split('#')[0];
+                  return (
+                    <div key={p.sid} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {pAvatar ? (
+                          <img src={pAvatar} alt={displayName} className="w-8 h-8 rounded-xl object-cover shrink-0 border border-neutral-200" referrerPolicy="no-referrer" />
+                        ) : (
+                          <div className="w-8 h-8 bg-stone-100 border border-neutral-200 rounded-xl flex items-center justify-center text-slate-700 font-medium text-xs shrink-0">
+                            {displayName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="text-xs sm:text-sm font-medium text-slate-900 truncate">
+                          {displayName}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button 
+                          type="button"
+                          onClick={() => declineUser({ sid: p.sid, identity: p.identity })}
+                          className="px-2.5 py-1.5 bg-white hover:bg-stone-50 text-slate-600 border border-neutral-200 hover:border-slate-400 text-xs font-medium rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                        >
+                          Decline
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => admitUser(p)}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+                        >
+                          Admit
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </motion.div>
@@ -4618,10 +4916,10 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
 
       {/* Main Grid Area */}
       <div className={cn(
-        "flex-1 relative flex flex-col items-center justify-center p-2 sm:p-3 pt-1 sm:pt-2 bg-[#131416] overflow-hidden min-h-0 transition-all duration-300",
+        "flex-1 relative flex flex-col items-center justify-center p-1.5 sm:p-3 pt-1.5 sm:pt-2 bg-[#131416] overflow-hidden min-h-0 transition-all duration-300",
         isMobileLandscape 
           ? (isToolbarCollapsed ? "pr-2 sm:pr-3 pb-2 sm:pb-3" : "pr-[78px] sm:pr-[90px] pb-2 sm:pb-3") 
-          : (isToolbarCollapsed ? "pb-2 sm:pb-3" : "pb-[96px] sm:pb-[106px]")
+          : (isToolbarCollapsed ? "pb-1.5 sm:pb-3" : "pb-[84px] sm:pb-[96px]")
       )}>
         {/* Floating Silence Alert: Zero circles, zero pills, stage-centered */}
         <AnimatePresence>
@@ -4885,38 +5183,93 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     </div>
                   </div>
                 ) : computedLayout === 'sidebar' && focusItem ? (
-                  <div className="flex flex-col md:flex-row gap-3.5 sm:gap-5 h-full w-full max-w-6xl px-3 sm:px-5 pt-12 md:pt-14 pb-3 items-center justify-center min-h-0">
-                    <div className="flex-[3] w-full min-w-0 flex items-center justify-center">
-                      <div className="relative w-full max-w-[min(860px,calc((100vh-205px)*16/9))] aspect-video bg-bg-dark rounded-2xl overflow-hidden shadow-2xl border border-white/5">
-                        <div className="absolute inset-0 w-full h-full">
-                          {renderStageItemTile(focusItem, { isFocal: true })}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="w-full md:w-[164px] lg:w-[180px] h-[96px] md:h-full max-h-[calc(100vh-185px)] overflow-x-auto md:overflow-y-auto flex md:flex-col md:justify-center gap-3 custom-scroll p-1 shrink-0">
-                      {stageItems
-                        .filter((item) => item.key !== focusItem.key)
-                        .map((item) => (
+                  <div className={cn(
+                    "flex flex-col md:flex-row h-full w-full max-w-6xl items-center justify-center min-h-0",
+                    isPortraitMobile
+                      ? "gap-2 px-1 pt-0.5 pb-1"
+                      : "gap-3 sm:gap-5 px-2.5 sm:px-5 pt-2 md:pt-14 pb-2 md:pb-3"
+                  )}>
+                    <div className="flex-1 md:flex-[3] w-full h-full min-w-0 min-h-0 flex items-center justify-center">
+                      {(() => {
+                        const isFocusPortraitCamera =
+                          isPortraitMobile &&
+                          (focusItem.kind !== 'track' || focusItem.trackRef.source !== Track.Source.ScreenShare) &&
+                          focusItem.kind !== 'stage_card';
+                        return (
                           <div
-                            key={item.key}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setSpotlightIdentity(item.key)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') setSpotlightIdentity(item.key); }}
-                            className="relative w-[144px] sm:w-[156px] md:w-full h-full md:h-auto aspect-[16/10] rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none"
-                            title={`Focus on ${getItemDisplayLabel(item)}`}
+                            className={cn(
+                              "relative bg-bg-dark overflow-hidden shadow-2xl border border-white/5",
+                              isFocusPortraitCamera
+                                ? "w-full h-full rounded-2xl"
+                                : "w-full max-w-[min(860px,calc((100vh-205px)*16/9))] aspect-video rounded-2xl"
+                            )}
                           >
                             <div className="absolute inset-0 w-full h-full">
-                              {renderStageItemTile(item, { isCompact: true, interactive: false })}
+                              {renderStageItemTile(focusItem, {
+                                isFocal: true,
+                                isMobilePortrait: isFocusPortraitCamera,
+                              })}
                             </div>
                           </div>
-                        ))}
+                        );
+                      })()}
                     </div>
+                    {isPortraitMobile ? (
+                      <div className="w-full h-[116px] overflow-x-auto custom-scroll py-0.5 shrink-0 flex items-center">
+                        <div className="flex items-center justify-center gap-2 min-w-full w-max px-0.5">
+                          {stageItems
+                            .filter((item) => item.key !== focusItem.key)
+                            .map((item) => (
+                              <div
+                                key={item.key}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSpotlightIdentity(item.key)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') setSpotlightIdentity(item.key); }}
+                                className="relative w-[108px] h-[108px] aspect-square rounded-2xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none"
+                                title={`Focus on ${getItemDisplayLabel(item)}`}
+                              >
+                                <div className="absolute inset-0 w-full h-full">
+                                  {renderStageItemTile(item, {
+                                    isCompact: true,
+                                    interactive: false,
+                                    isMobilePortrait: true,
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex md:flex-col md:justify-center gap-2.5 md:gap-3 custom-scroll p-1 shrink-0 w-full md:w-[164px] lg:w-[180px] h-[96px] md:h-full max-h-[calc(100vh-185px)] overflow-x-auto md:overflow-y-auto">
+                        {stageItems
+                          .filter((item) => item.key !== focusItem.key)
+                          .map((item) => (
+                            <div
+                              key={item.key}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setSpotlightIdentity(item.key)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') setSpotlightIdentity(item.key); }}
+                              className="relative rounded-xl overflow-hidden bg-bg-dark border border-white/10 hover:border-white/30 transition-all shrink-0 cursor-pointer shadow-md select-none w-[144px] sm:w-[156px] md:w-full h-full md:h-auto aspect-[16/10]"
+                              title={`Focus on ${getItemDisplayLabel(item)}`}
+                            >
+                              <div className="absolute inset-0 w-full h-full">
+                                {renderStageItemTile(item, {
+                                  isCompact: true,
+                                  interactive: false,
+                                  isMobilePortrait: false,
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
-                ) : isMobile && visibleStageItems.length === 2 && mobilePrimaryItem && mobileSecondaryItem ? (
+                ) : isMobile && visibleStageItems.length === 2 && layoutMode !== 'tiled' && mobilePrimaryItem && mobileSecondaryItem ? (
                   <div ref={mobilePipStageRef} className="relative w-full h-full">
                     <div className="absolute inset-0 rounded-[28px] overflow-hidden bg-bg-dark">
-                      {renderStageItemTile(mobilePrimaryItem, { isFocal: true })}
+                      {renderStageItemTile(mobilePrimaryItem, { isFocal: true, isMobilePortrait: isPortraitMobile })}
                     </div>
 
                     <DraggableEdgeSnapCard
@@ -4928,7 +5281,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       className="z-20 w-[132px] h-[176px] rounded-3xl overflow-hidden border border-white/15 shadow-2xl bg-bg-dark"
                     >
                       <div className="relative w-full h-full">
-                        {renderStageItemTile(mobileSecondaryItem, { isCompact: true })}
+                        {renderStageItemTile(mobileSecondaryItem, { isCompact: true, isMobilePortrait: isPortraitMobile })}
                         <button
                           type="button"
                           data-no-drag="true"
@@ -4945,85 +5298,155 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     </DraggableEdgeSnapCard>
                   </div>
                 ) : visibleStageItems.length === 1 ? (
-                  <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
+                  <div className={cn(
+                    "w-full h-full flex items-center justify-center min-h-0 min-w-0",
+                    isPortraitMobile ? "p-1" : "p-2 sm:p-4"
+                  )}>
                     <div
                       className={cn(
                         "relative w-full transition-all duration-300 ease-out",
-                        isMobile && !isMobileLandscape
-                          ? "max-w-[460px] max-h-[calc(100dvh-120px)] aspect-[9/16] rounded-3xl overflow-hidden shadow-2xl"
+                        isPortraitMobile
+                          ? "h-full rounded-2xl overflow-hidden shadow-2xl"
                           : "max-w-[min(860px,calc((100vh-200px)*16/9))] aspect-video rounded-2xl overflow-hidden shadow-2xl"
                       )}
                     >
                       <div className="absolute inset-0 w-full h-full">
                         {renderStageItemTile(visibleStageItems[0], {
                           isFocal: true,
-                          isMobilePortrait: isMobile && !isMobileLandscape,
+                          isMobilePortrait: isPortraitMobile,
                         })}
                       </div>
                     </div>
                   </div>
                 ) : visibleStageItems.length === 2 ? (
-                  <div className="w-full h-full flex items-center justify-center p-3 sm:p-6 min-h-0 min-w-0">
-                    <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 items-center justify-items-center">
+                  <div className={cn(
+                    "w-full h-full flex items-center justify-center min-h-0 min-w-0",
+                    isPortraitMobile ? "p-1" : "p-2.5 sm:p-6"
+                  )}>
+                    <div
+                      className={cn(
+                        "w-full max-w-6xl items-center justify-items-center",
+                        isPortraitMobile
+                          ? "h-[82%] max-h-[580px] grid grid-cols-2 grid-rows-1 gap-2"
+                          : "grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6"
+                      )}
+                    >
                       {visibleStageItems.map((item) => (
                         <div
                           key={item.key}
-                          className="relative w-full max-w-[calc((100vh-190px)*16/9)] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl min-w-0 border border-white/5"
+                          className={cn(
+                            "relative w-full overflow-hidden bg-bg-dark shadow-xl min-w-0 border border-white/5",
+                            isPortraitMobile
+                              ? "h-full rounded-2xl"
+                              : "max-w-[calc((100vh-190px)*16/9)] aspect-video rounded-2xl"
+                          )}
                         >
                           <div className="absolute inset-0 w-full h-full">
-                            {renderStageItemTile(item, { isFocal: true })}
+                            {renderStageItemTile(item, { isFocal: true, isMobilePortrait: isPortraitMobile })}
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 ) : visibleStageItems.length === 3 ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center p-3 sm:p-5 min-h-0 min-w-0 gap-3.5 sm:gap-4">
-                    <div className="w-full max-w-5xl grid grid-cols-2 gap-3.5 sm:gap-4 items-center justify-items-center">
-                      {visibleStageItems.slice(0, 2).map((item) => (
-                        <div
-                          key={item.key}
-                          className="relative w-full max-w-[calc(((100vh-200px)/2)*16/9)] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0"
-                        >
-                          <div className="absolute inset-0 w-full h-full">
-                            {renderStageItemTile(item)}
+                  isPortraitMobile ? (
+                    <div className="w-full h-full p-1 min-h-0 min-w-0">
+                      <div className="w-full h-full grid grid-cols-2 grid-rows-2 gap-2">
+                        {visibleStageItems.slice(0, 2).map((item) => (
+                          <div
+                            key={item.key}
+                            className="relative w-full h-full overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0 min-h-0 rounded-2xl"
+                          >
+                            <div className="absolute inset-0 w-full h-full">
+                              {renderStageItemTile(item, { isMobilePortrait: true })}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="w-full max-w-5xl flex items-center justify-center">
-                      <div className="relative w-full max-w-[min(50%,calc(((100vh-200px)/2)*16/9))] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0">
-                        <div className="absolute inset-0 w-full h-full">
-                          {renderStageItemTile(visibleStageItems[2])}
+                        ))}
+                        <div className="col-span-2 w-[calc(50%-4px)] mx-auto h-full relative overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0 min-h-0 rounded-2xl">
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(visibleStageItems[2], { isMobilePortrait: true })}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center p-2.5 sm:p-5 min-h-0 min-w-0 gap-2.5 sm:gap-4">
+                      <div className="w-full max-w-5xl grid grid-cols-2 gap-2.5 sm:gap-4 items-center justify-items-center">
+                        {visibleStageItems.slice(0, 2).map((item) => (
+                          <div
+                            key={item.key}
+                            className="relative w-full overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0 max-w-[calc(((100vh-200px)/2)*16/9)] aspect-video rounded-2xl"
+                          >
+                            <div className="absolute inset-0 w-full h-full">
+                              {renderStageItemTile(item, { isMobilePortrait: false })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="w-full max-w-5xl flex items-center justify-center">
+                        <div className="relative w-full overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0 max-w-[min(50%,calc(((100vh-200px)/2)*16/9))] aspect-video rounded-2xl">
+                          <div className="absolute inset-0 w-full h-full">
+                            {renderStageItemTile(visibleStageItems[2], { isMobilePortrait: false })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
                 ) : visibleStageItems.length === 4 ? (
-                  <div className="w-full h-full flex items-center justify-center p-3 sm:p-5 min-h-0 min-w-0">
-                    <div className="w-full max-w-5xl grid grid-cols-2 gap-3.5 sm:gap-4 items-center justify-items-center">
+                  <div className={cn(
+                    "w-full h-full flex items-center justify-center min-h-0 min-w-0",
+                    isPortraitMobile ? "p-1" : "p-2.5 sm:p-5"
+                  )}>
+                    <div
+                      className={cn(
+                        "w-full grid",
+                        isPortraitMobile
+                          ? "h-full grid-cols-2 grid-rows-2 gap-2"
+                          : "max-w-5xl grid-cols-2 gap-4 items-center justify-items-center"
+                      )}
+                    >
                       {visibleStageItems.map((item) => (
                         <div
                           key={item.key}
-                          className="relative w-full max-w-[calc(((100vh-200px)/2)*16/9)] aspect-video rounded-2xl overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0"
+                          className={cn(
+                            "relative w-full overflow-hidden bg-bg-dark shadow-xl border border-white/5 min-w-0",
+                            isPortraitMobile
+                              ? "h-full min-h-0 rounded-2xl"
+                              : "max-w-[calc(((100vh-200px)/2)*16/9)] aspect-video rounded-2xl"
+                          )}
                         >
                           <div className="absolute inset-0 w-full h-full">
-                            {renderStageItemTile(item)}
+                            {renderStageItemTile(item, { isMobilePortrait: isPortraitMobile })}
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 ) : visibleStageItems.length <= 6 ? (
-                  <div className="w-full h-full flex items-center justify-center p-2 sm:p-4 min-h-0 min-w-0">
-                    <div className="w-full max-w-5xl grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[calc(100vh-160px)] items-center justify-center transition-all duration-300 ease-out">
+                  <div className={cn(
+                    "w-full h-full flex items-center justify-center min-h-0 min-w-0",
+                    isPortraitMobile ? "p-1" : "p-2 sm:p-4"
+                  )}>
+                    <div
+                      className={cn(
+                        "w-full grid transition-all duration-300 ease-out",
+                        isPortraitMobile
+                          ? "h-full grid-cols-2 grid-rows-3 gap-2"
+                          : "max-w-5xl grid-cols-2 md:grid-cols-3 gap-3 max-h-[calc(100vh-160px)] items-center justify-items-center"
+                      )}
+                    >
                       {visibleStageItems.map((item) => (
                         <div
                           key={item.key}
-                          className="relative w-full aspect-video max-h-[calc((100vh-190px)/2)] rounded-xl overflow-hidden bg-bg-dark shadow-md min-w-0"
+                          className={cn(
+                            "relative w-full overflow-hidden bg-bg-dark shadow-md min-w-0",
+                            isPortraitMobile
+                              ? "h-full min-h-0 rounded-2xl border border-white/5"
+                              : "aspect-video max-h-[calc((100vh-190px)/2)] rounded-xl"
+                          )}
                         >
                           <div className="absolute inset-0 w-full h-full">
-                            {renderStageItemTile(item)}
+                            {renderStageItemTile(item, { isMobilePortrait: isPortraitMobile })}
                           </div>
                         </div>
                       ))}
@@ -5298,8 +5721,11 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     }}
                     onToggleLobby={async (enabled) => {
                       setLobbyEnabled(enabled);
-                      await updateDoc(doc(db, 'rooms', room), { lobby: enabled });
-                      setToastMessage(enabled ? "Waiting room enabled" : "Waiting room disabled");
+                      await setDoc(doc(db, 'rooms', room), { lobby: enabled }, { merge: true });
+                      if (!enabled) {
+                        await admitAllUsers();
+                      }
+                      setToastMessage(enabled ? "Waiting room enabled" : "Waiting room disabled — everyone can join freely");
                       setTimeout(() => setToastMessage(null), 2500);
                     }}
                     onAdmitUser={(p) => {
@@ -5804,7 +6230,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                                 className={cn(
                                   "inline-flex items-center gap-1 rounded-xl border transition-colors shrink-0",
                                   active
-                                    ? "bg-emerald-50/80 text-emerald-800 border-emerald-200/80"
+                                    ? "bg-slate-900 text-white border-slate-900"
                                     : "bg-white text-slate-600 border-neutral-200/80 hover:border-slate-300"
                                 )}
                               >
@@ -5875,7 +6301,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                             />
                             <button
                               type="submit"
-                              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-[13px] font-medium rounded-xl cursor-pointer whitespace-nowrap"
+                              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-[13px] font-medium rounded-xl cursor-pointer whitespace-nowrap"
                             >
                               Add
                             </button>
@@ -6008,7 +6434,37 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   />
                 )}
                 {activeTab === 'waiting' && (
-                  <div className="space-y-6">
+                  <div className="space-y-5">
+                    {hasAdminAuthority && (
+                      <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-stone-50 border border-neutral-200/70">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-slate-900">Require approval to join</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {lobbyEnabled ? 'Guests wait for you to admit them' : 'Everyone can join freely'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={lobbyEnabled}
+                          onClick={async () => {
+                            const next = !lobbyEnabled;
+                            setLobbyEnabled(next);
+                            await setDoc(doc(db, 'rooms', room), { lobby: next }, { merge: true });
+                            if (!next) await admitAllUsers();
+                            setToastMessage(next ? 'Waiting room enabled' : 'Waiting room disabled — everyone can join freely');
+                            setTimeout(() => setToastMessage(null), 2500);
+                          }}
+                          className={cn(
+                            "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                            lobbyEnabled ? "bg-slate-900" : "bg-neutral-300"
+                          )}
+                        >
+                          <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", lobbyEnabled ? "translate-x-5" : "translate-x-0")} />
+                        </button>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <p className="text-xs font-medium text-slate-700 uppercase tracking-wider">Waiting Room</p>
@@ -6018,7 +6474,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                         <button
                           type="button"
                           onClick={admitAllUsers}
-                          className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-medium rounded-xl transition-colors whitespace-nowrap truncate cursor-pointer"
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-colors whitespace-nowrap truncate cursor-pointer"
                         >
                           Admit All
                         </button>
@@ -6048,7 +6504,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                               <button 
                                 type="button"
                                 onClick={() => admitUser(p)}
-                                className="px-2.5 py-1.5 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/60 text-xs font-medium rounded-xl transition-colors whitespace-nowrap truncate cursor-pointer"
+                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl transition-colors whitespace-nowrap truncate cursor-pointer"
                               >
                                 Admit
                               </button>
@@ -6253,6 +6709,8 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
           room={room}
           isCaptionsEnabled={isCaptionsEnabled}
           setIsCaptionsEnabled={setIsCaptionsEnabled}
+          autoDownloadTranscript={autoDownloadTranscript}
+          setAutoDownloadTranscript={updateAutoDownloadTranscript}
           selectedBg={selectedBg}
           setSelectedBg={setSelectedBg}
           selectedBgImage={selectedBgImage}
@@ -6736,16 +7194,86 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                             animate={{ y: 0 }}
                             exit={{ y: "100%" }}
                             transition={{ type: "spring", damping: 28, stiffness: 280 }}
-                            className="fixed inset-x-0 bottom-0 z-[130] bg-[#1a1c1e] text-white rounded-t-3xl border-t border-white/10 shadow-2xl pb-8 max-h-[84vh] flex flex-col overflow-hidden"
+                            style={{ overscrollBehaviorY: 'contain' }}
+                            className="fixed inset-x-0 bottom-0 z-[130] bg-[#1a1c1e] text-white rounded-t-3xl border-t border-white/10 shadow-2xl pb-6 max-h-[68dvh] flex flex-col overflow-hidden overscroll-contain"
                           >
-                            {/* Drag handle */}
-                            <div 
-                              className="w-10 h-1 bg-white/20 rounded-full mx-auto my-3 cursor-pointer shrink-0" 
-                              onClick={() => setIsMoreMenuOpen(false)}
-                            />
+                            {/* Drag handle & Close Header (Prevents accidental browser pull-to-refresh) */}
+                            <div
+                              className="px-5 pt-2.5 pb-2 border-b border-white/10 flex items-center justify-between shrink-0 touch-none select-none"
+                              onTouchStart={(e) => {
+                                sheetTouchStartYRef.current = e.touches[0]?.clientY ?? null;
+                              }}
+                              onTouchMove={(e) => {
+                                const startY = sheetTouchStartYRef.current;
+                                const curY = e.touches[0]?.clientY;
+                                if (startY !== null && curY !== undefined && curY - startY > 6) {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onTouchEnd={(e) => {
+                                const startY = sheetTouchStartYRef.current;
+                                const endY = e.changedTouches[0]?.clientY;
+                                sheetTouchStartYRef.current = null;
+                                if (startY !== null && endY !== undefined && endY - startY > 44) {
+                                  setIsMoreMenuOpen(false);
+                                }
+                              }}
+                            >
+                              <span className="text-xs font-medium text-slate-300">More options</span>
+                              <button
+                                type="button"
+                                onClick={() => setIsMoreMenuOpen(false)}
+                                className="w-10 h-1 bg-white/25 rounded-full cursor-pointer"
+                                aria-label="Drag or tap to close menu"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setIsMoreMenuOpen(false)}
+                                className="p-1.5 text-slate-300 hover:text-white rounded-lg cursor-pointer"
+                                aria-label="Close options"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
 
                             {/* Menu Actions Scroll Container */}
-                            <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-4">
+                            <div
+                              ref={sheetScrollRef}
+                              style={{ overscrollBehaviorY: 'contain' }}
+                              onTouchStart={(e) => {
+                                if ((sheetScrollRef.current?.scrollTop ?? 0) <= 0) {
+                                  sheetTouchStartYRef.current = e.touches[0]?.clientY ?? null;
+                                } else {
+                                  sheetTouchStartYRef.current = null;
+                                }
+                              }}
+                              onTouchMove={(e) => {
+                                const startY = sheetTouchStartYRef.current;
+                                const curY = e.touches[0]?.clientY;
+                                if (
+                                  startY !== null &&
+                                  curY !== undefined &&
+                                  curY - startY > 10 &&
+                                  (sheetScrollRef.current?.scrollTop ?? 0) <= 0
+                                ) {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onTouchEnd={(e) => {
+                                const startY = sheetTouchStartYRef.current;
+                                const endY = e.changedTouches[0]?.clientY;
+                                sheetTouchStartYRef.current = null;
+                                if (
+                                  startY !== null &&
+                                  endY !== undefined &&
+                                  endY - startY > 64 &&
+                                  (sheetScrollRef.current?.scrollTop ?? 0) <= 0
+                                ) {
+                                  setIsMoreMenuOpen(false);
+                                }
+                              }}
+                              className="flex-1 overflow-y-auto overscroll-contain custom-scroll p-4 space-y-4"
+                            >
                               {/* Section 1: Collaboration & Workspace */}
                               <div className="space-y-1">
                                 <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-3 pb-1">
@@ -7593,7 +8121,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                   type="checkbox"
                   checked={autoDownloadRecording}
                   onChange={(e) => toggleAutoDownloadRecording(e.target.checked)}
-                  className="mt-0.5 rounded border-neutral-300 text-emerald-700 focus:ring-emerald-700/50 cursor-pointer"
+                  className="mt-0.5 rounded border-neutral-300 text-slate-900 focus:ring-slate-900/30 cursor-pointer"
                 />
                 <span className="text-xs text-slate-700 leading-relaxed">
                   Always auto-download recordings when leaving, ending a meeting, or closing this tab
@@ -7639,7 +8167,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                     setRecordingExitModal(null);
                     await executeExitAction(destination, isEndForAll);
                   }}
-                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50"
                 >
                   {isSavingRecordingBeforeExit ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
                   <span>{isSavingRecordingBeforeExit ? 'Finalizing...' : 'Download & Leave'}</span>
@@ -7731,12 +8259,12 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
           {userAvatar ? (
             <div className={cn(
               isCompact
-                ? "w-9 h-9 shrink-0 aspect-square"
+                ? (isMobilePortrait ? "w-11 h-11 shrink-0 aspect-square" : "w-9 h-9 shrink-0 aspect-square")
                 : isMiniCard
                   ? "w-14 h-14 shrink-0 aspect-square"
                   : isFocal 
                     ? "w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 shrink-0 aspect-square" 
-                    : "w-14 h-14 sm:w-20 sm:h-20 shrink-0 aspect-square",
+                    : "w-16 h-16 sm:w-20 sm:h-20 shrink-0 aspect-square",
               "rounded-full overflow-hidden border-2 border-accent-blue/20 shadow-xl transition-all",
               isSpeaking ? "ring-4 ring-accent-blue/40 scale-105" : ""
             )}>
@@ -7745,12 +8273,12 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
           ) : (
             <div className={cn(
               isCompact
-                ? "w-9 h-9 shrink-0 aspect-square text-xs sm:text-sm"
+                ? (isMobilePortrait ? "w-11 h-11 shrink-0 aspect-square text-base" : "w-9 h-9 shrink-0 aspect-square text-xs sm:text-sm")
                 : isMiniCard
                   ? "w-14 h-14 shrink-0 aspect-square text-xl"
                   : isFocal 
                     ? "w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 shrink-0 aspect-square text-2xl sm:text-4xl" 
-                    : "w-14 h-14 sm:w-20 sm:h-20 shrink-0 aspect-square text-xl sm:text-2xl",
+                    : "w-16 h-16 sm:w-20 sm:h-20 shrink-0 aspect-square text-xl sm:text-2xl",
               "rounded-full bg-accent-blue flex items-center justify-center font-bold text-white shadow-xl transition-all",
               isSpeaking ? "ring-4 ring-accent-blue/40 scale-105" : ""
             )}>
@@ -7782,7 +8310,9 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
       {showName && (
         <div className={cn(
           "absolute flex items-center gap-1.5 bg-black/65 backdrop-blur-md rounded-lg border border-white/10 pointer-events-none",
-          isCompact ? "bottom-1.5 left-1.5 px-2 py-0.5" : "bottom-3 left-3 px-3 py-1.5"
+          isCompact
+            ? "bottom-1.5 left-1.5 max-w-[calc(100%-12px)] px-2 py-0.5"
+            : "bottom-2.5 sm:bottom-3 left-2.5 sm:left-3 max-w-[calc(100%-20px)] px-2.5 sm:px-3 py-1 sm:py-1.5"
         )}>
           {isScreenShare ? (
             <MonitorUp size={isCompact ? 11 : 14} className="text-emerald-400 shrink-0" />
@@ -7798,8 +8328,8 @@ function CustomParticipantTile({ trackRef, raisedHands, isPinned, onTogglePin, m
             <Mic size={isCompact ? 11 : 14} className="text-white/70 shrink-0" />
           )}
           <span className={cn(
-            "text-white font-medium truncate",
-            isCompact ? "text-[10px] max-w-[95px]" : "text-[13px] max-w-[160px]"
+            "text-white font-medium truncate min-w-0",
+            isCompact ? "text-[11px]" : "text-xs sm:text-[13px]"
           )}>
             {isScreenShare
               ? (trackRef?.participant.isLocal ? "Your screen" : `${trackRef?.participant.identity.split('#')[0]}'s screen`)
@@ -8387,8 +8917,8 @@ const NotesPanel = React.memo(({
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <h4 className="font-semibold text-slate-900 text-sm truncate">{note.title || "Untitled"}</h4>
                           {note.type === 'summary' && (
-                            <span className="text-[11px] font-medium text-emerald-800 bg-emerald-50/80 border border-emerald-200/60 px-2 py-0.5 rounded-md shrink-0">
-                              AI Summary
+                            <span className="text-[11px] font-medium text-slate-500 shrink-0">
+                              Summary
                             </span>
                           )}
                         </div>
@@ -8454,7 +8984,7 @@ const NotesPanel = React.memo(({
                 onClick={() => setAutoSaveTranscript(!autoSaveTranscript)}
                 className={cn(
                   "w-10 h-5 rounded-full relative transition-all duration-200 cursor-pointer shrink-0",
-                  autoSaveTranscript ? "bg-emerald-700" : "bg-neutral-300"
+                  autoSaveTranscript ? "bg-slate-900" : "bg-neutral-300"
                 )}
                 title="Toggle background transcript"
               >
@@ -8504,7 +9034,7 @@ const NotesPanel = React.memo(({
                         setSavedTranscriptFlash(true);
                         setTimeout(() => setSavedTranscriptFlash(false), 1800);
                       }}
-                      className="text-[13px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                      className="text-[13px] font-medium text-slate-800 hover:text-slate-950 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
                     >
                       <Save size={13} />
                       <span>{savedTranscriptFlash ? 'Synced' : 'Sync File Now'}</span>
@@ -8515,22 +9045,21 @@ const NotesPanel = React.memo(({
                     onClick={() => {
                       const textOut = liveTranscriptions.length > 0
                         ? [
-                            ...liveTranscriptions.map((t) => `[${t.timeLabel || new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] ${t.speaker || formatEntrySpeaker(t.identity)}: ${t.text}`),
-                            ...(liveInterim ? [`[Live] ${mySpeakerName}: ${liveInterim}`] : [])
-                          ].join('\n\n')
+                            ...liveTranscriptions.map((t) => `\n**[${t.timeLabel || new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}] ${t.speaker || formatEntrySpeaker(t.identity)}:** ${t.text}\n`),
+                            ...(liveInterim ? [`\n**[Live] ${mySpeakerName}:** ${liveInterim}\n`] : [])
+                          ].join('')
                         : (roomTranscriptDoc?.body || '');
-                      const blob = new Blob([textOut], { type: 'text/plain;charset=utf-8' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `forum-transcript-${Date.now()}.txt`;
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      downloadStyledTranscript({
+                        roomId: roomId || 'meeting',
+                        title: `Meeting Transcript — ${roomId || 'Session'}`,
+                        dateText: format(new Date(), 'PPpp'),
+                        rawBody: textOut,
+                      });
                     }}
-                    className="text-[13px] font-medium text-slate-600 hover:text-slate-900 cursor-pointer ml-auto flex items-center gap-1.5 whitespace-nowrap"
+                    className="text-[13px] font-medium text-slate-700 hover:text-slate-950 cursor-pointer ml-auto flex items-center gap-1.5 whitespace-nowrap"
                   >
                     <Download size={13} />
-                    <span>Download .txt</span>
+                    <span>Download Transcript</span>
                   </button>
                 </div>
               </div>
@@ -8546,8 +9075,8 @@ const NotesPanel = React.memo(({
         {panelTab === 'summary' && (
           <div className="bg-white rounded-2xl p-4 border border-neutral-200/80 space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50/90 border border-emerald-200/70 flex items-center justify-center text-emerald-700 shrink-0">
-                <Bot size={17} />
+              <div className="w-9 h-9 rounded-xl bg-stone-100 flex items-center justify-center text-slate-700 shrink-0">
+                <FileText size={17} />
               </div>
               <div className="min-w-0">
                 <span className="text-sm font-semibold text-slate-900 block leading-snug">AI Meeting Summary</span>

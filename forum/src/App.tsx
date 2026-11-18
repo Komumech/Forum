@@ -6,6 +6,8 @@ import IsolatedFeed from './pages/IsolatedFeed';
 import InvitePage from './pages/InvitePage';
 import MeetingsCountPage from './pages/MeetingsCountPage';
 import FeedbackPage from './pages/FeedbackPage';
+import ProgrammaticSeoPage from './pages/ProgrammaticSeoPage';
+import SolutionsHubPage from './pages/SolutionsHubPage';
 import { ErrorFeedbackModal } from './components/ErrorFeedbackModal';
 import { useAuth } from './context/AuthContext';
 
@@ -27,6 +29,10 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/meeting/:id" element={<MeetingPage />} />
         <Route path="/invite/:id" element={<InvitePage />} />
+        <Route path="/solutions" element={<SolutionsHubPage />} />
+        <Route path="/use-cases/:slug" element={<ProgrammaticSeoPage category="use-cases" />} />
+        <Route path="/compare/:slug" element={<ProgrammaticSeoPage category="compare" />} />
+        <Route path="/integrations/:slug" element={<ProgrammaticSeoPage category="integrations" />} />
         <Route path="/count" element={<MeetingsCountPage />} />
         <Route path="/stats" element={<MeetingsCountPage />} />
         <Route path="/feedback" element={<FeedbackPage />} />

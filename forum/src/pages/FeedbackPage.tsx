@@ -163,7 +163,7 @@ export default function FeedbackPage() {
 
           <div className="bg-white border border-neutral-200/80 rounded-2xl p-6 space-y-1.5">
             <span className="text-xs text-slate-500">Positive (3★+)</span>
-            <p className="text-3xl font-light text-emerald-700 tabular-nums">{stats.satisfactionPct}%</p>
+            <p className="text-3xl font-light text-slate-900 tabular-nums">{stats.satisfactionPct}%</p>
           </div>
 
           <div className="bg-white border border-neutral-200/80 rounded-2xl p-6 space-y-1.5">
@@ -191,7 +191,7 @@ export default function FeedbackPage() {
               className={cn(
                 'px-3.5 py-2 rounded-xl text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap',
                 filterMode === tab.id
-                  ? 'bg-emerald-50/90 text-emerald-800 border-emerald-200/80'
+                  ? 'bg-slate-900 text-white border-slate-900'
                   : 'bg-white text-slate-600 border-neutral-200 hover:border-slate-400'
               )}
             >
@@ -252,7 +252,7 @@ export default function FeedbackPage() {
                         Issue Report
                       </span>
                     ) : (
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex flex-nowrap items-center gap-1 shrink-0">
                         {[1, 2, 3, 4, 5].map((s) => (
                           <Star
                             key={s}
@@ -260,13 +260,13 @@ export default function FeedbackPage() {
                             className={
                               s <= item.rating
                                 ? isLow
-                                  ? 'fill-amber-500 text-amber-600'
-                                  : 'fill-emerald-600 text-emerald-700'
-                                : 'text-slate-200'
+                                  ? 'fill-amber-500 text-amber-600 shrink-0'
+                                  : 'fill-slate-900 text-slate-900 shrink-0'
+                                : 'text-slate-200 shrink-0'
                             }
                           />
                         ))}
-                        <span className="ml-1.5 text-xs font-mono text-slate-600 tabular-nums">
+                        <span className="ml-1.5 text-xs font-mono text-slate-600 tabular-nums whitespace-nowrap shrink-0">
                           {item.rating}/5
                         </span>
                       </div>

@@ -191,7 +191,7 @@ export default function MeetingPolls({
               className={cn(
                 "py-2 px-3 text-xs font-medium rounded-xl border transition-colors cursor-pointer text-center whitespace-nowrap truncate",
                 pollType === 'poll'
-                  ? "bg-emerald-50/90 text-emerald-900 border-emerald-600/50"
+                  ? "bg-slate-900 text-white border-slate-900"
                   : "bg-white text-slate-600 border-neutral-200 hover:border-slate-400"
               )}
             >
@@ -203,7 +203,7 @@ export default function MeetingPolls({
               className={cn(
                 "py-2 px-3 text-xs font-medium rounded-xl border transition-colors cursor-pointer text-center flex items-center justify-center gap-1.5 whitespace-nowrap truncate",
                 pollType === 'quiz'
-                  ? "bg-emerald-50/90 text-emerald-900 border-emerald-600/50"
+                  ? "bg-slate-900 text-white border-slate-900"
                   : "bg-white text-slate-600 border-neutral-200 hover:border-slate-400"
               )}
             >
@@ -386,7 +386,7 @@ export default function MeetingPolls({
                         )}
                       >
                         <div
-                          className="absolute inset-y-0 left-0 bg-emerald-50/70 transition-all duration-300"
+                          className="absolute inset-y-0 left-0 bg-stone-100 transition-all duration-300"
                           style={{ width: `${percent}%` }}
                         />
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   Video, Keyboard, Plus, 
   Workflow, PenTool, FileText, Check, ChevronDown, 
@@ -12,6 +12,8 @@ import { cn } from '../lib/utils';
 import { db } from '../firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { SendErrorFeedbackButton } from '../components/ErrorFeedbackModal';
+import { getSeoPagesByCategory } from '../data/seoPages';
+import { useDocumentSeo } from '../utils/useDocumentSeo';
 
 export default function Home() {
   const [roomCode, setRoomCode] = useState('');
@@ -213,6 +215,32 @@ export default function Home() {
     }
   ];
 
+  useDocumentSeo({
+    title: 'Komu Forum — Video Meetings, Whiteboards & Transcripts',
+    description:
+      'Direct, encrypted video meetings with real-time whiteboards, single-file speaker transcripts, OBS clean feeds, and Google Calendar scheduling.',
+    canonicalPath: '/',
+    keywords: [
+      'browser video conferencing',
+      'komu forum meetings',
+      'collaborative meeting whiteboard',
+      'meeting transcript download',
+      'obs clean video feed',
+    ],
+    jsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: faqs.map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: item.a,
+        },
+      })),
+    },
+  });
+
   return (
     <div className="min-h-screen bg-[#f8f9fa] flex flex-col font-sans selection:bg-blue-100 selection:text-accent-blue text-gray-800">
       {/* Header Navigation */}
@@ -228,8 +256,8 @@ export default function Home() {
           <nav className="hidden lg:flex items-center gap-8 bg-white px-6 py-2 rounded-xl border border-neutral-200/60 shadow-xs text-sm font-medium text-slate-600">
             <a href="#features" className="hover:text-slate-900 transition-colors">Features</a>
             <a href="#workspace" className="hover:text-slate-900 transition-colors">Workspace</a>
+            <Link to="/solutions" className="hover:text-slate-900 transition-colors whitespace-nowrap">Solutions</Link>
             <a href="#faq" className="hover:text-slate-900 transition-colors">FAQ</a>
-            <a href="/resources/" className="hover:text-slate-900 transition-colors">Guides</a>
             <button type="button" onClick={() => navigate('/count')} className="hover:text-slate-900 transition-colors cursor-pointer whitespace-nowrap">Counter</button>
           </nav>
         </div>
@@ -796,28 +824,81 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Minimalist Footer */}
-      <footer className="bg-[#f2f4f6] text-gray-500 py-12 px-6 lg:px-16 border-t border-gray-200/80">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 bg-white rounded-lg flex items-center justify-center border border-gray-200 p-1">
-              <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
+      {/* Minimalist Footer with Structured Workflow Directory */}
+      <footer className="bg-[#f2f4f6] text-gray-500 py-14 px-6 lg:px-16 border-t border-gray-200/80">
+        <div className="max-w-7xl mx-auto space-y-10">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 pb-10 border-b border-gray-200/70">
+            <div className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Use Cases</p>
+              <ul className="space-y-2 text-xs font-medium text-slate-600">
+                {getSeoPagesByCategory('use-cases').map((p) => (
+                  <li key={p.slug}>
+                    <Link to={`/use-cases/${p.slug}`} className="hover:text-slate-900 transition-colors">
+                      {p.headline.split(':')[0].replace(' Without Meeting Fatigue', '').replace('Full-Bandwidth Audio for ', '')}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <span className="text-sm font-bold text-gray-900">Forum Workspace</span>
+
+            <div className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Compare</p>
+              <ul className="space-y-2 text-xs font-medium text-slate-600">
+                {getSeoPagesByCategory('compare').map((p) => (
+                  <li key={p.slug}>
+                    <Link to={`/compare/${p.slug}`} className="hover:text-slate-900 transition-colors">
+                      {p.headline.split(':')[0]}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Integrations</p>
+              <ul className="space-y-2 text-xs font-medium text-slate-600">
+                {getSeoPagesByCategory('integrations').map((p) => (
+                  <li key={p.slug}>
+                    <Link to={`/integrations/${p.slug}`} className="hover:text-slate-900 transition-colors">
+                      {p.seoTitle.split('|')[0].trim()}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Platform</p>
+              <ul className="space-y-2 text-xs font-medium text-slate-600">
+                <li><Link to="/solutions" className="hover:text-slate-900 transition-colors">All Solutions</Link></li>
+                <li><Link to="/dashboard" className="hover:text-slate-900 transition-colors">Dashboard</Link></li>
+                <li><a href="#features" className="hover:text-slate-900 transition-colors">Features</a></li>
+                <li><a href="#faq" className="hover:text-slate-900 transition-colors">FAQ</a></li>
+              </ul>
+            </div>
           </div>
 
-          <div className="flex items-center gap-6 text-xs font-semibold text-gray-600">
-            <a href="#features" className="hover:text-gray-900 transition-colors">Features</a>
-            <a href="#workspace" className="hover:text-gray-900 transition-colors">Workspace</a>
-            <a href="#faq" className="hover:text-gray-900 transition-colors">FAQ</a>
-            <a href="/resources/" className="hover:text-gray-900 transition-colors">Guides</a>
-            <button type="button" onClick={() => navigate('/count')} className="hover:text-gray-900 transition-colors cursor-pointer whitespace-nowrap">Meetings Count</button>
-            <a href="mailto:komumech@gmail.com" className="hover:text-gray-900 transition-colors">Contact</a>
-          </div>
+          <div className="flex flex-col sm:flex-row justify-between items-center gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 bg-white rounded-lg flex items-center justify-center border border-gray-200 p-1">
+                <img src="https://komuhost.vercel.app/favicon.ico" className="w-full h-full object-contain" alt="Forum" referrerPolicy="no-referrer" />
+              </div>
+              <span className="text-sm font-bold text-gray-900">Komu Forum Workspace</span>
+            </div>
 
-          <p className="text-xs text-gray-400 font-medium">
-            © 2026 Forum. WebRTC encrypted.
-          </p>
+            <div className="flex items-center gap-6 text-xs font-semibold text-gray-600">
+              <a href="#features" className="hover:text-gray-900 transition-colors">Features</a>
+              <a href="#workspace" className="hover:text-gray-900 transition-colors">Workspace</a>
+              <Link to="/solutions" className="hover:text-gray-900 transition-colors">Solutions</Link>
+              <a href="#faq" className="hover:text-gray-900 transition-colors">FAQ</a>
+              <button type="button" onClick={() => navigate('/count')} className="hover:text-gray-900 transition-colors cursor-pointer whitespace-nowrap">Meetings Count</button>
+              <a href="mailto:komumech@gmail.com" className="hover:text-gray-900 transition-colors">Contact</a>
+            </div>
+
+            <p className="text-xs text-gray-400 font-medium">
+              © 2026 Komu Forum. WebRTC encrypted.
+            </p>
+          </div>
         </div>
       </footer>
     </div>

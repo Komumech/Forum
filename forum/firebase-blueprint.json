@@ -13,7 +13,8 @@
         },
         "sessionCount": { "type": "number", "description": "Tracked session count for reusable rooms such as PMI rooms" },
         "archivedSessionCount": { "type": "number", "description": "Count of archived sessions beyond the rolling sessionLogs map" },
-        "sessionLogs": { "type": "object", "description": "Map of tracked LiveKit room session IDs to start/lastActive timestamps" }
+        "sessionLogs": { "type": "object", "description": "Map of tracked LiveKit room session IDs to start/lastActive timestamps" },
+        "lobby": { "type": "boolean", "description": "Whether waiting room approval is required before participants join" }
       },
       "required": ["hostId", "createdAt"]
     },
@@ -44,7 +45,11 @@
         "previousStatus": { "type": "string" },
         "currentRoomId": { "type": "string" },
         "inMeetingHeartbeat": { "type": "number" },
-        "lastSeen": { "type": "string", "format": "date-time" }
+        "lastSeen": { "type": "string", "format": "date-time" },
+        "settings": {
+          "type": "object",
+          "description": "User call preferences including muteOnJoin, videoOffOnJoin, mirrorVideo, autoDownloadTranscript, and requireWaitingRoom"
+        }
       },
       "required": ["uid", "status"]
     },
@@ -101,6 +106,7 @@
         "invitedEmails": { "type": "array", "items": { "type": "string" } },
         "coverImage": { "type": "string" },
         "recurrence": { "type": "string" },
+        "waitingRoom": { "type": "boolean", "description": "Whether host admission approval is required to join" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["roomId", "hostId"]

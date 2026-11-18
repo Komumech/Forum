@@ -114,13 +114,13 @@ export default function CustomDropdown({
                     className={cn(
                       "w-full text-left px-3 py-2.5 rounded-xl text-sm flex items-center justify-between gap-2.5 transition-colors cursor-pointer",
                       isSelected
-                        ? "bg-emerald-50/80 text-emerald-800 font-medium"
+                        ? "bg-stone-100 text-slate-900 font-medium"
                         : "text-slate-700 hover:bg-stone-100/70"
                     )}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       {option.icon && (
-                        <span className={cn("shrink-0", isSelected ? "text-emerald-700" : "text-slate-400")}>
+                        <span className={cn("shrink-0", isSelected ? "text-slate-900" : "text-slate-400")}>
                           {option.icon}
                         </span>
                       )}

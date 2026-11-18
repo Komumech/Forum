@@ -81,8 +81,8 @@ export default function HostKeyModal({
         )}
 
         {success ? (
-          <div className="p-4 bg-emerald-50 border border-emerald-200/80 rounded-xl text-emerald-800 text-xs flex items-center gap-2.5">
-            <Check size={16} className="text-emerald-700 shrink-0" />
+          <div className="p-4 bg-stone-50 border border-neutral-200/80 rounded-xl text-slate-800 text-xs flex items-center gap-2.5">
+            <Check size={16} className="text-slate-900 shrink-0" />
             <span className="font-medium">Host authority granted.</span>
           </div>
         ) : (

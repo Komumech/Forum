@@ -301,7 +301,7 @@ export default function HostControlsPanel({
                 <button
                   type="button"
                   onClick={onAdmitAllUsers}
-                  className="text-xs font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                  className="text-xs font-medium text-slate-900 hover:underline cursor-pointer"
                 >
                   Admit all
                 </button>
@@ -328,7 +328,7 @@ export default function HostControlsPanel({
                       <button
                         type="button"
                         onClick={() => onAdmitUser(p)}
-                        className="px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-medium rounded-lg cursor-pointer"
+                        className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg cursor-pointer"
                       >
                         Admit
                       </button>

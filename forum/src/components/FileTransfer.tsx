@@ -163,7 +163,7 @@ export function SendFileDialog({ isOpen, onClose, participants, defaultRecipient
               onClick={() => fileInputRef.current?.click()}
               className={cn(
                 "border border-dashed rounded-2xl p-6 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-2",
-                dragOver ? "border-emerald-700 bg-emerald-50/40" : "border-neutral-300 hover:border-emerald-700/60 bg-stone-50/60",
+                dragOver ? "border-slate-900 bg-stone-100/80" : "border-neutral-300 hover:border-slate-500 bg-stone-50/60",
                 selectedFile ? "border-solid border-neutral-200 bg-white" : ""
               )}
             >

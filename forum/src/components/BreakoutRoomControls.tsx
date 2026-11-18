@@ -268,7 +268,7 @@ export default function BreakoutRoomControls({
                 className={cn(
                   "px-3 py-1.5 text-xs font-medium rounded-xl border transition-colors cursor-pointer whitespace-nowrap truncate shrink-0",
                   currentRoomId === null
-                    ? "bg-emerald-50 text-emerald-800 border-emerald-200/60"
+                    ? "bg-stone-100 text-slate-900 border-neutral-300"
                     : "bg-white hover:bg-stone-50 text-slate-700 border-neutral-200 hover:border-slate-400"
                 )}
               >
@@ -294,8 +294,8 @@ export default function BreakoutRoomControls({
                       className={cn(
                         "px-3 py-1.5 text-xs font-medium rounded-xl border transition-colors cursor-pointer whitespace-nowrap truncate shrink-0",
                         isCurrent
-                          ? "bg-emerald-50 text-emerald-800 border-emerald-200/60"
-                          : "bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-700"
+                          ? "bg-stone-100 text-slate-900 border-neutral-300"
+                          : "bg-slate-900 hover:bg-slate-800 text-white border-slate-900"
                       )}
                     >
                       {isCurrent ? 'You are here' : 'Join Room'}

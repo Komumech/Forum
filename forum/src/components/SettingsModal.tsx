@@ -21,7 +21,6 @@ import {
   Globe,
   RefreshCw,
   SlidersHorizontal,
-  Sparkles,
   Palette,
   Bell
 } from 'lucide-react';
@@ -34,7 +33,7 @@ import {
 } from '../utils/pushNotifications';
 import { VideoTrack } from '@livekit/components-react';
 import { Track, Participant } from 'livekit-client';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import CustomDropdown, { DropdownOption } from './CustomDropdown';
@@ -97,6 +96,8 @@ interface SettingsModalProps {
   room: string | undefined;
   isCaptionsEnabled: boolean;
   setIsCaptionsEnabled: (val: boolean) => void;
+  autoDownloadTranscript?: boolean;
+  setAutoDownloadTranscript?: (val: boolean) => void;
   selectedBg: 'none' | 'blur' | 'image' | 'greenscreen' | 'color';
   setSelectedBg: (val: any) => void;
   selectedBgImage: string;
@@ -275,6 +276,8 @@ export default function SettingsModal({
   room,
   isCaptionsEnabled,
   setIsCaptionsEnabled,
+  autoDownloadTranscript = true,
+  setAutoDownloadTranscript,
   selectedBg,
   setSelectedBg,
   selectedBgImage,
@@ -519,7 +522,7 @@ export default function SettingsModal({
     const next = !lobbyEnabled;
     setLobbyEnabled(next);
     try {
-      await updateDoc(doc(db, 'rooms', room), { lobby: next });
+      await setDoc(doc(db, 'rooms', room), { lobby: next }, { merge: true });
     } catch (err) {
       console.error("Failed to update lobby setting:", err);
     }
@@ -995,9 +998,7 @@ export default function SettingsModal({
                       : "bg-white border-neutral-200 text-slate-700 hover:bg-stone-50"
                   )}
                 >
-                  <div className="w-8 h-8 rounded-xl bg-[#00FF00] flex items-center justify-center text-black font-medium shadow-inner border border-black/10">
-                    <Sparkles size={14} className="text-emerald-950" />
-                  </div>
+                  <div className="w-8 h-8 rounded-xl bg-[#00FF00] flex items-center justify-center text-black font-medium shadow-inner border border-black/10" />
                   <span className="text-xs">Green Screen</span>
                 </button>
 
@@ -1195,7 +1196,7 @@ export default function SettingsModal({
                   <span className="text-sm font-medium text-[#1f1f1f]">Waiting room</span>
                 </div>
                 <p className="text-xs text-[#444746]">
-                  {isHost ? "Require host admission before participants can join" : "Controlled by meeting host"}
+                  {isHost ? "Require host approval before guests join (turn off so everyone joins freely)" : "Controlled by meeting host"}
                 </p>
               </div>
               <MaterialSwitch
@@ -1308,6 +1309,20 @@ export default function SettingsModal({
                 onChange={() => setIsCaptionsEnabled(!isCaptionsEnabled)}
               />
             </div>
+
+            {/* Auto-Download Transcript Toggle */}
+            {setAutoDownloadTranscript && (
+              <div className="flex items-center justify-between py-2 border-t border-[#e0e2ec]">
+                <div className="space-y-0.5 pr-4">
+                  <span className="text-sm font-medium text-[#1f1f1f] block">Auto-download transcript on exit</span>
+                  <p className="text-xs text-[#444746]">Save a formatted transcript file when leaving or closing the call</p>
+                </div>
+                <MaterialSwitch
+                  checked={autoDownloadTranscript}
+                  onChange={() => setAutoDownloadTranscript(!autoDownloadTranscript)}
+                />
+              </div>
+            )}
 
             {/* Language Selector */}
             <div className="space-y-2 pt-2 border-t border-[#e0e2ec]">
@@ -1449,7 +1464,7 @@ export default function SettingsModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-6 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-medium rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+            className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap"
           >
             Done
           </button>

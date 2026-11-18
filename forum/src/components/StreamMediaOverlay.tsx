@@ -481,7 +481,7 @@ export function StageStudioPanel({
             className={cn(
               'px-4 py-2 rounded-xl text-xs font-medium transition-colors duration-150 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0',
               overlay.active
-                ? 'bg-emerald-50/90 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100'
+                ? 'bg-stone-100 text-slate-900 border border-neutral-300 hover:bg-stone-200/70'
                 : 'bg-slate-900 text-white hover:bg-slate-800'
             )}
           >
@@ -697,7 +697,7 @@ export function StageStudioPanel({
                   className={cn(
                     'px-3.5 py-3 rounded-xl border text-left text-xs font-medium transition-colors cursor-pointer flex items-center gap-2.5 leading-snug',
                     isSelected
-                      ? 'bg-emerald-50/85 text-emerald-900 border-emerald-300'
+                      ? 'bg-stone-100 text-slate-900 border-slate-900/30'
                       : 'bg-white text-slate-700 border-neutral-200/80 hover:border-slate-400'
                   )}
                 >

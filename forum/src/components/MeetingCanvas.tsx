@@ -182,7 +182,7 @@ export default function MeetingCanvas({
                 className={cn(
                   "py-2 px-2 rounded-xl border text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap truncate text-center",
                   selectedCompactColumn === col.id
-                    ? "bg-emerald-50/90 text-emerald-900 border-emerald-200/80"
+                    ? "bg-slate-900 text-white border-slate-900"
                     : "bg-white text-slate-600 border-neutral-200/70 hover:border-slate-400"
                 )}
               >
@@ -221,7 +221,7 @@ export default function MeetingCanvas({
                   <button
                     type="button"
                     onClick={() => setActiveColumnForNew(activeColumnForNew === col.id ? null : col.id)}
-                    className="px-2 py-1 text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap truncate"
+                    className="px-2 py-1 text-slate-800 bg-stone-100 hover:bg-stone-200/70 border border-neutral-200 rounded-lg text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap truncate"
                   >
                     <Plus size={12} className="shrink-0" />
                     <span>Add</span>

@@ -306,8 +306,8 @@ export default function ClipsBasic({
         )}
 
         {savedNotice && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200/70 rounded-xl text-emerald-800 text-xs flex items-center gap-2">
-            <Check size={14} className="shrink-0" />
+          <div className="p-3 bg-stone-50 border border-neutral-200 rounded-xl text-slate-800 text-xs flex items-center gap-2">
+            <Check size={14} className="shrink-0 text-slate-900" />
             <span>Clip saved to your library.</span>
           </div>
         )}
@@ -325,7 +325,7 @@ export default function ClipsBasic({
                   screenBlockedByPolicy
                     ? "border-neutral-200/70 text-slate-400 bg-stone-50/70 cursor-not-allowed"
                     : sourceMode === 'screen'
-                      ? "border-emerald-600/60 bg-emerald-50/40 text-slate-900 cursor-pointer"
+                      ? "border-slate-900 bg-stone-50 text-slate-900 cursor-pointer"
                       : "border-neutral-200 text-slate-600 hover:border-slate-400 cursor-pointer"
                 )}
               >
@@ -344,7 +344,7 @@ export default function ClipsBasic({
                 className={cn(
                   "p-3.5 rounded-xl border text-left transition-colors cursor-pointer space-y-1 bg-white",
                   sourceMode === 'camera'
-                    ? "border-emerald-600/60 bg-emerald-50/40 text-slate-900"
+                    ? "border-slate-900 bg-stone-50 text-slate-900"
                     : "border-neutral-200 text-slate-600 hover:border-slate-400"
                 )}
               >
@@ -456,23 +456,23 @@ export default function ClipsBasic({
               </button>
 
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSaveToClips}
-                  disabled={isSaving}
-                  className="px-3.5 py-2 bg-emerald-50/90 hover:bg-emerald-100 text-emerald-900 border border-emerald-200/80 text-xs font-medium rounded-xl flex items-center gap-1.5 cursor-pointer whitespace-nowrap truncate disabled:opacity-50"
-                >
-                  <Save size={13} className="shrink-0" />
-                  <span>{isSaving ? 'Saving...' : 'Save Clip'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-medium rounded-xl flex items-center gap-1.5 cursor-pointer whitespace-nowrap truncate"
-                >
-                  <Download size={13} className="shrink-0" />
-                  <span>Download</span>
-                </button>
+            <button
+              type="button"
+              onClick={handleSaveToClips}
+              disabled={isSaving}
+              className="px-3.5 py-2 bg-white hover:bg-stone-50 text-slate-800 border border-neutral-200 text-xs font-medium rounded-xl flex items-center gap-1.5 cursor-pointer whitespace-nowrap truncate disabled:opacity-50"
+            >
+              <Save size={13} className="shrink-0" />
+              <span>{isSaving ? 'Saving...' : 'Save Clip'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-xl flex items-center gap-1.5 cursor-pointer whitespace-nowrap truncate"
+            >
+              <Download size={13} className="shrink-0" />
+              <span>Download</span>
+            </button>
               </div>
             </div>
           </div>

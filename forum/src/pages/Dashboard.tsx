@@ -8,9 +8,10 @@ import {
   LayoutDashboard, FileText, Bell, RefreshCw, X, MoreVertical, Globe,
   Copy, Check, Monitor, ChevronLeft, Calendar as CalendarIcon,
   Filter, Grid, List as ListIcon, Trash2, Edit2, Menu,
-  Paperclip, FolderUp, ArrowUpRight, Download, Send, Share2, Sparkles, Layers,
-  FileCheck, HardDrive, ShieldCheck, ArrowRight, Upload, Mail, Star
+  Paperclip, FolderUp, ArrowUpRight, Download, Send, Share2, Layers,
+  FileCheck, HardDrive, ShieldCheck, ArrowRight, ArrowLeft, Upload, Mail, Star
 } from 'lucide-react';
+import { downloadStyledTranscript } from '../utils/transcriptExport';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { db, auth, komuDb, komuAuth, googleProvider } from '../firebase';
@@ -224,6 +225,8 @@ export default function Dashboard() {
   const [liveNotificationAlert, setLiveNotificationAlert] = useState<{ title: string; body: string; url?: string } | null>(null);
   const liveAlertTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
   const [isJoinMeetingModalOpen, setIsJoinMeetingModalOpen] = useState(false);
   const [isScheduling, setIsScheduling] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -236,7 +239,8 @@ export default function Dashboard() {
     durationMins: 30,
     recurrence: 'none' as 'none' | 'daily' | 'weekly' | 'monthly',
     coverImage: '',
-    invitedEmails: ''
+    invitedEmails: '',
+    waitingRoom: false
   });
   const [showScheduleExtras, setShowScheduleExtras] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -532,6 +536,16 @@ export default function Dashboard() {
     muteOnJoin: false,
     videoOffOnJoin: false,
     mirrorVideo: true,
+    autoDownloadTranscript: (() => {
+      if (typeof window === 'undefined') return true;
+      try {
+        const v = localStorage.getItem('forum_auto_download_transcript_v1');
+        return v === null ? true : v === 'true';
+      } catch {
+        return true;
+      }
+    })(),
+    requireWaitingRoom: false,
   });
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const searchRef = React.useRef<HTMLDivElement>(null);
@@ -540,12 +554,22 @@ export default function Dashboard() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setSearchQuery('');
+        setShowSearchDropdown(false);
+        setIsMobileSearchOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (isScheduling) {
+      setNewMeeting(prev => ({
+        ...prev,
+        waitingRoom: settings.requireWaitingRoom === true,
+      }));
+    }
+  }, [isScheduling, settings.requireWaitingRoom]);
 
   useEffect(() => {
     if (!user) {
@@ -556,13 +580,34 @@ export default function Dashboard() {
     // Load local settings
     const savedSettings = localStorage.getItem(`settings_${user.uid}`);
     if (savedSettings) {
-      setSettings(JSON.parse(savedSettings));
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setSettings((prev) => ({
+          ...prev,
+          ...parsed,
+          autoDownloadTranscript: parsed.autoDownloadTranscript ?? prev.autoDownloadTranscript,
+        }));
+      } catch {}
     }
 
-    // Fetch user profile for status — if user is on Dashboard, they are never stuck in_meeting
+    // Fetch user profile for status & cloud settings — if user is on Dashboard, they are never stuck in_meeting
     const profileUnsubscribe = onSnapshot(doc(db, 'userProfiles', user.uid), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        if (data.settings && typeof data.settings === 'object') {
+          setSettings((prev) => {
+            const merged = {
+              ...prev,
+              ...data.settings,
+              autoDownloadTranscript: data.settings.autoDownloadTranscript ?? prev.autoDownloadTranscript,
+            };
+            try {
+              localStorage.setItem(`settings_${user.uid}`, JSON.stringify(merged));
+              localStorage.setItem('forum_auto_download_transcript_v1', String(merged.autoDownloadTranscript !== false));
+            } catch {}
+            return merged;
+          });
+        }
         if (data.status === 'in_meeting') {
           const restored =
             data.previousStatus && data.previousStatus !== 'in_meeting' && data.previousStatus !== 'offline'
@@ -1028,6 +1073,9 @@ export default function Dashboard() {
 
   const saveSettings = (newSettings: any) => {
     setSettings(newSettings);
+    try {
+      localStorage.setItem('forum_auto_download_transcript_v1', String(newSettings.autoDownloadTranscript !== false));
+    } catch {}
     if (user) {
       localStorage.setItem(`settings_${user.uid}`, JSON.stringify(newSettings));
       // Persist to Cloud for cross-device sync
@@ -1035,6 +1083,12 @@ export default function Dashboard() {
         settings: newSettings,
         updatedAt: Timestamp.now()
       }, { merge: true }).catch(err => console.error("Cloud settings sync failed:", err));
+      // Keep user's Personal Meeting Room lobby state in sync
+      if (typeof newSettings.requireWaitingRoom === 'boolean') {
+        setDoc(doc(db, 'rooms', `pmi-${user.uid}`), {
+          lobby: newSettings.requireWaitingRoom
+        }, { merge: true }).catch(() => {});
+      }
     }
   };
 
@@ -1221,6 +1275,7 @@ export default function Dashboard() {
         acceptedNames: [hostName],
         invitedEmails: parsedEmails,
         isMeeting: true,
+        waitingRoom: newMeeting.waitingRoom === true,
         coverImage: newMeeting.coverImage || '',
         createdAt: Timestamp.now()
       });
@@ -1231,7 +1286,7 @@ export default function Dashboard() {
         hostName,
         title: resolvedTitle,
         createdAt: Date.now(),
-        lobby: false,
+        lobby: newMeeting.waitingRoom === true,
         admittedList: [user.uid, hostEmail, hostName].filter(Boolean)
       }, { merge: true });
 
@@ -1254,7 +1309,8 @@ export default function Dashboard() {
         durationMins: 30,
         recurrence: 'none',
         coverImage: '',
-        invitedEmails: ''
+        invitedEmails: '',
+        waitingRoom: settings.requireWaitingRoom === true
       });
       setDashboardToast({
         message: parsedEmails.length > 0
@@ -1292,7 +1348,7 @@ export default function Dashboard() {
           hostEmail,
           hostName,
           createdAt: Date.now(),
-          lobby: false,
+          lobby: settings.requireWaitingRoom === true,
           admittedList: [user.uid, hostEmail, hostName].filter(Boolean)
         }, { merge: true });
       } catch (err) {
@@ -1524,26 +1580,75 @@ export default function Dashboard() {
             ? "h-16 lg:h-20 opacity-100 overflow-visible"
             : "h-0 opacity-0 border-b-transparent pointer-events-none overflow-hidden"
         )}>
-          <div className="flex items-center gap-4 flex-1 max-w-xl">
+          <div className={cn(
+            "flex items-center gap-3 flex-1 transition-all",
+            isMobileSearchOpen ? "max-w-full" : "max-w-xl gap-3 sm:gap-4"
+          )}>
             <button 
+              type="button"
               onClick={() => setIsMobileMenuOpen(true)}
-              className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-all"
+              className={cn(
+                "md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-all shrink-0",
+                isMobileSearchOpen && "hidden"
+              )}
             >
               <Menu size={20} />
             </button>
             <div className="relative w-full group/search" ref={searchRef}>
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              {isMobileSearchOpen ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    setShowSearchDropdown(false);
+                  }}
+                  className="md:hidden absolute left-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-900 rounded-lg cursor-pointer z-10"
+                  aria-label="Close search"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+              ) : (
+                <Search className="absolute left-3.5 sm:left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
+              )}
+              <Search className={cn(
+                "hidden md:block absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none",
+                !isMobileSearchOpen && "hidden"
+              )} size={18} />
               <input 
+                ref={searchInputRef}
                 type="text" 
                 placeholder="Search meetings, contacts or notes..." 
-                className="w-full pl-10 lg:pl-12 pr-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none text-sm transition-all"
+                className={cn(
+                  "w-full pr-9 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-accent-blue/20 outline-none text-sm transition-all",
+                  isMobileSearchOpen ? "pl-10 md:pl-12 bg-gray-100/80" : "pl-10 lg:pl-12"
+                )}
                 value={searchQuery}
-                onFocus={() => setShowSearchDropdown(true)}
+                onFocus={() => {
+                  setIsMobileSearchOpen(true);
+                  setShowSearchDropdown(true);
+                }}
+                onClick={() => {
+                  setIsMobileSearchOpen(true);
+                  setShowSearchDropdown(true);
+                }}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   setShowSearchDropdown(true);
                 }}
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 rounded-lg cursor-pointer"
+                  aria-label="Clear search"
+                >
+                  <X size={15} />
+                </button>
+              )}
               
               {/* Outlook-style Search Results Card */}
               <AnimatePresence>
@@ -1567,6 +1672,7 @@ export default function Dashboard() {
                                   const isPast = m.startTime.getTime() < Date.now();
                                   // Keep the search query so the tab shows "just results"
                                   setShowSearchDropdown(false);
+                                  setIsMobileSearchOpen(false);
                                   setActiveSidebarTab('meetings');
                                   setMeetingSubTab(isPast ? 'previous' : 'upcoming');
                                   
@@ -1619,6 +1725,7 @@ export default function Dashboard() {
                                 onClick={() => { 
                                   setSearchQuery(''); 
                                   setShowSearchDropdown(false);
+                                  setIsMobileSearchOpen(false);
                                   setActiveSidebarTab('contacts'); 
                                 }}
                                 className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-all text-left group"
@@ -1650,6 +1757,7 @@ export default function Dashboard() {
                                 onClick={() => { 
                                   setSearchQuery(''); 
                                   setShowSearchDropdown(false);
+                                  setIsMobileSearchOpen(false);
                                   setActiveSidebarTab('notes'); 
                                 }}
                                 className="w-full flex items-center gap-3 p-2 hover:bg-gray-50 rounded-xl transition-all text-left group"
@@ -1686,7 +1794,10 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className={cn(
+            "flex items-center gap-2 sm:gap-6 shrink-0",
+            isMobileSearchOpen && "hidden md:flex"
+          )}>
             <div className="relative">
               <button 
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
@@ -2638,14 +2749,11 @@ export default function Dashboard() {
                           >
                             <div className="space-y-2">
                               <div className="flex items-center justify-between gap-2">
-                                <div className={cn(
-                                  "w-8 h-8 rounded-xl flex items-center justify-center text-xs font-medium border",
-                                  isTranscript ? "bg-emerald-50 text-emerald-800 border-emerald-200/60" : "bg-stone-100 text-slate-700 border-neutral-200/60"
-                                )}>
+                                <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-medium border bg-stone-100 text-slate-700 border-neutral-200/70">
                                   {isTranscript ? <MessageSquare size={14} /> : <FileText size={14} />}
                                 </div>
                                 {isTranscript && (
-                                  <span className="text-[11px] font-medium text-emerald-700">
+                                  <span className="text-[11px] font-medium text-slate-500">
                                     Transcript
                                   </span>
                                 )}
@@ -2672,87 +2780,143 @@ export default function Dashboard() {
             )}
 
             {activeSidebarTab === 'settings' && (
-              <div className="max-w-2xl space-y-8 h-full pb-20">
-                <div className="flex items-center justify-between sticky top-0 bg-gray-50/80 backdrop-blur-md z-10 py-2 -mx-2 px-2">
-                  <h2 className="text-2xl font-bold text-gray-900">Settings</h2>
-                  <button 
+              <div className="max-w-2xl space-y-6 pb-20">
+                <div className="flex items-center justify-between gap-4 pb-2 border-b border-neutral-200/70">
+                  <div>
+                    <h2 className="text-2xl font-light text-slate-900 tracking-tight">Settings</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">Preferences sync automatically across devices</p>
+                  </div>
+                  <button
+                    type="button"
                     onClick={() => {
                       saveSettings(settings);
-                      setDashboardToast({ message: 'Settings saved successfully', type: 'success' });
-                      setTimeout(() => setDashboardToast(null), 3000);
+                      setDashboardToast({ message: 'Settings saved', type: 'success' });
+                      setTimeout(() => setDashboardToast(null), 2500);
                     }}
-                    className="px-5 sm:px-8 py-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl font-medium text-sm shadow-sm transition-all active:scale-95"
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-medium text-xs transition-colors cursor-pointer whitespace-nowrap"
                   >
                     Save Changes
                   </button>
                 </div>
-                <div className="space-y-6">
-                  <div className="bg-white p-6 rounded-3xl shadow-sm space-y-4">
-                    <h3 className="font-bold text-gray-900">Profile Settings</h3>
+
+                <div className="space-y-5">
+                  <div className="bg-white p-5 sm:p-6 rounded-2xl border border-neutral-200/80 space-y-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Profile</h3>
                     <div className="flex items-center gap-4">
-                      <img src={user?.photoURL || ''} className="w-16 h-16 rounded-full object-cover shadow-sm ring-1 ring-gray-200" alt="Profile" referrerPolicy="no-referrer" />
-                      <div className="space-y-1">
-                        <p className="font-bold text-gray-900">{user?.displayName}</p>
-                        <p className="text-sm text-gray-500">{user?.email}</p>
+                      <img src={user?.photoURL || ''} className="w-14 h-14 rounded-2xl object-cover border border-neutral-200" alt="Profile" referrerPolicy="no-referrer" />
+                      <div className="space-y-0.5 min-w-0">
+                        <p className="font-medium text-slate-900 text-sm truncate">{user?.displayName}</p>
+                        <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                        <p className="text-[11px] text-slate-400">Managed by Google Account</p>
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Display Name</label>
-                      <input 
-                        type="text" 
-                        defaultValue={user?.displayName || ''} 
-                        readOnly
-                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl outline-none text-gray-400 cursor-not-allowed" 
-                      />
-                      <p className="text-[10px] text-gray-400 italic">Managed by Google Account</p>
                     </div>
                   </div>
-                  <div className="bg-white p-6 rounded-3xl shadow-sm space-y-4">
-                    <h3 className="font-bold text-gray-900">Meeting Experience</h3>
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
-                      <div className="space-y-0.5">
-                        <span className="text-sm font-bold text-gray-900">Always mute microphone</span>
-                        <p className="text-[10px] text-gray-500">Mute yourself automatically when joining a call</p>
+
+                  <div className="bg-white p-5 sm:p-6 rounded-2xl border border-neutral-200/80 space-y-3">
+                    <h3 className="text-sm font-semibold text-slate-900 pb-1">Meeting &amp; Transcripts</h3>
+
+                    <div className="flex items-center justify-between gap-4 p-3.5 bg-[#FBFBFA] border border-neutral-200/60 rounded-xl">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-900 block">Waiting room (Require host approval)</span>
+                        <p className="text-xs text-slate-500">Ask host to admit people before joining, or turn off so everyone joins freely</p>
                       </div>
-                      <button 
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.requireWaitingRoom === true}
+                        onClick={() => saveSettings({ ...settings, requireWaitingRoom: !(settings.requireWaitingRoom === true) })}
+                        className={cn(
+                          "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                          settings.requireWaitingRoom === true ? "bg-slate-900" : "bg-neutral-300"
+                        )}
+                      >
+                        <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", settings.requireWaitingRoom === true ? "translate-x-5" : "translate-x-0")} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 p-3.5 bg-[#FBFBFA] border border-neutral-200/60 rounded-xl">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-900 block">Automatically download transcript</span>
+                        <p className="text-xs text-slate-500">Save a styled transcript file to your device when leaving or ending a call</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.autoDownloadTranscript !== false}
+                        onClick={() => saveSettings({ ...settings, autoDownloadTranscript: !(settings.autoDownloadTranscript !== false) })}
+                        className={cn(
+                          "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                          settings.autoDownloadTranscript !== false ? "bg-slate-900" : "bg-neutral-300"
+                        )}
+                      >
+                        <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", settings.autoDownloadTranscript !== false ? "translate-x-5" : "translate-x-0")} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4 p-3.5 bg-[#FBFBFA] border border-neutral-200/60 rounded-xl">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-900 block">Always mute microphone</span>
+                        <p className="text-xs text-slate-500">Mute yourself automatically when joining a call</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.muteOnJoin}
                         onClick={() => saveSettings({ ...settings, muteOnJoin: !settings.muteOnJoin })}
-                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.muteOnJoin ? "bg-gray-900" : "bg-gray-200")}
+                        className={cn(
+                          "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                          settings.muteOnJoin ? "bg-slate-900" : "bg-neutral-300"
+                        )}
                       >
-                        <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", settings.muteOnJoin ? "right-1" : "left-1")} />
+                        <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", settings.muteOnJoin ? "translate-x-5" : "translate-x-0")} />
                       </button>
                     </div>
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
-                      <div className="space-y-0.5">
-                        <span className="text-sm font-bold text-gray-900">Always turn off video</span>
-                        <p className="text-[10px] text-gray-500">Join meetings with your camera disabled</p>
+
+                    <div className="flex items-center justify-between gap-4 p-3.5 bg-[#FBFBFA] border border-neutral-200/60 rounded-xl">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-900 block">Always turn off video</span>
+                        <p className="text-xs text-slate-500">Join meetings with your camera disabled</p>
                       </div>
-                      <button 
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.videoOffOnJoin}
                         onClick={() => saveSettings({ ...settings, videoOffOnJoin: !settings.videoOffOnJoin })}
-                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.videoOffOnJoin ? "bg-gray-900" : "bg-gray-200")}
+                        className={cn(
+                          "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                          settings.videoOffOnJoin ? "bg-slate-900" : "bg-neutral-300"
+                        )}
                       >
-                        <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", settings.videoOffOnJoin ? "right-1" : "left-1")} />
+                        <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", settings.videoOffOnJoin ? "translate-x-5" : "translate-x-0")} />
                       </button>
                     </div>
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
-                      <div className="space-y-0.5">
-                        <span className="text-sm font-bold text-gray-900">Mirror my video</span>
-                        <p className="text-[10px] text-gray-500">See a mirrored view of your own camera</p>
+
+                    <div className="flex items-center justify-between gap-4 p-3.5 bg-[#FBFBFA] border border-neutral-200/60 rounded-xl">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-900 block">Mirror my video</span>
+                        <p className="text-xs text-slate-500">See a mirrored view of your own camera</p>
                       </div>
-                      <button 
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.mirrorVideo}
                         onClick={() => saveSettings({ ...settings, mirrorVideo: !settings.mirrorVideo })}
-                        className={cn("w-10 h-5 rounded-full relative transition-all", settings.mirrorVideo ? "bg-gray-900" : "bg-gray-200")}
+                        className={cn(
+                          "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                          settings.mirrorVideo ? "bg-slate-900" : "bg-neutral-300"
+                        )}
                       >
-                        <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", settings.mirrorVideo ? "right-1" : "left-1")} />
+                        <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", settings.mirrorVideo ? "translate-x-5" : "translate-x-0")} />
                       </button>
                     </div>
                   </div>
 
                   {/* Push Notifications Section */}
-                  <div className="bg-white p-6 rounded-3xl shadow-sm space-y-4">
-                    <div className="flex items-center justify-between gap-4">
+                  <div className="bg-white p-5 sm:p-6 rounded-2xl border border-neutral-200/80 space-y-3">
+                    <div className="flex items-center justify-between gap-4 pb-1">
                       <div>
-                        <h3 className="font-bold text-gray-900">Push Notifications</h3>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <h3 className="text-sm font-semibold text-slate-900">Push Notifications</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
                           {notifPermission === 'granted'
                             ? 'Browser push alerts are enabled on this device'
                             : notifPermission === 'denied'
@@ -2786,7 +2950,7 @@ export default function Dashboard() {
                           type="button"
                           onClick={async () => {
                             await triggerForumPushNotification({
-                              title: 'Forum Push Notifications',
+                              title: 'Komu Push Notifications',
                               body: 'Notifications are active for meeting invites & reminders.',
                               url: '/dashboard'
                             });
@@ -2800,39 +2964,49 @@ export default function Dashboard() {
                       )}
                     </div>
 
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
-                      <div className="space-y-0.5">
-                        <span className="text-sm font-bold text-gray-900">Upcoming meeting reminders</span>
-                        <p className="text-[10px] text-gray-500">Notify 10 minutes before scheduled calls start</p>
+                    <div className="flex items-center justify-between gap-4 p-3.5 bg-[#FBFBFA] border border-neutral-200/60 rounded-xl">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-900 block">Upcoming meeting reminders</span>
+                        <p className="text-xs text-slate-500">Notify 10 minutes before scheduled calls start</p>
                       </div>
                       <button
                         type="button"
+                        role="switch"
+                        aria-checked={pushPrefs.meetingReminders}
                         onClick={() => {
                           const next = { ...pushPrefs, meetingReminders: !pushPrefs.meetingReminders };
                           setPushPrefs(next);
                           savePushPreferences(next);
                         }}
-                        className={cn("w-10 h-5 rounded-full relative transition-all cursor-pointer", pushPrefs.meetingReminders ? "bg-gray-900" : "bg-gray-200")}
+                        className={cn(
+                          "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                          pushPrefs.meetingReminders ? "bg-slate-900" : "bg-neutral-300"
+                        )}
                       >
-                        <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", pushPrefs.meetingReminders ? "right-1" : "left-1")} />
+                        <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", pushPrefs.meetingReminders ? "translate-x-5" : "translate-x-0")} />
                       </button>
                     </div>
 
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl">
-                      <div className="space-y-0.5">
-                        <span className="text-sm font-bold text-gray-900">Calendar & invite notifications</span>
-                        <p className="text-[10px] text-gray-500">Alert when someone invites you to a Forum meeting</p>
+                    <div className="flex items-center justify-between gap-4 p-3.5 bg-[#FBFBFA] border border-neutral-200/60 rounded-xl">
+                      <div className="space-y-0.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-900 block">Calendar &amp; invite notifications</span>
+                        <p className="text-xs text-slate-500">Alert when someone invites you to a meeting</p>
                       </div>
                       <button
                         type="button"
+                        role="switch"
+                        aria-checked={pushPrefs.inviteAlerts}
                         onClick={() => {
                           const next = { ...pushPrefs, inviteAlerts: !pushPrefs.inviteAlerts };
                           setPushPrefs(next);
                           savePushPreferences(next);
                         }}
-                        className={cn("w-10 h-5 rounded-full relative transition-all cursor-pointer", pushPrefs.inviteAlerts ? "bg-gray-900" : "bg-gray-200")}
+                        className={cn(
+                          "w-11 h-6 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                          pushPrefs.inviteAlerts ? "bg-slate-900" : "bg-neutral-300"
+                        )}
                       >
-                        <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", pushPrefs.inviteAlerts ? "right-1" : "left-1")} />
+                        <span className={cn("w-5 h-5 bg-white rounded-full transition-transform shadow-xs block", pushPrefs.inviteAlerts ? "translate-x-5" : "translate-x-0")} />
                       </button>
                     </div>
                   </div>
@@ -3101,7 +3275,7 @@ export default function Dashboard() {
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-start gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200/60 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="w-8 h-8 rounded-xl bg-stone-100 border border-neutral-200/80 text-slate-700 flex items-center justify-center shrink-0 mt-0.5">
                   <Bell size={15} />
                 </div>
                 <div className="min-w-0">
@@ -3217,16 +3391,15 @@ export default function Dashboard() {
                   </button>
                   <button 
                     onClick={() => {
-                      const blob = new Blob([`${editingNote.title}\n\n${editingNote.body}`], { type: 'text/plain;charset=utf-8' });
-                      const url = URL.createObjectURL(blob);
-                      const link = document.createElement('a');
-                      link.href = url;
-                      link.download = `${editingNote.title || 'Meeting_Transcript'}.txt`;
-                      link.click();
-                      URL.revokeObjectURL(url);
+                      downloadStyledTranscript({
+                        title: editingNote.title || 'Meeting Transcript',
+                        roomId: editingNote.roomId,
+                        rawBody: editingNote.body || '',
+                        fileNameBase: editingNote.title || 'Meeting_Transcript',
+                      });
                     }}
                     className="p-2 bg-stone-100 hover:bg-stone-200/70 border border-neutral-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
-                    title="Download transcript"
+                    title="Download styled transcript"
                   >
                     <Download size={14} />
                   </button>
@@ -3399,7 +3572,7 @@ export default function Dashboard() {
                             className={cn(
                               "rounded-xl text-[11px] font-medium border transition-colors cursor-pointer whitespace-nowrap",
                               editMeetingForm.durationMins === mins
-                                ? "bg-emerald-50/80 text-emerald-800 border-emerald-200/80"
+                                ? "bg-slate-900 text-white border-slate-900"
                                 : "bg-white border-neutral-200 text-slate-600 hover:border-slate-400"
                             )}
                           >
@@ -3738,7 +3911,7 @@ export default function Dashboard() {
                             className={cn(
                               "rounded-xl text-[11px] font-medium border transition-colors cursor-pointer whitespace-nowrap",
                               newMeeting.durationMins === mins
-                                ? "bg-emerald-50/80 text-emerald-800 border-emerald-200/80"
+                                ? "bg-slate-900 text-white border-slate-900"
                                 : "bg-white border-neutral-200 text-slate-600 hover:border-slate-400"
                             )}
                           >
@@ -3909,6 +4082,28 @@ export default function Dashboard() {
                   )}
                 </div>
 
+                {/* Waiting Room Approval Toggle */}
+                <div className="flex items-center justify-between gap-3 p-3.5 bg-stone-50/70 border border-neutral-200/70 rounded-xl">
+                  <div className="min-w-0">
+                    <span className="text-xs font-medium text-slate-900 block">Waiting room approval</span>
+                    <span className="text-[11px] text-slate-500 block">
+                      {newMeeting.waitingRoom ? 'Host must admit people before they enter' : 'Anyone with link can join freely'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={newMeeting.waitingRoom}
+                    onClick={() => setNewMeeting(prev => ({ ...prev, waitingRoom: !prev.waitingRoom }))}
+                    className={cn(
+                      "w-10 h-5 rounded-full relative transition-colors shrink-0 cursor-pointer p-0.5",
+                      newMeeting.waitingRoom ? "bg-slate-900" : "bg-neutral-300"
+                    )}
+                  >
+                    <span className={cn("w-4 h-4 bg-white rounded-full transition-transform shadow-xs block", newMeeting.waitingRoom ? "translate-x-5" : "translate-x-0")} />
+                  </button>
+                </div>
+
                 <div className="pt-3 flex items-center justify-end gap-2.5 border-t border-neutral-100">
                   <button 
                     type="button"
@@ -3966,8 +4161,8 @@ export default function Dashboard() {
               </div>
 
               {confirmedNames.length > 0 && (
-                <div className="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-200/60 rounded-xl px-3.5 py-2.5">
-                  <span className="font-medium">Confirmed:</span> {confirmedNames.join(', ')}
+                <div className="text-[11px] text-slate-700 bg-stone-50 border border-neutral-200/80 rounded-xl px-3.5 py-2.5">
+                  <span className="font-medium text-slate-900">Confirmed:</span> {confirmedNames.join(', ')}
                 </div>
               )}
 

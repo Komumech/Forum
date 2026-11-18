@@ -1,4 +1,12 @@
 User-agent: *
 Allow: /
+Allow: /solutions
+Allow: /use-cases/
+Allow: /compare/
+Allow: /integrations/
+Disallow: /meeting/
+Disallow: /isolated-feed/
+Disallow: /feed/
+Disallow: /dashboard
 
 Sitemap: https://komu-forum.vercel.app/sitemap.xml

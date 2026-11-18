@@ -345,9 +345,9 @@ export default function InvitePage() {
                 </button>
               </div>
             ) : (
-              <div className="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200/70 flex items-center justify-between gap-3">
+              <div className="p-4 rounded-2xl bg-stone-50 border border-neutral-200/80 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-700 text-white flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0">
                     {addingCalendar ? (
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     ) : (
@@ -355,14 +355,14 @@ export default function InvitePage() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-emerald-950">
+                    <p className="text-xs font-semibold text-slate-900">
                       {addingCalendar
                         ? 'Confirming invite & syncing calendar...'
                         : calendarAdded
-                          ? 'Accepted & Added to Forum Calendar'
+                          ? 'Accepted & Added to Calendar'
                           : 'Invite ready'}
                     </p>
-                    <p className="text-[11px] text-emerald-800/80 truncate">
+                    <p className="text-[11px] text-slate-500 truncate">
                       Signed in as {user.displayName || user.email}
                     </p>
                   </div>
@@ -372,7 +372,7 @@ export default function InvitePage() {
                     type="button"
                     onClick={handleDeclineInvite}
                     title="Decline invite"
-                    className="p-1.5 text-emerald-700/70 hover:text-rose-600 hover:bg-white rounded-lg transition-colors cursor-pointer shrink-0"
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-white rounded-lg transition-colors cursor-pointer shrink-0"
                   >
                     <X size={15} />
                   </button>

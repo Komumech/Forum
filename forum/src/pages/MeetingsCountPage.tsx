@@ -473,7 +473,7 @@ export default function MeetingsCountPage() {
           <button
             type="button"
             onClick={() => navigate(user ? '/dashboard' : '/')}
-            className="inline-flex items-center gap-2 px-5 py-3 bg-emerald-50/80 hover:bg-emerald-100/80 text-emerald-800 border border-emerald-200/60 rounded-xl text-xs sm:text-sm font-medium transition-colors duration-150 ease-out whitespace-nowrap cursor-pointer"
+            className="inline-flex items-center gap-2 px-5 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-medium transition-colors duration-150 ease-out whitespace-nowrap cursor-pointer"
           >
             <Video size={15} />
             <span>Start a Meeting</span>

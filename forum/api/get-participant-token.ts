@@ -1,52 +1,36 @@
-import { AccessToken } from "livekit-server-sdk";
+import { AccessToken } from 'livekit-server-sdk';
 
-type ApiRequest = {
-  method?: string;
-  query?: Record<string, string | string[] | undefined>;
-  body?: unknown;
-};
+export default async function handler(req: any, res: any) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-type ApiResponse = {
-  status(code: number): ApiResponse;
-  json(body: Record<string, unknown>): void;
-};
-
-function getValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-export default async function handler(req: ApiRequest, res: ApiResponse) {
-  if (req.method !== "GET" && req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
-  const body = isRecord(req.body) ? req.body : {};
-  const room = getValue(req.query?.room) ?? body.room;
-  const username = getValue(req.query?.username) ?? body.username;
-  const metadata = getValue(req.query?.metadata) ?? body.metadata ?? "";
+  const room = String(req?.query?.room || req?.body?.room || '').trim();
+  const username = String(req?.query?.username || req?.body?.username || '').trim();
+  const rawMetadata = req?.query?.metadata ?? req?.body?.metadata ?? '';
+  const metadata = typeof rawMetadata === 'object' ? JSON.stringify(rawMetadata) : String(rawMetadata);
   const subscriberOnly =
-    getValue(req.query?.subscriberOnly) === "true" || body.subscriberOnly === true;
+    req?.query?.subscriberOnly === 'true' || req?.body?.subscriberOnly === true;
 
-  if (typeof room !== "string" || !room || typeof username !== "string" || !username) {
-    return res.status(400).json({ error: "Missing room or username parameter" });
+  if (!room || !username) {
+    return res.status(400).json({ error: 'Missing room or username parameter' });
   }
+
+  const apiKey = process.env.LIVEKIT_API_KEY || 'APIKKz48zYgzLs5';
+  const apiSecret =
+    process.env.LIVEKIT_API_SECRET || 'xxFMWxVfAtzMUJf1WXGHZj2Kp7plcChVagiQJAfYNzcB';
 
   try {
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    if (!apiKey || !apiSecret) {
-      return res.status(503).json({ error: "LiveKit server configuration missing" });
-    }
-
-    const accessToken = new AccessToken(apiKey, apiSecret, {
+    const at = new AccessToken(apiKey, apiSecret, {
       identity: username,
-      metadata: typeof metadata === "string" ? metadata : JSON.stringify(metadata),
+      metadata,
     });
-    accessToken.addGrant({
+
+    at.addGrant({
       roomJoin: true,
       room,
       canPublish: !subscriberOnly,
@@ -55,12 +39,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       canUpdateOwnMetadata: !subscriberOnly,
     });
 
-    const token = await accessToken.toJwt();
+    const token = await at.toJwt();
     return res.status(200).json({ token, room, username });
-  } catch (error) {
-    console.error("[Token API] Error generating token:", error);
-    return res.status(500).json({
-      error: error instanceof Error ? error.message : "Failed to generate token",
-    });
+  } catch (err: any) {
+    console.error('[api/get-participant-token] Error:', err);
+    return res.status(500).json({ error: err?.message || 'Failed to generate token' });
   }
 }
