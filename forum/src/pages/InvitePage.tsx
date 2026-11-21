@@ -20,6 +20,7 @@ import { format } from 'date-fns';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { SendErrorFeedbackButton } from '../components/ErrorFeedbackModal';
+import { useDocumentSeo } from '../utils/useDocumentSeo';
 
 export default function InvitePage() {
   const { id: roomId } = useParams();
@@ -249,6 +250,22 @@ export default function InvitePage() {
       : null;
 
   const hasCover = Boolean(meeting?.coverImage && String(meeting.coverImage).trim().length > 0);
+  const seoTitle = meeting?.title ? `${meeting.title} · Komu Forum` : 'Forum Meeting Invite';
+  const seoDesc =
+    meeting?.description ||
+    `Hosted by ${meeting?.hostName || 'Forum Host'}. Join this Forum meeting and add it directly to your calendar.`;
+  const seoImage = hasCover && roomId
+    ? `https://komu-forum.vercel.app/api/invite-og?id=${encodeURIComponent(roomId)}`
+    : 'https://komu-forum.vercel.app/forum-logo.png';
+
+  useDocumentSeo({
+    title: seoTitle,
+    description: seoDesc,
+    canonicalPath: roomId ? `/invite/${encodeURIComponent(roomId)}` : '/',
+    image: seoImage,
+    twitterCard: hasCover ? 'summary_large_image' : 'summary',
+  });
+
   const confirmedCount = (() => {
     const uids = new Set<string>([
       ...(Array.isArray(meeting?.acceptedUids) ? meeting.acceptedUids : []),

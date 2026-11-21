@@ -5848,7 +5848,7 @@ function MeetingRoomContent({ room, videoDevices, audioDevices, speakerDevices, 
                       if (!isHost && !(isCoHost && allowCoHostRecord)) return;
                       try {
                         const recorder = new MeetingCompositeRecorder();
-                        recorder.start(getLiveAudioTracks, room, {
+                        await recorder.start(getLiveAudioTracks, room, {
                           mode,
                           meetingTitle: meetingDetails?.title || `Meeting ${room}`,
                           getParticipants: () => recorderParticipantsRef.current,

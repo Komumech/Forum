@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@firebase/auth": "^1.13.0",
     "@firebase/firestore": "^4.14.0",
     "@google/genai": "^3.4.0",
@@ -30,6 +31,7 @@
     "livekit-server-sdk": "^2.15.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "mp4-muxer": "^5.2.2",
     "pdfjs-dist": "^6.5.438",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

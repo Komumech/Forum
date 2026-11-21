@@ -1,4 +1,5 @@
-import { makeWebmSeekable } from './webmFixer';
+import { Mp3Encoder } from '@breezystack/lamejs';
+import { Mp4VideoRecorder } from './mp4VideoRecorder';
 import type { StageOverlayState } from '../components/StreamMediaOverlay';
 
 export interface RecordedMeetingResult {
@@ -42,9 +43,40 @@ function drawRoundedRect(
   ctx.closePath();
 }
 
+function floatToInt16Resampled(input: Float32Array, srcRate: number, dstRate: number): Int16Array {
+  if (srcRate === dstRate || srcRate <= 0 || dstRate <= 0) {
+    const out = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+  const ratio = srcRate / dstRate;
+  const outLen = Math.max(1, Math.floor(input.length / ratio));
+  const out = new Int16Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const pos = i * ratio;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const a = input[idx] ?? 0;
+    const b = input[Math.min(input.length - 1, idx + 1)] ?? a;
+    const sample = Math.max(-1, Math.min(1, a + (b - a) * frac));
+    out[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return out;
+}
+
 export class MeetingCompositeRecorder {
-  private mediaRecorder: MediaRecorder | null = null;
-  private chunks: Blob[] = [];
+  private mp4Recorder: Mp4VideoRecorder | null = null;
+  private mp3Encoder: Mp3Encoder | null = null;
+  private mp3Chunks: Uint8Array[] = [];
+  private mp3ScriptNode: ScriptProcessorNode | null = null;
+  private mp3MixBus: GainNode | null = null;
+  private mp3MuteSink: GainNode | null = null;
+  private mp3TargetRate = 48000;
+  private mp3SourceRate = 48000;
+
   private canvas: HTMLCanvasElement | null = null;
   private drawInterval: ReturnType<typeof setInterval> | null = null;
   private drawWorker: Worker | null = null;
@@ -108,7 +140,6 @@ export class MeetingCompositeRecorder {
     const currentTracks = getAudioTracks().filter((t) => t && t.readyState === 'live');
     const liveIds = new Set(currentTracks.map((t) => t.id));
 
-    // Disconnect ended tracks so stale sources don't accumulate
     for (const [trackId, source] of this.connectedAudioSources.entries()) {
       if (!liveIds.has(trackId)) {
         try {
@@ -118,13 +149,15 @@ export class MeetingCompositeRecorder {
       }
     }
 
-    // Directly tap each live MediaStreamTrack without .clone() (cloning remote WebRTC tracks can output silence in Chromium)
     for (const track of currentTracks) {
       if (this.connectedAudioSources.has(track.id)) continue;
       try {
         const src = audioCtx.createMediaStreamSource(new MediaStream([track]));
         src.connect(analyser);
         src.connect(dest);
+        if (this.mp3MixBus) {
+          src.connect(this.mp3MixBus);
+        }
         this.connectedAudioSources.set(track.id, src);
       } catch {
         // Ignore transient track binding error
@@ -368,7 +401,7 @@ export class MeetingCompositeRecorder {
 
     ctx.fillStyle = '#64748b';
     ctx.font = '400 15px system-ui, -apple-system, sans-serif';
-    ctx.fillText(`${roomLabel}  ·  ${isSpeaking ? 'Speaking' : 'Audio recording'}`, width / 2, avatarY + 128);
+    ctx.fillText(`${roomLabel}  ·  ${isSpeaking ? 'Speaking' : 'Video recording'}`, width / 2, avatarY + 128);
     ctx.restore();
 
     this.drawAudioWave(ctx, width / 2, cardY + cardH - 102, isSpeaking);
@@ -516,7 +549,6 @@ export class MeetingCompositeRecorder {
       return;
     }
 
-    // Center stage card / media frame
     const cw = Math.min(740, width - 200);
     const hasPoints = Array.isArray(overlay.points) && overlay.points.filter(Boolean).length > 0;
     const ch = img && (overlay.title || overlay.subtitle || overlay.body)
@@ -590,68 +622,97 @@ export class MeetingCompositeRecorder {
     ctx.restore();
   }
 
-  start(
+  async start(
     getAudioTracks: () => MediaStreamTrack[],
     roomName: string,
     options?: RecorderStartOptions
-  ): void {
+  ): Promise<void> {
     this.cleanup();
 
     this.mode = options?.mode || 'video';
-    this.logoImg = this.preloadLogo();
     this.displayedSpeakerId = null;
     this.lastSpeakerSwitchAt = 0;
     this.hasBestEffortFlushed = false;
+    this.startedAt = Date.now();
+    this.pausedDurationMs = 0;
+    this.pausedAt = 0;
+
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const audioCtx = new AudioCtx({ latencyHint: 'playback' });
+    this.audioCtx = audioCtx;
+    void audioCtx.resume().catch(() => {});
+
+    const dest = audioCtx.createMediaStreamDestination();
+    this.audioDest = dest;
+
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 128;
+    analyser.smoothingTimeConstant = 0.78;
+    this.analyser = analyser;
+    this.freqData = new Uint8Array(analyser.frequencyBinCount);
+
+    // Silent keepalive so stream clock stays continuous even when participants start muted
+    const osc = audioCtx.createOscillator();
+    const silentGain = audioCtx.createGain();
+    silentGain.gain.value = 0.00001;
+    osc.frequency.value = 40;
+    osc.connect(silentGain);
+    silentGain.connect(dest);
+    osc.start();
+    this.keepaliveOsc = osc;
+
+    if (this.mode === 'audio') {
+      // Real MP3 recording via @breezystack/lamejs
+      this.mp3SourceRate = audioCtx.sampleRate || 48000;
+      const validMp3Rates = [32000, 44100, 48000];
+      this.mp3TargetRate = validMp3Rates.includes(this.mp3SourceRate) ? this.mp3SourceRate : 48000;
+      this.mp3Encoder = new Mp3Encoder(1, this.mp3TargetRate, 128);
+      this.mp3Chunks = [];
+
+      const mixBus = audioCtx.createGain();
+      mixBus.gain.value = 1;
+      const scriptNode = audioCtx.createScriptProcessor(4096, 1, 1);
+      const muteSink = audioCtx.createGain();
+      muteSink.gain.value = 0;
+
+      scriptNode.onaudioprocess = (ev) => {
+        if (this.pausedAt > 0 || !this.mp3Encoder) return;
+        const floatSamples = ev.inputBuffer.getChannelData(0);
+        const pcm16 = floatToInt16Resampled(floatSamples, this.mp3SourceRate, this.mp3TargetRate);
+        const encoded = this.mp3Encoder.encodeBuffer(pcm16);
+        if (encoded && encoded.length > 0) {
+          this.mp3Chunks.push(encoded);
+        }
+      };
+
+      mixBus.connect(scriptNode);
+      scriptNode.connect(muteSink);
+      muteSink.connect(audioCtx.destination);
+      silentGain.connect(mixBus);
+
+      this.mp3MixBus = mixBus;
+      this.mp3ScriptNode = scriptNode;
+      this.mp3MuteSink = muteSink;
+
+      this.syncAudioTracks(getAudioTracks);
+      this.audioSyncInterval = setInterval(() => {
+        this.syncAudioTracks(getAudioTracks);
+      }, 350);
+      return;
+    }
+
+    // Video + Audio mode -> Genuine MP4
+    this.logoImg = this.preloadLogo();
+    this.syncAudioTracks(getAudioTracks);
+    this.audioSyncInterval = setInterval(() => {
+      this.syncAudioTracks(getAudioTracks);
+    }, 350);
 
     const canvas = document.createElement('canvas');
     canvas.width = 1280;
     canvas.height = 720;
     this.canvas = canvas;
     const ctx = canvas.getContext('2d');
-
-    this.startedAt = Date.now();
-    this.pausedDurationMs = 0;
-    this.pausedAt = 0;
-    this.chunks = [];
-
-    // Always initialize AudioContext + silent keepalive clock so MediaRecorder has continuous audio PTS
-    // even when everyone starts muted, and dynamically bind new/unmuted tracks every 350ms.
-    const audioTracks: MediaStreamTrack[] = [];
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioCtx({ latencyHint: 'playback' });
-      this.audioCtx = audioCtx;
-      void audioCtx.resume().catch(() => {});
-
-      const dest = audioCtx.createMediaStreamDestination();
-      this.audioDest = dest;
-
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 128;
-      analyser.smoothingTimeConstant = 0.78;
-      this.analyser = analyser;
-      this.freqData = new Uint8Array(analyser.frequencyBinCount);
-
-      // Ultra-quiet silent keepalive routed only to dest (never to analyser) so Opus frame timestamps never gap
-      const osc = audioCtx.createOscillator();
-      const silentGain = audioCtx.createGain();
-      silentGain.gain.value = 0.00001;
-      osc.frequency.value = 40;
-      osc.connect(silentGain);
-      silentGain.connect(dest);
-      osc.start();
-      this.keepaliveOsc = osc;
-
-      this.syncAudioTracks(getAudioTracks);
-      this.audioSyncInterval = setInterval(() => {
-        this.syncAudioTracks(getAudioTracks);
-      }, 350);
-
-      dest.stream.getAudioTracks().forEach((t) => audioTracks.push(t));
-    } catch (err) {
-      console.warn('[MeetingCompositeRecorder] AudioContext setup notice:', err);
-    }
-
     const roomLabel = options?.meetingTitle || roomName;
 
     const drawFrame = () => {
@@ -661,12 +722,9 @@ export class MeetingCompositeRecorder {
       const participants = options?.getParticipants ? options.getParticipants() : [];
       const speaker = this.resolveDisplayedSpeaker(participants);
 
-      const videos =
-        this.mode === 'audio'
-          ? []
-          : Array.from(document.querySelectorAll('video')).filter(
-              (v) => v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0 && v.offsetWidth > 0 && v.offsetHeight > 0
-            );
+      const videos = Array.from(document.querySelectorAll('video')).filter(
+        (v) => v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0 && v.offsetWidth > 0 && v.offsetHeight > 0
+      );
 
       if (videos.length === 0) {
         this.drawSpeakerStudioCard(ctx, canvas.width, canvas.height, roomLabel, speaker);
@@ -719,7 +777,6 @@ export class MeetingCompositeRecorder {
 
     drawFrame();
 
-    // Use an unthrottled Web Worker timer so switching browser tabs never starves video frames
     try {
       const workerBlob = new Blob(['setInterval(() => postMessage(1), 41);'], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(workerBlob);
@@ -732,71 +789,68 @@ export class MeetingCompositeRecorder {
     }
 
     const canvasStream = canvas.captureStream(24);
-    const allTracks = [...canvasStream.getVideoTracks(), ...audioTracks];
-
+    const allTracks = [...canvasStream.getVideoTracks(), ...dest.stream.getAudioTracks()];
     const compositeStream = new MediaStream(allTracks);
     this.compositeStream = compositeStream;
 
-    // Prefer VP8+Opus: faster real-time encoding without frame drops or truncated WebM clusters
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-      ? 'video/webm;codecs=vp8,opus'
-      : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : 'video/webm';
-
-    const recorder = new MediaRecorder(compositeStream, {
-      mimeType,
+    const mp4Recorder = new Mp4VideoRecorder();
+    this.mp4Recorder = mp4Recorder;
+    await mp4Recorder.start({
+      stream: compositeStream,
+      sourceCanvas: canvas,
+      fps: 24,
       videoBitsPerSecond: 1_800_000,
       audioBitsPerSecond: 128_000,
     });
-    this.mediaRecorder = recorder;
-
-    recorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) {
-        this.chunks.push(event.data);
-      }
-    };
-
-    recorder.start(500);
   }
 
   pause(): void {
-    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-      this.mediaRecorder.pause();
-      this.pausedAt = Date.now();
-      if (this.audioCtx && this.audioCtx.state === 'running') {
-        void this.audioCtx.suspend().catch(() => {});
-      }
+    if (this.pausedAt > 0) return;
+    this.pausedAt = Date.now();
+    this.mp4Recorder?.pause();
+    if (this.audioCtx && this.audioCtx.state === 'running') {
+      void this.audioCtx.suspend().catch(() => {});
     }
   }
 
   resume(): void {
-    if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
-      if (this.pausedAt) {
-        this.pausedDurationMs += Date.now() - this.pausedAt;
-        this.pausedAt = 0;
-      }
-      if (this.audioCtx && this.audioCtx.state === 'suspended') {
-        void this.audioCtx.resume().catch(() => {});
-      }
-      this.mediaRecorder.resume();
+    if (this.pausedAt === 0) return;
+    this.pausedDurationMs += Date.now() - this.pausedAt;
+    this.pausedAt = 0;
+    if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      void this.audioCtx.resume().catch(() => {});
     }
+    this.mp4Recorder?.resume();
   }
 
   flushBestEffortDownload(roomName: string): boolean {
     if (this.hasBestEffortFlushed) return false;
-    if (!this.mediaRecorder && this.chunks.length === 0) return false;
+    const safeRoom = roomName.replace(/[^a-zA-Z0-9_-]/g, '_');
+
     try {
-      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        this.mediaRecorder.requestData();
+      if (this.mode === 'audio') {
+        if (!this.mp3Encoder || this.mp3Chunks.length === 0) return false;
+        this.hasBestEffortFlushed = true;
+        const tail = this.mp3Encoder.flush();
+        const parts: BlobPart[] = this.mp3Chunks.map((c) => new Uint8Array(c));
+        if (tail && tail.length > 0) parts.push(new Uint8Array(tail));
+        const blob = new Blob(parts, { type: 'audio/mpeg' });
+        const filename = `forum-${safeRoom}-audio-${Date.now()}.mp3`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        return true;
       }
-    } catch {}
-    if (this.chunks.length === 0) return false;
-    try {
+
+      const blob = this.mp4Recorder?.flushBestEffortBlob();
+      if (!blob || blob.size === 0) return false;
       this.hasBestEffortFlushed = true;
-      const blob = new Blob(this.chunks, { type: 'video/webm' });
-      const suffix = this.mode === 'audio' ? 'audio' : 'video';
-      const filename = `forum-${roomName.replace(/[^a-zA-Z0-9_-]/g, '_')}-${suffix}-${Date.now()}.webm`;
+      const filename = `forum-${safeRoom}-video-${Date.now()}.mp4`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -812,51 +866,40 @@ export class MeetingCompositeRecorder {
     }
   }
 
-  stop(roomName: string): Promise<RecordedMeetingResult> {
-    return new Promise((resolve) => {
-      const elapsedMs = Math.max(
-        1000,
-        Date.now() -
-          this.startedAt -
-          this.pausedDurationMs -
-          (this.pausedAt ? Date.now() - this.pausedAt : 0)
-      );
-      const durationSeconds = Math.max(1, Math.round(elapsedMs / 1000));
-      const suffix = this.mode === 'audio' ? 'audio' : 'video';
-      const filename = `forum-${roomName.replace(/[^a-zA-Z0-9_-]/g, '_')}-${suffix}-${Date.now()}.webm`;
-      const currentMode = this.mode;
+  async stop(roomName: string): Promise<RecordedMeetingResult> {
+    const elapsedMs = Math.max(
+      1000,
+      Date.now() -
+        this.startedAt -
+        this.pausedDurationMs -
+        (this.pausedAt ? Date.now() - this.pausedAt : 0)
+    );
+    const durationSeconds = Math.max(1, Math.round(elapsedMs / 1000));
+    const currentMode = this.mode;
+    const safeRoom = roomName.replace(/[^a-zA-Z0-9_-]/g, '_');
 
-      let finalized = false;
-      const finalizeChunks = async () => {
-        if (finalized) return;
-        finalized = true;
-        const rawBlob = new Blob(this.chunks, { type: 'video/webm' });
-        const fixedBlob = await makeWebmSeekable(rawBlob, elapsedMs);
-        const url = URL.createObjectURL(fixedBlob);
-        this.cleanup();
-        resolve({ blob: fixedBlob, url, durationSeconds, filename, mode: currentMode });
-      };
-
-      if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
-        void finalizeChunks();
-        return;
+    if (currentMode === 'audio') {
+      const parts: BlobPart[] = this.mp3Chunks.map((c) => new Uint8Array(c));
+      if (this.mp3Encoder) {
+        try {
+          const tail = this.mp3Encoder.flush();
+          if (tail && tail.length > 0) parts.push(new Uint8Array(tail));
+        } catch {}
       }
+      const blob = new Blob(parts, { type: 'audio/mpeg' });
+      const filename = `forum-${safeRoom}-audio-${Date.now()}.mp3`;
+      const url = URL.createObjectURL(blob);
+      this.cleanup();
+      return { blob, url, durationSeconds, filename, mode: 'audio' };
+    }
 
-      this.mediaRecorder.onstop = () => {
-        setTimeout(() => {
-          void finalizeChunks();
-        }, 60);
-      };
-
-      try {
-        if (this.mediaRecorder.state === 'recording') {
-          this.mediaRecorder.requestData();
-        }
-        this.mediaRecorder.stop();
-      } catch {
-        void finalizeChunks();
-      }
-    });
+    const blob = this.mp4Recorder
+      ? await this.mp4Recorder.stop()
+      : new Blob([], { type: 'video/mp4' });
+    const filename = `forum-${safeRoom}-video-${Date.now()}.mp4`;
+    const url = URL.createObjectURL(blob);
+    this.cleanup();
+    return { blob, url, durationSeconds, filename, mode: 'video' };
   }
 
   cleanup(): void {
@@ -876,6 +919,27 @@ export class MeetingCompositeRecorder {
       clearInterval(this.audioSyncInterval);
       this.audioSyncInterval = null;
     }
+    if (this.mp3ScriptNode) {
+      try {
+        this.mp3ScriptNode.disconnect();
+        this.mp3ScriptNode.onaudioprocess = null;
+      } catch {}
+      this.mp3ScriptNode = null;
+    }
+    if (this.mp3MixBus) {
+      try {
+        this.mp3MixBus.disconnect();
+      } catch {}
+      this.mp3MixBus = null;
+    }
+    if (this.mp3MuteSink) {
+      try {
+        this.mp3MuteSink.disconnect();
+      } catch {}
+      this.mp3MuteSink = null;
+    }
+    this.mp3Encoder = null;
+    this.mp3Chunks = [];
     for (const source of this.connectedAudioSources.values()) {
       try {
         source.disconnect();
@@ -889,6 +953,10 @@ export class MeetingCompositeRecorder {
       } catch {}
       this.keepaliveOsc = null;
     }
+    if (this.mp4Recorder) {
+      this.mp4Recorder.cleanup();
+      this.mp4Recorder = null;
+    }
     if (this.compositeStream) {
       this.compositeStream.getTracks().forEach((t) => t.stop());
       this.compositeStream = null;
@@ -901,6 +969,5 @@ export class MeetingCompositeRecorder {
     this.analyser = null;
     this.freqData = null;
     this.canvas = null;
-    this.mediaRecorder = null;
   }
 }

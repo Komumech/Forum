@@ -181,7 +181,7 @@ export default function HostControlsPanel({
 
   // Recording & Playback state
   const [recordingMode, setRecordingMode] = useState<'video' | 'audio'>('video');
-  const playbackVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const playbackMediaRef = React.useRef<HTMLMediaElement | null>(null);
 
   // Participant editing state
   const [openMenuIdentity, setOpenMenuIdentity] = useState<string | null>(null);
@@ -189,7 +189,7 @@ export default function HostControlsPanel({
   const [renameDraft, setRenameDraft] = useState('');
 
   const seekRecordingBy = (deltaSeconds: number) => {
-    const el = playbackVideoRef.current;
+    const el = playbackMediaRef.current;
     if (!el) return;
     const maxDur = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : (latestRecording?.durationSeconds || 0);
     const nextTime = Math.max(0, Math.min(maxDur || el.currentTime + deltaSeconds, el.currentTime + deltaSeconds));
@@ -593,34 +593,34 @@ export default function HostControlsPanel({
                         type="button"
                         onClick={() => setRecordingMode('video')}
                         className={cn(
-                          "py-2 px-3 rounded-lg text-xs font-medium transition-colors cursor-pointer",
+                          "py-2 px-2.5 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap truncate",
                           recordingMode === 'video'
                             ? "bg-white text-slate-900 shadow-xs"
                             : "text-slate-600 hover:text-slate-900"
                         )}
                       >
-                        Video + Audio
+                        Video (MP4)
                       </button>
                       <button
                         type="button"
                         onClick={() => setRecordingMode('audio')}
                         className={cn(
-                          "py-2 px-3 rounded-lg text-xs font-medium transition-colors cursor-pointer",
+                          "py-2 px-2.5 rounded-lg text-xs font-medium transition-colors cursor-pointer whitespace-nowrap truncate",
                           recordingMode === 'audio'
                             ? "bg-white text-slate-900 shadow-xs"
                             : "text-slate-600 hover:text-slate-900"
                         )}
                       >
-                        Audio Only
+                        Audio (MP3)
                       </button>
                     </div>
                     <button
                       type="button"
                       onClick={() => onStartRecording(recordingMode)}
-                      className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap truncate"
                     >
                       <CircleDot size={14} />
-                      <span>{recordingMode === 'audio' ? 'Start Audio Recording' : 'Start Recording'}</span>
+                      <span>{recordingMode === 'audio' ? 'Start MP3 Recording' : 'Start MP4 Recording'}</span>
                     </button>
                   </>
                 ) : (
@@ -663,21 +663,33 @@ export default function HostControlsPanel({
               <div className="pt-4 border-t border-neutral-200/70 space-y-3">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-medium text-slate-800">
-                    {latestRecording.mode === 'audio' ? 'Last Audio Recording' : 'Last Recording'}
+                    {latestRecording.mode === 'audio' ? 'Last Audio Recording (MP3)' : 'Last Video Recording (MP4)'}
                   </span>
                   <span className="font-mono text-slate-500 tabular-nums">
                     {formatTimer(latestRecording.durationSeconds)}
                   </span>
                 </div>
-                <div className="rounded-xl overflow-hidden border border-neutral-200/80 bg-[#131416] aspect-video">
-                  <video
-                    ref={playbackVideoRef}
-                    src={latestRecording.url}
-                    controls
-                    preload="metadata"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
+                {latestRecording.mode === 'audio' ? (
+                  <div className="p-3 rounded-xl border border-neutral-200/80 bg-stone-50">
+                    <audio
+                      ref={playbackMediaRef as React.RefObject<HTMLAudioElement>}
+                      src={latestRecording.url}
+                      controls
+                      preload="metadata"
+                      className="w-full h-10"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-xl overflow-hidden border border-neutral-200/80 bg-[#131416] aspect-video">
+                    <video
+                      ref={playbackMediaRef as React.RefObject<HTMLVideoElement>}
+                      src={latestRecording.url}
+                      controls
+                      preload="metadata"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <button
                     type="button"

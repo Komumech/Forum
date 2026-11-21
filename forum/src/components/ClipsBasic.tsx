@@ -9,7 +9,7 @@ import {
   onSnapshot, deleteDoc, doc
 } from 'firebase/firestore';
 import { cn } from '../lib/utils';
-import { makeWebmSeekable } from '../utils/webmFixer';
+import { Mp4VideoRecorder } from '../utils/mp4VideoRecorder';
 import { SendErrorFeedbackButton } from './ErrorFeedbackModal';
 
 interface SavedClip {
@@ -56,9 +56,8 @@ export default function ClipsBasic({
   const [error, setError] = useState<string | null>(null);
   const [savedClips, setSavedClips] = useState<SavedClip[]>([]);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mp4RecorderRef = useRef<Mp4VideoRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<any>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const recordedUrlRef = useRef<string | null>(null);
@@ -70,6 +69,7 @@ export default function ClipsBasic({
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      mp4RecorderRef.current?.cleanup();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
@@ -103,7 +103,6 @@ export default function ClipsBasic({
     setRecordedBlob(null);
     if (recordedUrl) URL.revokeObjectURL(recordedUrl);
     setRecordedUrl(null);
-    chunksRef.current = [];
     setRecordingSeconds(0);
 
     try {
@@ -132,47 +131,19 @@ export default function ClipsBasic({
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.onended = () => {
-          stopRecording();
+          void stopRecording();
         };
       }
 
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-        ? 'video/webm;codecs=vp8,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-          ? 'video/webm;codecs=vp9,opus'
-          : 'video/webm';
-
-      const recorder = new MediaRecorder(stream, {
-        mimeType,
+      const recorder = new Mp4VideoRecorder();
+      await recorder.start({
+        stream,
+        fps: 24,
         videoBitsPerSecond: 1_800_000,
         audioBitsPerSecond: 128_000,
       });
-      mediaRecorderRef.current = recorder;
+      mp4RecorderRef.current = recorder;
 
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      const recStartMs = Date.now();
-      recorder.onstop = async () => {
-        const rawBlob = new Blob(chunksRef.current, { type: 'video/webm' });
-        const fullBlob = await makeWebmSeekable(rawBlob, Date.now() - recStartMs);
-        const url = URL.createObjectURL(fullBlob);
-        setRecordedBlob(fullBlob);
-        setRecordedUrl(url);
-        setIsRecording(false);
-        setIsPaused(false);
-        if (timerRef.current) clearInterval(timerRef.current);
-
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(t => t.stop());
-          streamRef.current = null;
-        }
-      };
-
-      recorder.start(1000);
       setIsRecording(true);
       setIsPaused(false);
 
@@ -180,6 +151,10 @@ export default function ClipsBasic({
         setRecordingSeconds(prev => prev + 1);
       }, 1000);
     } catch (err: any) {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
       const rawMessage = String(err?.message || '');
       const isPolicyBlocked =
         rawMessage.toLowerCase().includes('display-capture') ||
@@ -198,16 +173,16 @@ export default function ClipsBasic({
   };
 
   const pauseRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.pause();
+    if (mp4RecorderRef.current && mp4RecorderRef.current.state === 'recording') {
+      mp4RecorderRef.current.pause();
       setIsPaused(true);
       if (timerRef.current) clearInterval(timerRef.current);
     }
   };
 
   const resumeRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
-      mediaRecorderRef.current.resume();
+    if (mp4RecorderRef.current && mp4RecorderRef.current.state === 'paused') {
+      mp4RecorderRef.current.resume();
       setIsPaused(false);
       timerRef.current = setInterval(() => {
         setRecordingSeconds(prev => prev + 1);
@@ -215,14 +190,27 @@ export default function ClipsBasic({
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+  const stopRecording = async () => {
+    const recorder = mp4RecorderRef.current;
+    mp4RecorderRef.current = null;
+    if (timerRef.current) clearInterval(timerRef.current);
+    setIsRecording(false);
+    setIsPaused(false);
+
+    if (recorder && recorder.state !== 'inactive') {
       try {
-        if (mediaRecorderRef.current.state === 'recording') {
-          mediaRecorderRef.current.requestData();
-        }
-      } catch {}
-      mediaRecorderRef.current.stop();
+        const mp4Blob = await recorder.stop();
+        const url = URL.createObjectURL(mp4Blob);
+        setRecordedBlob(mp4Blob);
+        setRecordedUrl(url);
+      } catch (err: any) {
+        setError(err?.message || 'Failed to finalize MP4 recording');
+      }
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
     }
   };
 
@@ -230,7 +218,7 @@ export default function ClipsBasic({
     if (!recordedUrl) return;
     const a = document.createElement('a');
     a.href = recordedUrl;
-    a.download = `${clipTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.webm`;
+    a.download = `${clipTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

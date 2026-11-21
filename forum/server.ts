@@ -2,7 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
 import path from "path";
-import { fetchMeetingForInvite, renderInviteOgPng, injectInviteMetaHtml } from "./api/_inviteHelper";
+import { fetchMeetingForInvite, resolveInvitePreviewImage, injectInviteMetaHtml } from "./api/_inviteHelper";
 import {
   AccessToken,
   EgressClient,
@@ -557,17 +557,21 @@ Return ONLY the processed text replacement without introductory greetings or met
     }
   });
 
-  // Dynamic Invite OpenGraph Preview Image (Meeting Cover + Forum Icon in Bottom-Right)
+  // Dynamic Invite OpenGraph Preview Image (Meeting Cover or Forum Logo fallback)
   app.get("/api/invite-og", async (req, res) => {
     const roomId = String(req.query.id || "").trim();
     if (!roomId) {
       return res.status(400).send("Missing id");
     }
     try {
-      const imgBuffer = await renderInviteOgPng(roomId);
-      res.setHeader("Content-Type", "image/jpeg");
+      const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
+      const host = String(req.headers["x-forwarded-host"] || req.headers.host || `localhost:${PORT}`).split(",")[0].trim();
+      const origin = `${proto}://${host}`;
+      const { buffer, contentType } = await resolveInvitePreviewImage(roomId, origin);
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", String(buffer.length));
       res.setHeader("Cache-Control", "public, max-age=300");
-      return res.status(200).send(imgBuffer);
+      return res.status(200).send(buffer);
     } catch (err) {
       console.error("[Invite OG] Failed:", err);
       return res.status(500).send("Failed to render preview image");

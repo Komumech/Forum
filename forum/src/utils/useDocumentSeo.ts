@@ -4,6 +4,8 @@ export interface DocumentSeoConfig {
   title: string;
   description: string;
   canonicalPath: string;
+  image?: string;
+  twitterCard?: 'summary' | 'summary_large_image';
   keywords?: string[];
   jsonLd?: Record<string, any> | Record<string, any>[];
 }
@@ -12,6 +14,7 @@ const SITE_ORIGIN = 'https://komu-forum.vercel.app';
 const DEFAULT_TITLE = 'Komu Forum — Video Meetings, Whiteboards & Transcripts';
 const DEFAULT_DESCRIPTION =
   'Encrypted browser video meetings with real-time whiteboards, speaker transcripts, isolated OBS feeds, and calendar scheduling.';
+const DEFAULT_IMAGE = `${SITE_ORIGIN}/forum-logo.png`;
 
 function upsertMeta(attr: 'name' | 'property', key: string, content: string) {
   let el = document.querySelector(`meta[${attr}="${key}"]`) as HTMLMetaElement | null;
@@ -37,12 +40,16 @@ export function useDocumentSeo({
   title,
   description,
   canonicalPath,
+  image,
+  twitterCard,
   keywords,
   jsonLd,
 }: DocumentSeoConfig) {
   useEffect(() => {
     const cleanPath = canonicalPath.startsWith('/') ? canonicalPath : `/${canonicalPath}`;
     const fullUrl = `${SITE_ORIGIN}${cleanPath}`;
+    const effectiveImage = image || DEFAULT_IMAGE;
+    const effectiveTwitterCard = twitterCard || 'summary_large_image';
 
     document.title = title;
     upsertMeta('name', 'description', description);
@@ -52,9 +59,12 @@ export function useDocumentSeo({
     upsertMeta('property', 'og:title', title);
     upsertMeta('property', 'og:description', description);
     upsertMeta('property', 'og:url', fullUrl);
+    upsertMeta('property', 'og:image', effectiveImage);
+    upsertMeta('name', 'twitter:card', effectiveTwitterCard);
     upsertMeta('name', 'twitter:title', title);
     upsertMeta('name', 'twitter:description', description);
     upsertMeta('name', 'twitter:url', fullUrl);
+    upsertMeta('name', 'twitter:image', effectiveImage);
     upsertCanonical(fullUrl);
 
     const scriptId = 'komu-dynamic-jsonld';
@@ -77,12 +87,15 @@ export function useDocumentSeo({
       upsertMeta('property', 'og:title', DEFAULT_TITLE);
       upsertMeta('property', 'og:description', DEFAULT_DESCRIPTION);
       upsertMeta('property', 'og:url', `${SITE_ORIGIN}/`);
+      upsertMeta('property', 'og:image', DEFAULT_IMAGE);
+      upsertMeta('name', 'twitter:card', 'summary_large_image');
       upsertMeta('name', 'twitter:title', DEFAULT_TITLE);
       upsertMeta('name', 'twitter:description', DEFAULT_DESCRIPTION);
       upsertMeta('name', 'twitter:url', `${SITE_ORIGIN}/`);
+      upsertMeta('name', 'twitter:image', DEFAULT_IMAGE);
       upsertCanonical(`${SITE_ORIGIN}/`);
       const existing = document.getElementById(scriptId);
       if (existing) existing.remove();
     };
-  }, [title, description, canonicalPath, JSON.stringify(keywords), JSON.stringify(jsonLd)]);
+  }, [title, description, canonicalPath, image, twitterCard, JSON.stringify(keywords), JSON.stringify(jsonLd)]);
 }
